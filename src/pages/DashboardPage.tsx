@@ -71,20 +71,27 @@ export function DashboardPage() {
       </div>
 
       {/* Quick actions */}
-      <div className="flex gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <button
           onClick={() => navigate('/add')}
-          className="flex-1 py-3 rounded-lg bg-green-500 text-white font-medium
+          className="py-3 rounded-lg bg-green-500 text-white font-medium
             hover:bg-green-600 transition-colors"
         >
           + Add Sentence
         </button>
         <button
           onClick={() => navigate('/browse')}
-          className="flex-1 py-3 rounded-lg bg-gray-100 font-medium
+          className="py-3 rounded-lg bg-gray-100 font-medium
             hover:bg-gray-200 transition-colors"
         >
           Browse
+        </button>
+        <button
+          onClick={() => navigate('/graph')}
+          className="py-3 rounded-lg bg-indigo-500 text-white font-medium
+            hover:bg-indigo-600 transition-colors"
+        >
+          Graph
         </button>
       </div>
     </div>

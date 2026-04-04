@@ -6,6 +6,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
+import { GraphPage } from './pages/GraphPage';
 
 function App() {
   const [ready, setReady] = useState(false);
@@ -31,6 +32,7 @@ function App() {
           <Route path="/review/:deckId" element={<ReviewPage />} />
           <Route path="/add" element={<AddSentencePage />} />
           <Route path="/browse" element={<BrowsePage />} />
+          <Route path="/graph" element={<GraphPage />} />
         </Routes>
       </div>
     </BrowserRouter>
