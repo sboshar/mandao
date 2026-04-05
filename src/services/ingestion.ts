@@ -130,7 +130,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
       await db.sentenceTokens.bulkAdd(tokenRecords);
 
       // Create SRS cards (one per review mode)
-      const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en'];
+      const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
       const cards: SrsCard[] = modes.map((mode) => ({
         id: uuid(),
         sentenceId,

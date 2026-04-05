@@ -72,14 +72,26 @@ export function ReviewPage() {
           </button>
 
           <button
+            onClick={() => { setMode('py-to-en-zh'); startReview('py-to-en-zh'); }}
+            className={`w-full p-4 rounded-lg border-2 text-left transition-colors
+              hover:border-orange-400 hover:bg-orange-50
+              ${mode === 'py-to-en-zh' ? 'border-orange-400 bg-orange-50' : 'border-gray-200'}`}
+          >
+            <div className="font-medium">Pinyin &rarr; English + Chinese</div>
+            <div className="text-sm text-gray-500">
+              See pinyin (tone sandhi), produce meaning + characters
+            </div>
+          </button>
+
+          <button
             onClick={() => { setMode('both'); startReview('both'); }}
             className={`w-full p-4 rounded-lg border-2 text-left transition-colors
               hover:border-purple-400 hover:bg-purple-50
               ${mode === 'both' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}`}
           >
-            <div className="font-medium">Both (mixed)</div>
+            <div className="font-medium">All (mixed)</div>
             <div className="text-sm text-gray-500">
-              Interleave both directions
+              Interleave all directions
             </div>
           </button>
         </div>

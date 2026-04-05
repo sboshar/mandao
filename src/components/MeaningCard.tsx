@@ -11,6 +11,10 @@ import { ClickableChar } from './ClickableChar';
 import { ClickablePinyin } from './ClickablePinyin';
 import { PinyinCard } from './PinyinCard';
 import { AudioButton } from './AudioButton';
+import { TokenSpan } from './TokenSpan';
+import { PinyinDisplay } from './PinyinDisplay';
+import { getTokensForSentence } from '../services/ingestion';
+import type { SentenceToken } from '../db/schema';
 
 interface CharBreakdownItem {
   childMeaning: Meaning;
@@ -169,11 +173,13 @@ function MeaningContent() {
   );
 }
 
+type TokenWithMeaning = SentenceToken & { meaning: Meaning };
+
 /** Sentence view inside the exploration modal */
 function SentenceContent() {
-  const { current, push } = useNavigationStore();
+  const { current } = useNavigationStore();
   const [sentence, setSentence] = useState<Sentence | null>(null);
-  const [tokens, setTokens] = useState<{ surfaceForm: string; meaningId: string; pinyinSandhi: string }[]>([]);
+  const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
 
   const entry = current();
 
@@ -189,10 +195,7 @@ function SentenceContent() {
       if (cancelled || !s) return;
       setSentence(s);
 
-      const toks = await db.sentenceTokens
-        .where('sentenceId')
-        .equals(s.id)
-        .sortBy('position');
+      const toks = await getTokensForSentence(s.id);
       if (!cancelled) setTokens(toks);
     }
     load();
@@ -204,19 +207,25 @@ function SentenceContent() {
   return (
     <div className="p-6">
       <div className="text-center mb-4">
-        <div className="text-2xl mb-2">
-          {tokens.map((t, i) => (
-            <span
-              key={i}
-              onClick={() => push({ type: 'meaning', id: t.meaningId })}
-              className="cursor-pointer hover:bg-blue-100 rounded px-0.5 transition-colors"
-            >
-              {t.surfaceForm}
-            </span>
+        <div className="flex flex-wrap justify-center gap-1 mb-2">
+          {tokens.map((t) => (
+            <TokenSpan
+              key={t.id}
+              meaningId={t.meaningId}
+              surfaceForm={t.surfaceForm}
+              pinyin={t.meaning.pinyin}
+              pinyinNumeric={t.meaning.pinyinNumeric}
+              showPinyin
+            />
           ))}
         </div>
-        <div className="text-sm text-gray-500">{sentence.pinyinSandhi}</div>
+        <PinyinDisplay
+          pinyin={sentence.pinyinSandhi}
+          basePinyin={sentence.pinyin}
+          className="text-sm text-gray-500"
+        />
         <div className="text-base text-gray-700 mt-1">{sentence.english}</div>
+        <AudioButton text={sentence.chinese} className="mt-2" />
       </div>
     </div>
   );

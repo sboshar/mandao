@@ -44,6 +44,7 @@ export function ReviewCard() {
   }
 
   const isEnToZh = card.reviewMode === 'en-to-zh';
+  const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
 
   const handleRate = async (rating: 1 | 2 | 3 | 4) => {
     await reviewCard(card.id, rating as unknown as typeof Rating.Again);
@@ -56,7 +57,7 @@ export function ReviewCard() {
       <div className="text-sm text-gray-400 text-center mb-4">
         {remaining()} cards remaining
         <span className="ml-2 text-xs">
-          ({card.reviewMode === 'en-to-zh' ? 'EN → ZH' : 'ZH → EN'})
+          ({card.reviewMode === 'en-to-zh' ? 'EN → ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY → EN+ZH' : 'ZH → EN'})
         </span>
       </div>
 
@@ -67,6 +68,14 @@ export function ReviewCard() {
           {isEnToZh ? (
             // English → Chinese: show English on front
             <div className="text-xl text-center">{sentence.english}</div>
+          ) : isPyToEnZh ? (
+            // Pinyin → English + Chinese: show pinyin on front
+            <div className="text-center">
+              <PinyinDisplay
+                pinyin={sentence.pinyinSandhi}
+                className="text-2xl"
+              />
+            </div>
           ) : (
             // Chinese → English: show characters on front
             <div className="text-3xl text-center tracking-wider">
@@ -88,34 +97,37 @@ export function ReviewCard() {
           <>
             {/* Back */}
             <div className="mt-6 pt-6 border-t space-y-4">
-              {/* Characters with clickable tokens */}
-              {isEnToZh && (
+              {/* Characters with clickable tokens (EN→ZH and PY→EN+ZH) */}
+              {(isEnToZh || isPyToEnZh) && (
                 <div className="flex flex-wrap justify-center gap-1">
                   {tokens.map((t) => (
                     <TokenSpan
                       key={t.id}
                       meaningId={t.meaningId}
                       surfaceForm={t.surfaceForm}
-                      pinyin={t.pinyinSandhi}
+                      pinyin={t.meaning.pinyin}
                       pinyinNumeric={t.meaning.pinyinNumeric}
-                      showPinyin
+                      showPinyin={!isPyToEnZh}
                     />
                   ))}
                 </div>
               )}
 
-              {/* English (for ZH→EN mode) */}
+              {/* English (for ZH→EN and PY→EN+ZH modes) */}
               {!isEnToZh && (
                 <div className="text-xl text-center">{sentence.english}</div>
               )}
 
-              {/* Pinyin */}
-              <div className="text-center">
-                <PinyinDisplay
-                  pinyin={sentence.pinyinSandhi}
-                  className="text-base"
-                />
-              </div>
+              {/* Pinyin sandhi with differences highlighted (skip for PY mode — already on front) */}
+              {!isPyToEnZh && (
+                <div className="text-center">
+                  <PinyinDisplay
+                    pinyin={sentence.pinyinSandhi}
+                    basePinyin={sentence.pinyin}
+                    className="text-base"
+                  />
+                </div>
+              )}
 
               {/* Audio */}
               <div className="text-center">
@@ -123,14 +135,14 @@ export function ReviewCard() {
               </div>
 
               {/* Pinyin with clickable tokens (for ZH→EN mode) */}
-              {!isEnToZh && (
+              {!isEnToZh && !isPyToEnZh && (
                 <div className="flex flex-wrap justify-center gap-1">
                   {tokens.map((t) => (
                     <TokenSpan
                       key={t.id}
                       meaningId={t.meaningId}
                       surfaceForm={t.surfaceForm}
-                      pinyin={t.pinyinSandhi}
+                      pinyin={t.meaning.pinyin}
                       pinyinNumeric={t.meaning.pinyinNumeric}
                       showPinyin
                     />

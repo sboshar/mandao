@@ -4,13 +4,16 @@ import { db } from '../db/db';
 import type { Sentence } from '../db/schema';
 import { getTokensForSentence } from '../services/ingestion';
 import { TokenSpan } from '../components/TokenSpan';
+import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
+import { useNavigationStore } from '../stores/navigationStore';
 import type { SentenceToken, Meaning } from '../db/schema';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
 export function BrowsePage() {
   const navigate = useNavigate();
+  const { open } = useNavigationStore();
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
@@ -66,7 +69,10 @@ export function BrowsePage() {
               {expandedId === s.id && (
                 <div className="px-4 pb-4 pt-0 border-t">
                   <div className="text-sm text-gray-500 mb-2">
-                    {s.pinyinSandhi}
+                    <PinyinDisplay
+                      pinyin={s.pinyinSandhi}
+                      basePinyin={s.pinyin}
+                    />
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {tokens.map((t) => (
@@ -74,12 +80,18 @@ export function BrowsePage() {
                         key={t.id}
                         meaningId={t.meaningId}
                         surfaceForm={t.surfaceForm}
-                        pinyin={t.pinyinSandhi}
+                        pinyin={t.meaning.pinyin}
                         pinyinNumeric={t.meaning.pinyinNumeric}
                         showPinyin
                       />
                     ))}
                   </div>
+                  <button
+                    onClick={() => open({ type: 'sentence', id: s.id })}
+                    className="mt-3 text-sm text-blue-500 hover:text-blue-700 transition-colors"
+                  >
+                    View sentence card &rarr;
+                  </button>
                 </div>
               )}
             </div>
