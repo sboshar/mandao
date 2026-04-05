@@ -71,7 +71,7 @@ export function DashboardPage() {
       </div>
 
       {/* Quick actions */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <button
           onClick={() => navigate('/add')}
           className="py-3 rounded-lg bg-green-500 text-white font-medium
@@ -92,6 +92,13 @@ export function DashboardPage() {
             hover:bg-indigo-600 transition-colors"
         >
           Graph
+        </button>
+        <button
+          onClick={() => navigate('/stats')}
+          className="py-3 rounded-lg bg-purple-500 text-white font-medium
+            hover:bg-purple-600 transition-colors"
+        >
+          Stats
         </button>
       </div>
     </div>

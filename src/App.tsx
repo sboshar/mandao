@@ -7,6 +7,7 @@ import { ReviewPage } from './pages/ReviewPage';
 import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
+import { StatsPage } from './pages/StatsPage';
 
 function App() {
   const [ready, setReady] = useState(false);
@@ -33,6 +34,7 @@ function App() {
           <Route path="/add" element={<AddSentencePage />} />
           <Route path="/browse" element={<BrowsePage />} />
           <Route path="/graph" element={<GraphPage />} />
+          <Route path="/stats" element={<StatsPage />} />
         </Routes>
       </div>
     </BrowserRouter>
