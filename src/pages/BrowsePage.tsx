@@ -6,6 +6,7 @@ import { getTokensForSentence } from '../services/ingestion';
 import { TokenSpan } from '../components/TokenSpan';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
+import { ClickableEnglish } from '../components/ClickableEnglish';
 import { useNavigationStore } from '../stores/navigationStore';
 import type { SentenceToken, Meaning } from '../db/schema';
 
@@ -63,7 +64,9 @@ export function BrowsePage() {
                 className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
               >
                 <div className="text-lg">{s.chinese}</div>
-                <div className="text-sm text-gray-500">{s.english}</div>
+                <div className="text-sm text-gray-500">
+                  <ClickableEnglish text={s.english} />
+                </div>
               </button>
 
               {expandedId === s.id && (

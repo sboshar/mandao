@@ -5,8 +5,8 @@
 import { create } from 'zustand';
 
 export interface NavigationEntry {
-  type: 'meaning' | 'sentence' | 'pinyin';
-  /** meaning id, sentence id, or pinyinNumeric string */
+  type: 'meaning' | 'sentence' | 'pinyin' | 'english';
+  /** meaning id, sentence id, pinyinNumeric string, or english word */
   id: string;
 }
 

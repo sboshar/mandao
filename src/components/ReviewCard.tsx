@@ -6,6 +6,7 @@ import { TokenSpan } from './TokenSpan';
 import { PinyinDisplay } from './PinyinDisplay';
 import { AudioButton } from './AudioButton';
 import { useReviewStore } from '../stores/reviewStore';
+import { ClickableEnglish } from './ClickableEnglish';
 import { reviewCard, Rating } from '../services/srs';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
@@ -67,7 +68,9 @@ export function ReviewCard() {
         <div className="flex-1 flex flex-col items-center justify-center">
           {isEnToZh ? (
             // English → Chinese: show English on front
-            <div className="text-xl text-center">{sentence.english}</div>
+            <div className="text-xl text-center">
+              <ClickableEnglish text={sentence.english} />
+            </div>
           ) : isPyToEnZh ? (
             // Pinyin → English + Chinese: show pinyin on front
             <div className="text-center">
@@ -115,7 +118,9 @@ export function ReviewCard() {
 
               {/* English (for ZH→EN and PY→EN+ZH modes) */}
               {!isEnToZh && (
-                <div className="text-xl text-center">{sentence.english}</div>
+                <div className="text-xl text-center">
+                  <ClickableEnglish text={sentence.english} />
+                </div>
               )}
 
               {/* Pinyin sandhi with differences highlighted (skip for PY mode — already on front) */}

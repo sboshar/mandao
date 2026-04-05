@@ -13,6 +13,8 @@ import { PinyinCard } from './PinyinCard';
 import { AudioButton } from './AudioButton';
 import { TokenSpan } from './TokenSpan';
 import { PinyinDisplay } from './PinyinDisplay';
+import { ClickableEnglish } from './ClickableEnglish';
+import { EnglishCard } from './EnglishCard';
 import { getTokensForSentence } from '../services/ingestion';
 import type { SentenceToken } from '../db/schema';
 
@@ -95,9 +97,13 @@ function MeaningContent() {
 
         <AudioButton text={meaning.headword} className="mt-2" />
         <div className="mt-2 text-gray-600 text-sm">{meaning.partOfSpeech}</div>
-        <div className="mt-1 text-xl">{meaning.englishShort}</div>
+        <div className="mt-1 text-xl">
+          <ClickableEnglish text={meaning.englishShort} />
+        </div>
         {meaning.englishFull !== meaning.englishShort && (
-          <div className="mt-1 text-sm text-gray-500">{meaning.englishFull}</div>
+          <div className="mt-1 text-sm text-gray-500">
+            <ClickableEnglish text={meaning.englishFull} />
+          </div>
         )}
       </div>
 
@@ -116,7 +122,9 @@ function MeaningContent() {
               >
                 <div className="text-lg">{s.chinese}</div>
                 <div className="text-sm text-gray-500">{s.pinyinSandhi}</div>
-                <div className="text-sm text-gray-600">{s.english}</div>
+                <div className="text-sm text-gray-600">
+                  <ClickableEnglish text={s.english} />
+                </div>
               </div>
             ))}
           </div>
@@ -224,7 +232,9 @@ function SentenceContent() {
           basePinyin={sentence.pinyin}
           className="text-sm text-gray-500"
         />
-        <div className="text-base text-gray-700 mt-1">{sentence.english}</div>
+        <div className="text-base text-gray-700 mt-1">
+          <ClickableEnglish text={sentence.english} />
+        </div>
         <AudioButton text={sentence.chinese} className="mt-2" />
       </div>
     </div>
@@ -267,6 +277,7 @@ export function MeaningCard() {
             {entry.type === 'meaning' && 'Meaning'}
             {entry.type === 'sentence' && 'Sentence'}
             {entry.type === 'pinyin' && 'Pinyin'}
+            {entry.type === 'english' && 'English'}
           </div>
           <button
             onClick={close}
@@ -280,6 +291,7 @@ export function MeaningCard() {
         {entry.type === 'meaning' && <MeaningContent />}
         {entry.type === 'sentence' && <SentenceContent />}
         {entry.type === 'pinyin' && <PinyinCard />}
+        {entry.type === 'english' && <EnglishCard />}
       </div>
     </div>
   );

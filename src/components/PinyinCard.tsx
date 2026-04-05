@@ -65,8 +65,12 @@ export function PinyinCard() {
                 >
                   <span className="text-3xl">{m.headword}</span>
                   <div className="flex-1">
-                    <div className="text-sm">{m.englishShort}</div>
-                    <div className="text-xs text-gray-400">{m.partOfSpeech}</div>
+                    <div className="text-sm">
+                      {m.englishShort}
+                      {m.partOfSpeech && (
+                        <span className="text-xs text-gray-400 ml-1">({m.partOfSpeech})</span>
+                      )}
+                    </div>
                   </div>
                   <span className="text-xs text-gray-300">{m.type}</span>
                 </button>
