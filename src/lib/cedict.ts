@@ -7,6 +7,7 @@ export type { DictEntry };
 
 let simplifiedTrie: Trie | null = null;
 let traditionalTrie: Trie | null = null;
+let allEntries: DictEntry[] = [];
 let loaded = false;
 let loading: Promise<void> | null = null;
 
@@ -35,13 +36,16 @@ export async function loadCedict(): Promise<void> {
     traditionalTrie = new Trie();
 
     const lines = text.split('\n');
+    const entries: DictEntry[] = [];
     for (const line of lines) {
       if (line.trim() === '' || line[0] === '#') continue;
       const entry = parseLine(line);
       if (!entry) continue;
+      entries.push(entry);
       simplifiedTrie.push(entry.simplified, entry);
       traditionalTrie.push(entry.traditional, entry);
     }
+    allEntries = entries;
 
     loaded = true;
   })();
@@ -59,6 +63,24 @@ export function lookup(word: string): DictEntry[] {
   const simplified = simplifiedTrie.get(word);
   const traditional = traditionalTrie.get(word);
   return simplified.length > 0 ? simplified : traditional;
+}
+
+/** Look up entries by English word (whole-word match against definitions).
+ *  Accepts multiple word forms to check (e.g. "lives", "live", "to live"). */
+export function lookupByEnglish(words: string[], limit = 50): DictEntry[] {
+  if (allEntries.length === 0) return [];
+  const pattern = words
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const re = new RegExp(`\\b(?:${pattern})\\b`, 'i');
+  const results: DictEntry[] = [];
+  for (const entry of allEntries) {
+    if (re.test(entry.english)) {
+      results.push(entry);
+      if (results.length >= limit) break;
+    }
+  }
+  return results;
 }
 
 /** Look up all entries that start with the given prefix */
