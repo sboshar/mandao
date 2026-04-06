@@ -24,11 +24,11 @@ export function AudioButton({ text, className = '' }: AudioButtonProps) {
       onClick={handleClick}
       disabled={playing}
       className={`inline-flex items-center gap-1 px-2 py-1 rounded text-sm
-        bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors
-        ${className}`}
+        disabled:opacity-50 transition-colors surface-hover ${className}`}
+      style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
       title="Play audio"
     >
-      {playing ? '...' : '🔊'}
+      {playing ? '...' : '\uD83D\uDD0A'}
     </button>
   );
 }

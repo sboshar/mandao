@@ -30,7 +30,6 @@ export function PinyinCard() {
 
   const pinyinDisplay = numericStringToDiacritic(entry.id);
 
-  // Group meanings by headword
   const byHeadword = new Map<string, Meaning[]>();
   for (const m of meanings) {
     const existing = byHeadword.get(m.headword) || [];
@@ -40,39 +39,38 @@ export function PinyinCard() {
 
   return (
     <>
-      {/* Pinyin heading */}
       <div className="p-6 text-center">
         <div className="text-3xl font-medium">{pinyinDisplay}</div>
-        <div className="text-sm text-gray-400 mt-1">
+        <div className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
           {meanings.length} meaning{meanings.length !== 1 ? 's' : ''} in your app
         </div>
       </div>
 
-      {/* Characters with this sound */}
       <div className="px-6 pb-6">
-        <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-medium uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
           Characters with this sound
         </h3>
         <div className="space-y-2">
           {[...byHeadword.entries()].map(([headword, hMeanings]) => (
-            <div key={headword} className="border rounded-lg overflow-hidden">
+            <div key={headword} className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
               {hMeanings.map((m) => (
                 <button
                   key={m.id}
                   onClick={() => push({ type: 'meaning', id: m.id })}
-                  className="w-full text-left p-3 hover:bg-blue-50 transition-colors
-                    flex items-center gap-3 border-b last:border-0"
+                  className="w-full text-left p-3 transition-colors surface-hover
+                    flex items-center gap-3"
+                  style={{ borderBottom: '1px solid var(--border-light)' }}
                 >
                   <span className="text-3xl">{m.headword}</span>
                   <div className="flex-1">
                     <div className="text-sm">
                       {m.englishShort}
                       {m.partOfSpeech && (
-                        <span className="text-xs text-gray-400 ml-1">({m.partOfSpeech})</span>
+                        <span className="text-xs ml-1" style={{ color: 'var(--text-tertiary)' }}>({m.partOfSpeech})</span>
                       )}
                     </div>
                   </div>
-                  <span className="text-xs text-gray-300">{m.type}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{m.type}</span>
                 </button>
               ))}
             </div>
