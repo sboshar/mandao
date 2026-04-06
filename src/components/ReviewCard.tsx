@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { Sentence, SentenceToken, Meaning } from '../db/schema';
 import { db } from '../db/db';
-import { getTokensForSentence } from '../services/ingestion';
+import { getTokensForSentence, updateSentenceTags } from '../services/ingestion';
 import { TokenSpan } from './TokenSpan';
 import { PinyinDisplay } from './PinyinDisplay';
 import { AudioButton } from './AudioButton';
+import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
 import { reviewCard, Rating } from '../services/srs';
@@ -15,6 +16,7 @@ export function ReviewCard() {
   const { currentCard, isFlipped, flip, next, remaining } = useReviewStore();
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
+  const [editingTags, setEditingTags] = useState(false);
 
   const card = currentCard();
 
@@ -30,6 +32,7 @@ export function ReviewCard() {
       if (!cancelled) setTokens(t);
     }
 
+    setEditingTags(false);
     load();
     return () => { cancelled = true; };
   }, [card?.id]);
@@ -46,6 +49,11 @@ export function ReviewCard() {
 
   const isEnToZh = card.reviewMode === 'en-to-zh';
   const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
+
+  const handleTagsChange = async (newTags: string[]) => {
+    await updateSentenceTags(sentence!.id, newTags);
+    setSentence((prev) => prev ? { ...prev, tags: newTags } : prev);
+  };
 
   const handleRate = async (rating: 1 | 2 | 3 | 4) => {
     await reviewCard(card.id, rating as unknown as typeof Rating.Again);
@@ -137,6 +145,35 @@ export function ReviewCard() {
               {/* Audio */}
               <div className="text-center">
                 <AudioButton text={sentence.chinese} />
+              </div>
+
+              {/* Tags */}
+              <div className="flex items-center justify-center gap-1 flex-wrap">
+                {sentence.tags && sentence.tags.length > 0 && !editingTags && (
+                  <>
+                    {sentence.tags.map((tag) => (
+                      <span key={tag} className="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
+                        {tag}
+                      </span>
+                    ))}
+                  </>
+                )}
+                {!editingTags ? (
+                  <button
+                    onClick={() => setEditingTags(true)}
+                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    {sentence.tags && sentence.tags.length > 0 ? 'edit' : '+ tag'}
+                  </button>
+                ) : (
+                  <div className="w-full max-w-xs">
+                    <TagInput
+                      tags={sentence.tags || []}
+                      onChange={handleTagsChange}
+                      compact
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Pinyin with clickable tokens (for ZH→EN mode) */}

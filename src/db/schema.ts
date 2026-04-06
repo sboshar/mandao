@@ -48,6 +48,8 @@ export interface Sentence {
   audioUrl: string | null;
   /** e.g. "manual", "textbook-ch3" */
   source: string;
+  /** User-defined tags, e.g. "restaurant", "travel" */
+  tags: string[];
   createdAt: number;
 }
 
