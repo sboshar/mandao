@@ -5,7 +5,7 @@ import { DEFAULT_DECK_ID } from '../db/schema';
 import { db } from '../db/db';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { useTutorialStore } from '../stores/tutorialStore';
-import { ThemeToggle } from '../components/ThemeToggle';
+
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -34,10 +34,7 @@ export function DashboardPage() {
 
   return (
     <div className="max-w-xl mx-auto px-6 py-10">
-      <div className="flex items-center justify-between mb-10">
-        <h1 className="text-2xl font-semibold tracking-tight">Mandarin</h1>
-        <ThemeToggle />
-      </div>
+      <h1 className="text-2xl font-semibold tracking-tight mb-10">Mandarin</h1>
 
       <TutorialBanner visibleAt={2}>
         Your 3 example sentences are in the deck. Click <strong>Browse</strong> below
