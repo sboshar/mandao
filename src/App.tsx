@@ -8,9 +8,11 @@ import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
 import { StatsPage } from './pages/StatsPage';
+import { IntroModal, useIntroSeen } from './components/IntroModal';
 
 function App() {
   const [ready, setReady] = useState(false);
+  const { seen, markSeen } = useIntroSeen();
 
   useEffect(() => {
     Promise.all([ensureDefaults(), loadCedict()]).then(() => setReady(true));
@@ -27,6 +29,7 @@ function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-gray-50">
+        {!seen && <IntroModal onClose={markSeen} />}
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/review" element={<ReviewPage />} />
