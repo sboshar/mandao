@@ -35,14 +35,14 @@ export function TokenSpan({
     <span className="inline-flex flex-col items-center px-0.5">
       <span
         onClick={handleWordClick}
-        className="cursor-pointer hover:bg-blue-100 rounded px-0.5 transition-colors text-2xl"
+        className="cursor-pointer rounded px-0.5 transition-colors text-2xl surface-hover"
         title="Click to view meaning"
       >
         {surfaceForm}
       </span>
 
       {showPinyin && pinyinSyllables.length > 0 && (
-        <span className="text-xs text-gray-500 flex gap-0.5">
+        <span className="text-xs flex gap-0.5" style={{ color: 'var(--text-secondary)' }}>
           {pinyinSyllables.map((syllable, i) => (
             <ClickablePinyin
               key={i}

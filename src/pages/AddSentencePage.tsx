@@ -242,14 +242,16 @@ export function AddSentencePage() {
         <h1 className="text-2xl font-bold">Add Sentence</h1>
         <button
           onClick={() => navigate('/')}
-          className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm"
+          className="px-3 py-1 rounded text-sm transition-colors"
+          style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
         >
           &larr; Back
         </button>
       </div>
 
       {error && (
-        <div className="mb-4 p-3 rounded bg-red-50 text-red-700 text-sm whitespace-pre-wrap">
+        <div className="mb-4 p-3 rounded text-sm whitespace-pre-wrap"
+          style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>
           {error}
         </div>
       )}
@@ -264,7 +266,7 @@ export function AddSentencePage() {
             </TutorialBanner>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium mb-1">
               Chinese Sentence
             </label>
             <input
@@ -272,8 +274,8 @@ export function AddSentencePage() {
               value={chinese}
               onChange={(e) => setChinese(e.target.value)}
               placeholder="他差不多吃完了。"
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500
-                focus:border-blue-500 text-lg"
+              className="w-full px-3 py-2 rounded-lg focus:ring-2 text-lg"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               lang="zh"
               readOnly={isTutorial && tutorialStep === 1}
             />
@@ -287,12 +289,10 @@ export function AddSentencePage() {
           <button
             onClick={handleSegment}
             disabled={dictLoading || !chinese.trim()}
-            className={`w-full py-3 rounded-lg text-white font-medium
-              disabled:opacity-50 transition-colors ${
-                isTutorial && tutorialStep === 1
-                  ? 'bg-blue-500 hover:bg-blue-600 ring-2 ring-blue-300 ring-offset-2'
-                  : 'bg-blue-500 hover:bg-blue-600'
-              }`}
+            className={`w-full py-3 rounded-lg font-medium disabled:opacity-50 transition-colors ${
+              isTutorial && tutorialStep === 1 ? 'ring-2 ring-offset-2' : ''
+            }`}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
             {dictLoading ? 'Loading dictionary...' : 'Next: Segment Words'}
           </button>
@@ -310,23 +310,23 @@ export function AddSentencePage() {
             </TutorialBanner>
           )}
 
-          <div className="p-3 bg-gray-50 rounded-lg">
+          <div className="p-3 rounded-lg inset">
             <div className="text-lg">{chinese}</div>
           </div>
 
-          <p className="text-sm text-gray-500">
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             Adjust word boundaries: click a word to split into characters, or{' '}
             <strong>+</strong> to merge adjacent tokens.
           </p>
 
           {/* Segment editing */}
-          <div className="flex flex-wrap gap-1 items-center p-3 bg-white border rounded-lg">
+          <div className="flex flex-wrap gap-1 items-center p-3 rounded-lg surface">
             {segments.map((seg, i) => (
               <div key={i} className="flex items-center">
                 <button
                   onClick={() => handleSplitSegment(i)}
-                  className="px-3 py-2 border-2 border-blue-200 rounded-lg text-xl
-                    hover:border-blue-400 hover:bg-blue-50 transition-colors"
+                  className="px-3 py-2 rounded-lg text-xl transition-colors"
+                  style={{ border: '2px solid var(--border)', background: 'var(--bg-surface)' }}
                   title={seg.length > 1 ? 'Click to split' : 'Single character'}
                 >
                   {seg}
@@ -334,7 +334,8 @@ export function AddSentencePage() {
                 {i < segments.length - 1 && (
                   <button
                     onClick={() => handleMergeSegments(i)}
-                    className="mx-0.5 px-1 text-gray-300 hover:text-blue-500 text-lg font-bold"
+                    className="mx-0.5 px-1 text-lg font-bold"
+                    style={{ color: 'var(--text-tertiary)' }}
                     title="Merge with next"
                   >
                     +
@@ -348,25 +349,25 @@ export function AddSentencePage() {
           {isTutorial && tutorialStep === 1 ? (
             <button
               onClick={handleTutorialSkipLLM}
-              className="w-full py-3 rounded-lg bg-blue-500 text-white font-medium
-                hover:bg-blue-600 transition-colors ring-2 ring-blue-300 ring-offset-2"
+              className="w-full py-3 rounded-lg font-medium transition-colors ring-2 ring-offset-2"
+              style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
             >
               Use Tutorial Data
             </button>
           ) : (
-            <div className="p-4 border rounded-lg space-y-3 bg-gray-50">
-              <p className="text-sm font-medium text-gray-700">
+            <div className="p-4 rounded-lg space-y-3 inset" style={{ border: '1px solid var(--border)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 1. Copy the analysis prompt (includes your segmentation + existing meanings)
               </p>
               <button
                 onClick={handleCopyPrompt}
-                className="w-full py-2 rounded bg-blue-500 text-white font-medium
-                  hover:bg-blue-600 text-sm transition-colors"
+                className="w-full py-2 rounded font-medium text-sm transition-colors"
+                style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
               >
                 {promptCopied ? 'Copied!' : 'Copy Prompt to Clipboard'}
               </button>
 
-              <p className="text-sm font-medium text-gray-700">
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 2. Paste it into ChatGPT / Claude / any LLM, then paste the response below
               </p>
               <textarea
@@ -374,13 +375,14 @@ export function AddSentencePage() {
                 onChange={(e) => setLlmPasteValue(e.target.value)}
                 placeholder="Paste the JSON response here..."
                 rows={6}
-                className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
+                className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               />
               <button
                 onClick={handleParseLLMResponse}
                 disabled={!llmPasteValue.trim()}
-                className="w-full py-2 rounded bg-green-500 text-white font-medium
-                  hover:bg-green-600 text-sm transition-colors disabled:opacity-50"
+                className="w-full py-2 rounded font-medium text-sm transition-colors disabled:opacity-50"
+                style={{ background: 'var(--success)', color: 'var(--text-inverted)' }}
               >
                 Parse &amp; Fill
               </button>
@@ -389,7 +391,8 @@ export function AddSentencePage() {
 
           <button
             onClick={() => setStep('input')}
-            className="w-full py-2 rounded-lg bg-gray-100 hover:bg-gray-200 font-medium text-sm"
+            className="w-full py-2 rounded-lg font-medium text-sm transition-colors"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
           >
             &larr; Back
           </button>
@@ -406,83 +409,91 @@ export function AddSentencePage() {
             </TutorialBanner>
           )}
 
-          <div className="p-3 bg-gray-50 rounded-lg">
+          <div className="p-3 rounded-lg inset">
             <div className="text-lg">{chinese}</div>
           </div>
 
           {/* Sentence-level English */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium mb-1">
               Sentence Translation
-              {!english && <span className="text-red-500 ml-1">*</span>}
+              {!english && <span className="ml-1" style={{ color: 'var(--danger)' }}>*</span>}
             </label>
             <input
               type="text"
               value={english}
               onChange={(e) => setEnglish(e.target.value)}
               placeholder="English translation of the full sentence"
-              className={`w-full px-3 py-2 border rounded-lg text-sm
-                ${!english ? 'border-orange-300 bg-orange-50' : ''}`}
+              className="w-full px-3 py-2 rounded-lg text-sm"
+              style={{
+                background: !english ? 'var(--warning-subtle)' : 'var(--bg-surface)',
+                border: `1px solid ${!english ? 'var(--warning)' : 'var(--border)'}`,
+                color: 'var(--text-primary)',
+              }}
             />
           </div>
 
           {/* Per-token detail forms */}
           <div className="space-y-3">
             {tokens.map((t, i) => (
-              <div key={i} className="p-4 border rounded-lg space-y-2">
+              <div key={i} className="p-4 rounded-lg space-y-2" style={{ border: '1px solid var(--border)' }}>
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{t.surfaceForm}</span>
                   {t.pinyinSandhi && (
-                    <span className="text-sm text-gray-500">{t.pinyinSandhi}</span>
+                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t.pinyinSandhi}</span>
                   )}
                   {!t.pinyinSandhi && t.pinyinNumeric && (
-                    <span className="text-sm text-gray-500">
+                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                       {numericStringToDiacritic(t.pinyinNumeric)}
                     </span>
                   )}
-                  <span className="text-sm text-gray-400">{t.partOfSpeech}</span>
+                  <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t.partOfSpeech}</span>
                   <span className="flex-1 text-right text-sm">{t.english}</span>
                 </div>
 
                 {/* Editable fields (collapsed by default, expand if needed) */}
                 <details className="text-sm">
-                  <summary className="text-gray-400 cursor-pointer hover:text-gray-600">
+                  <summary className="cursor-pointer" style={{ color: 'var(--text-tertiary)' }}>
                     Edit fields
                   </summary>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-xs text-gray-400 mb-0.5">Pinyin (tone numbers)</label>
+                      <label className="block text-xs mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Pinyin (tone numbers)</label>
                       <input
                         type="text"
                         value={t.pinyinNumeric}
                         onChange={(e) => updateToken(i, 'pinyinNumeric', e.target.value)}
-                        className="w-full px-2 py-1 border rounded text-sm"
+                        className="w-full px-2 py-1 rounded text-sm"
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-400 mb-0.5">English meaning</label>
+                      <label className="block text-xs mb-0.5" style={{ color: 'var(--text-tertiary)' }}>English meaning</label>
                       <input
                         type="text"
                         value={t.english}
                         onChange={(e) => updateToken(i, 'english', e.target.value)}
-                        className="w-full px-2 py-1 border rounded text-sm"
+                        className="w-full px-2 py-1 rounded text-sm"
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-400 mb-0.5">Tone sandhi pinyin</label>
+                      <label className="block text-xs mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Tone sandhi pinyin</label>
                       <input
                         type="text"
                         value={t.pinyinSandhi}
                         onChange={(e) => updateToken(i, 'pinyinSandhi', e.target.value)}
-                        className="w-full px-2 py-1 border rounded text-sm"
+                        className="w-full px-2 py-1 rounded text-sm"
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-400 mb-0.5">Part of speech</label>
+                      <label className="block text-xs mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Part of speech</label>
                       <select
                         value={t.partOfSpeech}
                         onChange={(e) => updateToken(i, 'partOfSpeech', e.target.value)}
-                        className="w-full px-2 py-1 border rounded text-sm"
+                        className="w-full px-2 py-1 rounded text-sm"
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                       >
                         <option value="">Select...</option>
                         <option value="noun">Noun</option>
@@ -505,14 +516,14 @@ export function AddSentencePage() {
                 {/* Character breakdowns — always visible + editable for multi-char words */}
                 {t.characters && t.characters.length > 1 && (
                   <div className="mt-2 pt-2 border-t">
-                    <div className="text-xs font-medium text-gray-500 mb-2">
+                    <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
                       Character breakdown (verify these are standalone meanings, not the whole word's meaning):
                     </div>
                     <div className="space-y-2">
                       {t.characters.map((c, ci) => (
                         <div key={ci} className="flex items-center gap-2">
                           <span className="text-lg w-8 text-center">{c.char}</span>
-                          <span className="text-xs text-gray-400 w-12">[{c.pinyinNumeric}]</span>
+                          <span className="text-xs w-12" style={{ color: 'var(--text-tertiary)' }}>[{c.pinyinNumeric}]</span>
                           <input
                             type="text"
                             value={c.english}
@@ -531,17 +542,17 @@ export function AddSentencePage() {
           <div className="flex gap-2">
             <button
               onClick={() => setStep('segment')}
-              className="flex-1 py-3 rounded-lg bg-gray-100 hover:bg-gray-200 font-medium"
+              className="flex-1 py-3 rounded-lg font-medium transition-colors"
+              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
             >
               Back
             </button>
             <button
               onClick={handleConfirm}
-              className={`flex-1 py-3 rounded-lg bg-blue-500 text-white font-medium hover:bg-blue-600 ${
-                isTutorial && tutorialStep === 1
-                  ? 'ring-2 ring-blue-300 ring-offset-2'
-                  : ''
+              className={`flex-1 py-3 rounded-lg font-medium transition-colors ${
+                isTutorial && tutorialStep === 1 ? 'ring-2 ring-offset-2' : ''
               }`}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
             >
               Review &amp; Save
             </button>
@@ -559,21 +570,22 @@ export function AddSentencePage() {
             </TutorialBanner>
           )}
 
-          <div className="p-4 border rounded-lg">
+          <div className="p-4 rounded-lg surface">
             <div className="text-2xl mb-1">{chinese}</div>
-            <div className="text-gray-600 mb-3">{english}</div>
+            <div className="mb-3" style={{ color: 'var(--text-secondary)' }}>{english}</div>
             <div className="space-y-2">
               {tokens.map((t, i) => (
                 <div
                   key={i}
-                  className="flex items-center gap-3 text-sm py-1 border-b last:border-0"
+                  className="flex items-center gap-3 text-sm py-1"
+                  style={{ borderBottom: '1px solid var(--border-light)' }}
                 >
                   <span className="text-lg w-16 text-right">{t.surfaceForm}</span>
-                  <span className="text-gray-500 w-24">
+                  <span className="w-24" style={{ color: 'var(--text-secondary)' }}>
                     {t.pinyinSandhi || numericStringToDiacritic(t.pinyinNumeric)}
                   </span>
                   <span className="flex-1">{t.english}</span>
-                  <span className="text-gray-400 text-xs">{t.partOfSpeech}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t.partOfSpeech}</span>
                 </div>
               ))}
             </div>
@@ -582,14 +594,15 @@ export function AddSentencePage() {
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {tags.map((tag) => (
-                <span key={tag} className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
+                <span key={tag} className="px-2 py-0.5 text-xs rounded-full"
+                  style={{ background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }}>
                   {tag}
                 </span>
               ))}
             </div>
           )}
 
-          <p className="text-sm text-gray-500">
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             This will create meaning entries for each token and 3 review cards
             (EN&rarr;ZH, ZH&rarr;EN, and PY&rarr;EN+ZH).
           </p>
@@ -597,19 +610,18 @@ export function AddSentencePage() {
           <div className="flex gap-2">
             <button
               onClick={() => setStep('review')}
-              className="flex-1 py-3 rounded-lg bg-gray-100 hover:bg-gray-200 font-medium"
+              className="flex-1 py-3 rounded-lg font-medium transition-colors"
+              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
             >
               Back
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className={`flex-1 py-3 rounded-lg bg-green-500 text-white font-medium
-                hover:bg-green-600 disabled:opacity-50 ${
-                  isTutorial && tutorialStep === 1
-                    ? 'ring-2 ring-green-300 ring-offset-2'
-                    : ''
-                }`}
+              className={`flex-1 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 ${
+                isTutorial && tutorialStep === 1 ? 'ring-2 ring-offset-2' : ''
+              }`}
+              style={{ background: 'var(--success)', color: 'var(--text-inverted)' }}
             >
               {saving ? 'Saving...' : 'Save Sentence'}
             </button>

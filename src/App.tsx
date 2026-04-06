@@ -9,7 +9,9 @@ import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
 import { StatsPage } from './pages/StatsPage';
 import { IntroModal } from './components/IntroModal';
+import { ThemeToggle } from './components/ThemeToggle';
 import { useTutorialStore } from './stores/tutorialStore';
+import './stores/themeStore'; // initialize theme on load
 
 function App() {
   const [ready, setReady] = useState(false);
@@ -22,7 +24,7 @@ function App() {
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-400">
+      <div className="min-h-screen flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}>
         Loading...
       </div>
     );
@@ -30,7 +32,10 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+        <div className="fixed top-3 right-4 z-40">
+          <ThemeToggle />
+        </div>
         {step === 0 && <IntroModal onDone={advance} />}
         <Routes>
           <Route

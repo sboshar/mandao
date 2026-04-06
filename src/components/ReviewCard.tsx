@@ -39,7 +39,7 @@ export function ReviewCard() {
 
   if (!card || !sentence) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-400">
+      <div className="flex items-center justify-center h-64" style={{ color: 'var(--text-tertiary)' }}>
         {remaining() === 0
           ? 'No cards to review. Add some sentences first!'
           : 'Loading...'}
@@ -63,32 +63,26 @@ export function ReviewCard() {
   return (
     <div className="max-w-2xl mx-auto">
       {/* Progress */}
-      <div className="text-sm text-gray-400 text-center mb-4">
+      <div className="text-sm text-center mb-4" style={{ color: 'var(--text-tertiary)' }}>
         {remaining()} cards remaining
         <span className="ml-2 text-xs">
-          ({card.reviewMode === 'en-to-zh' ? 'EN → ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY → EN+ZH' : 'ZH → EN'})
+          ({card.reviewMode === 'en-to-zh' ? 'EN \u2192 ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY \u2192 EN+ZH' : 'ZH \u2192 EN'})
         </span>
       </div>
 
       {/* Card */}
-      <div className="bg-white rounded-xl shadow-lg p-8 min-h-[300px] flex flex-col">
+      <div className="surface rounded-xl shadow-lg p-8 min-h-[300px] flex flex-col">
         {/* Front */}
         <div className="flex-1 flex flex-col items-center justify-center">
           {isEnToZh ? (
-            // English → Chinese: show English on front
             <div className="text-xl text-center">
               <ClickableEnglish text={sentence.english} />
             </div>
           ) : isPyToEnZh ? (
-            // Pinyin → English + Chinese: show pinyin on front
             <div className="text-center">
-              <PinyinDisplay
-                pinyin={sentence.pinyinSandhi}
-                className="text-2xl"
-              />
+              <PinyinDisplay pinyin={sentence.pinyinSandhi} className="text-2xl" />
             </div>
           ) : (
-            // Chinese → English: show characters on front
             <div className="text-3xl text-center tracking-wider">
               {sentence.chinese}
             </div>
@@ -99,16 +93,14 @@ export function ReviewCard() {
         {!isFlipped ? (
           <button
             onClick={flip}
-            className="mt-6 w-full py-3 rounded-lg bg-blue-500 text-white font-medium
-              hover:bg-blue-600 transition-colors"
+            className="mt-6 w-full py-3 rounded-lg font-medium transition-colors"
+            style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
             Show Answer
           </button>
         ) : (
           <>
-            {/* Back */}
-            <div className="mt-6 pt-6 border-t space-y-4">
-              {/* Characters with clickable tokens (EN→ZH and PY→EN+ZH) */}
+            <div className="mt-6 pt-6 space-y-4" style={{ borderTop: '1px solid var(--border)' }}>
               {(isEnToZh || isPyToEnZh) && (
                 <div className="flex flex-wrap justify-center gap-1">
                   {tokens.map((t) => (
@@ -124,14 +116,12 @@ export function ReviewCard() {
                 </div>
               )}
 
-              {/* English (for ZH→EN and PY→EN+ZH modes) */}
               {!isEnToZh && (
                 <div className="text-xl text-center">
                   <ClickableEnglish text={sentence.english} />
                 </div>
               )}
 
-              {/* Pinyin sandhi with differences highlighted (skip for PY mode — already on front) */}
               {!isPyToEnZh && (
                 <div className="text-center">
                   <PinyinDisplay
@@ -142,7 +132,6 @@ export function ReviewCard() {
                 </div>
               )}
 
-              {/* Audio */}
               <div className="text-center">
                 <AudioButton text={sentence.chinese} />
               </div>
@@ -152,7 +141,8 @@ export function ReviewCard() {
                 {sentence.tags && sentence.tags.length > 0 && !editingTags && (
                   <>
                     {sentence.tags.map((tag) => (
-                      <span key={tag} className="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
+                      <span key={tag} className="px-1.5 py-0.5 text-xs rounded-full"
+                        style={{ background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }}>
                         {tag}
                       </span>
                     ))}
@@ -161,7 +151,8 @@ export function ReviewCard() {
                 {!editingTags ? (
                   <button
                     onClick={() => setEditingTags(true)}
-                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                    className="text-xs transition-colors"
+                    style={{ color: 'var(--text-tertiary)' }}
                   >
                     {sentence.tags && sentence.tags.length > 0 ? 'edit' : '+ tag'}
                   </button>
@@ -176,7 +167,6 @@ export function ReviewCard() {
                 )}
               </div>
 
-              {/* Pinyin with clickable tokens (for ZH→EN mode) */}
               {!isEnToZh && !isPyToEnZh && (
                 <div className="flex flex-wrap justify-center gap-1">
                   {tokens.map((t) => (
@@ -195,34 +185,24 @@ export function ReviewCard() {
 
             {/* Rating buttons */}
             <div className="mt-6 grid grid-cols-4 gap-2">
-              <button
-                onClick={() => handleRate(1)}
-                className="py-3 rounded-lg bg-red-100 text-red-700 hover:bg-red-200
-                  font-medium transition-colors"
-              >
-                Again
-              </button>
-              <button
-                onClick={() => handleRate(2)}
-                className="py-3 rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200
-                  font-medium transition-colors"
-              >
-                Hard
-              </button>
-              <button
-                onClick={() => handleRate(3)}
-                className="py-3 rounded-lg bg-green-100 text-green-700 hover:bg-green-200
-                  font-medium transition-colors"
-              >
-                Good
-              </button>
-              <button
-                onClick={() => handleRate(4)}
-                className="py-3 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200
-                  font-medium transition-colors"
-              >
-                Easy
-              </button>
+              {([
+                { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
+                { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
+                { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
+                { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
+              ]).map((btn) => (
+                <button
+                  key={btn.rating}
+                  onClick={() => handleRate(btn.rating)}
+                  className="py-3 rounded-lg font-medium transition-colors"
+                  style={{
+                    background: `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
+                    color: btn.color,
+                  }}
+                >
+                  {btn.label}
+                </button>
+              ))}
             </div>
           </>
         )}
