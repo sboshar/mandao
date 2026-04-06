@@ -23,10 +23,11 @@ export function TokenSpan({
 }: TokenSpanProps) {
   const { open, push, isOpen } = useNavigationStore();
 
-  const pinyinSyllables = pinyin?.split(/\s+/) || [];
+  // Use sandhi pinyin if available, fall back to dictionary pinyin
+  const displayPinyin = pinyinSandhi || pinyin;
+  const displaySyllables = displayPinyin?.split(/\s+/) || [];
+  const baseSyllables = pinyin?.split(/\s+/) || [];
   const pinyinNumericSyllables = pinyinNumeric?.split(/\s+/) || [];
-  const sandhiSyllables = pinyinSandhi?.split(/\s+/) || [];
-  const hasSandhi = pinyinSandhi && pinyin && pinyinSandhi !== pinyin;
 
   const handleWordClick = () => {
     if (isOpen) {
@@ -46,27 +47,26 @@ export function TokenSpan({
         {surfaceForm}
       </span>
 
-      {showPinyin && pinyinSyllables.length > 0 && (
+      {showPinyin && displaySyllables.length > 0 && (
         <span className="text-xs flex gap-0.5">
-          {pinyinSyllables.map((syllable, i) => {
-            const sandhiDiffers = hasSandhi && sandhiSyllables[i] && sandhiSyllables[i] !== syllable;
+          {displaySyllables.map((syllable, i) => {
+            const baseSyllable = baseSyllables[i];
+            const isDifferent = baseSyllable && syllable !== baseSyllable;
 
-            if (sandhiDiffers) {
+            if (isDifferent) {
               return (
                 <span
                   key={i}
                   className="font-medium cursor-pointer rounded transition-colors surface-hover"
                   style={{ color: 'var(--sandhi-underline)' }}
-                  title={`Dictionary: ${syllable} → Spoken: ${sandhiSyllables[i]}`}
+                  title={`Dictionary: ${baseSyllable} → Spoken: ${syllable}`}
                   onClick={() => {
-                    if (isOpen) {
-                      push({ type: 'pinyin', id: pinyinNumericSyllables[i] || '' });
-                    } else {
-                      open({ type: 'pinyin', id: pinyinNumericSyllables[i] || '' });
-                    }
+                    const id = pinyinNumericSyllables[i] || '';
+                    if (isOpen) push({ type: 'pinyin', id });
+                    else open({ type: 'pinyin', id });
                   }}
                 >
-                  {sandhiSyllables[i]}
+                  {syllable}
                 </span>
               );
             }
