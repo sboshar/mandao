@@ -16,6 +16,9 @@ export function DashboardPage() {
   const [totalSentences, setTotalSentences] = useState(0);
   const [totalMeanings, setTotalMeanings] = useState(0);
 
+  const tutorialStep = useTutorialStore((s) => s.step);
+  const advanceTutorial = useTutorialStore((s) => s.advance);
+
   useEffect(() => {
     async function load() {
       const c = await getDueCounts(DEFAULT_DECK_ID);
@@ -28,19 +31,16 @@ export function DashboardPage() {
 
   const totalDue = counts.newCount + counts.reviewCount + counts.learningCount;
 
-  const tutorialStep = useTutorialStore((s) => s.step);
-  const advanceTutorial = useTutorialStore((s) => s.advance);
-
   return (
     <div className="max-w-2xl mx-auto p-6">
       <h1 className="text-3xl font-bold mb-8">Mandarin</h1>
 
-      <TutorialBanner visibleAt={1}>
-        Great! Your 3 example sentences are ready. Click <strong>Browse</strong> below
+      <TutorialBanner visibleAt={2}>
+        Your 3 example sentences are in the deck. Click <strong>Browse</strong> below
         to see them and explore how the app breaks down each sentence.
       </TutorialBanner>
 
-      <TutorialBanner visibleAt={5}>
+      <TutorialBanner visibleAt={6}>
         You've seen how Mandao works! Every sentence you add gets broken down
         into clickable characters and meanings, with tone sandhi tracked automatically.
         <div className="mt-2">
@@ -100,11 +100,11 @@ export function DashboardPage() {
         </button>
         <button
           onClick={() => {
-            if (tutorialStep === 1) advanceTutorial();
+            if (tutorialStep === 2) advanceTutorial();
             navigate('/browse');
           }}
           className={`py-3 rounded-lg font-medium transition-colors ${
-            tutorialStep === 1
+            tutorialStep === 2
               ? 'bg-blue-500 text-white hover:bg-blue-600 ring-2 ring-blue-300 ring-offset-2'
               : 'bg-gray-100 hover:bg-gray-200'
           }`}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ensureDefaults } from './db/db';
 import { loadCedict } from './lib/cedict';
 import { DashboardPage } from './pages/DashboardPage';
@@ -33,7 +33,12 @@ function App() {
       <div className="min-h-screen bg-gray-50">
         {step === 0 && <IntroModal onDone={advance} />}
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
+          <Route
+            path="/"
+            element={
+              step === 1 ? <Navigate to="/add?tutorial=1" replace /> : <DashboardPage />
+            }
+          />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/review/:deckId" element={<ReviewPage />} />
           <Route path="/add" element={<AddSentencePage />} />

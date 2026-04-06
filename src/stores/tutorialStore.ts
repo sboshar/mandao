@@ -2,23 +2,25 @@ import { create } from 'zustand';
 
 /**
  * Tutorial steps:
- * 0 = intro modal showing
- * 1 = dashboard: "Click Browse to see the example sentences"
- * 2 = browse: "Click on a sentence to expand it"
- * 3 = browse (expanded): "Click on any character to explore its meaning"
- * 4 = meaning card open: explain the explorer
- * 5 = dashboard: wrap-up, point to Add Sentence
- * 6 = done
+ * 0 = intro modal (theory + example sentences in proper format)
+ * 1 = add sentence page (tutorial mode, walk through adding first sentence)
+ * 2 = dashboard: other 2 sentences seeded, point to Browse
+ * 3 = browse: expand the 花 sentence
+ * 4 = browse expanded: click on 花 character
+ * 5 = meaning card: explain explorer + note multiple meanings
+ * 6 = dashboard wrap-up
+ * 7 = done
  */
-export type TutorialStep = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type TutorialStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const STORAGE_KEY = 'mandao_tutorial_step';
+const MAX_STEP = 7;
 
 function loadStep(): TutorialStep {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw === null) return 0;
   const n = parseInt(raw, 10);
-  return (n >= 0 && n <= 6 ? n : 6) as TutorialStep;
+  return (n >= 0 && n <= MAX_STEP ? n : MAX_STEP) as TutorialStep;
 }
 
 interface TutorialState {
@@ -31,12 +33,12 @@ export const useTutorialStore = create<TutorialState>((set) => ({
   step: loadStep(),
   advance: () =>
     set((s) => {
-      const next = Math.min(s.step + 1, 6) as TutorialStep;
+      const next = Math.min(s.step + 1, MAX_STEP) as TutorialStep;
       localStorage.setItem(STORAGE_KEY, String(next));
       return { step: next };
     }),
   skipAll: () => {
-    localStorage.setItem(STORAGE_KEY, '6');
-    set({ step: 6 });
+    localStorage.setItem(STORAGE_KEY, String(MAX_STEP));
+    set({ step: MAX_STEP as TutorialStep });
   },
 }));

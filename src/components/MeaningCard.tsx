@@ -251,19 +251,24 @@ export function MeaningCard() {
 
   const entry = current();
 
-  // Advance tutorial when meaning card first opens during step 3
+  // Advance tutorial when meaning card first opens during step 4
   useEffect(() => {
-    if (isOpen && entry && tutorialStep === 3) {
+    if (isOpen && entry && tutorialStep === 4) {
       advanceTutorial();
     }
   }, [isOpen, entry, tutorialStep, advanceTutorial]);
+
+  const handleClose = () => {
+    if (tutorialStep === 5) advanceTutorial();
+    close();
+  };
 
   if (!isOpen || !entry) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
-      onClick={(e) => { if (e.target === e.currentTarget) close(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
     >
       <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto">
         {/* Header with navigation */}
@@ -291,7 +296,7 @@ export function MeaningCard() {
             {entry.type === 'english' && 'English'}
           </div>
           <button
-            onClick={close}
+            onClick={handleClose}
             className="px-2 py-1 rounded hover:bg-gray-100"
           >
             &times;
@@ -300,13 +305,15 @@ export function MeaningCard() {
 
         {/* Tutorial hint */}
         <div className="px-4 pt-2">
-          <TutorialBanner visibleAt={4}>
-            This is the <strong>meaning explorer</strong>. You can click any character,
-            pinyin syllable, or English word to navigate deeper. Use the arrows to go
-            back and forward. Try clicking around, then close this to continue!
-            <div className="mt-2 text-xs text-gray-500">
-              When you add your own sentences later, every character and word will be
-              linked here automatically.
+          <TutorialBanner visibleAt={5}>
+            This is the <strong>meaning explorer</strong>. Notice how 花 has separate
+            entries for "to spend" and "flower" under <strong>Other Meanings</strong>.
+            <div className="mt-2">
+              Try clicking a <strong>pinyin syllable</strong> (like huā) to see all characters
+              with that sound, or click the <strong>arrows</strong> to go back and forward.
+            </div>
+            <div className="mt-2">
+              When you're done exploring, close this panel to go back to the dashboard.
             </div>
           </TutorialBanner>
         </div>

@@ -21,7 +21,7 @@ export function TutorialBanner({ visibleAt, children }: TutorialBannerProps) {
           <div className="text-sm text-blue-800">{children}</div>
         </div>
         <div className="flex gap-2 shrink-0">
-          {visibleAt < 4 && (
+          {visibleAt !== 5 && visibleAt !== 6 && (
             <button
               onClick={skipAll}
               className="text-xs text-blue-400 hover:text-blue-600"
@@ -29,12 +29,20 @@ export function TutorialBanner({ visibleAt, children }: TutorialBannerProps) {
               Skip tutorial
             </button>
           )}
-          {(visibleAt === 4 || visibleAt === 5) && (
+          {visibleAt === 5 && (
+            <button
+              onClick={() => { advance(); }}
+              className="text-xs px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600"
+            >
+              Got it!
+            </button>
+          )}
+          {visibleAt === 6 && (
             <button
               onClick={advance}
               className="text-xs px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600"
             >
-              {visibleAt === 4 ? 'Got it!' : 'Finish tutorial'}
+              Finish tutorial
             </button>
           )}
         </div>
