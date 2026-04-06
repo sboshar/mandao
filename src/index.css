@@ -30,10 +30,10 @@
 
   --sandhi-underline: #cb7b37;
 
-  /* Accent — muted blue */
-  --accent: #2383e2;
-  --accent-hover: #1b6ec2;
-  --accent-subtle: rgba(35, 131, 226, 0.08);
+  /* Accent — warm muted */
+  --accent: #8b7355;
+  --accent-hover: #756040;
+  --accent-subtle: rgba(139, 115, 85, 0.08);
 
   /* Semantic — muted */
   --success: #448361;
