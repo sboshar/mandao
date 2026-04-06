@@ -18,6 +18,8 @@ import type {
 } from '../db/schema';
 import { DEFAULT_DECK_ID } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
+import { loadDecomposition, decompose } from '../lib/decomposition';
+import { loadCedict, lookup as cedictLookup } from '../lib/cedict';
 
 // ============================================================
 // Types for the ingestion input
@@ -371,6 +373,105 @@ export async function getTokensForSentence(
     }
   }
   return results;
+}
+
+/** Component info returned by getComponentBreakdown */
+export interface ComponentInfo {
+  /** The component character */
+  char: string;
+  /** Position in the parent (0-indexed) */
+  position: number;
+  /** Meaning from DB if exists, null otherwise */
+  meaning: Meaning | null;
+  /** CEDICT definition fallback when no DB meaning */
+  cedictEnglish: string | null;
+  /** CEDICT pinyin fallback */
+  cedictPinyin: string | null;
+  /** Whether this component can be decomposed further */
+  canDecompose: boolean;
+}
+
+/**
+ * Get component breakdown for a single character using the decomposition dataset.
+ * Returns structural components with DB meanings or CEDICT fallbacks.
+ */
+export async function getComponentBreakdown(
+  char: string
+): Promise<ComponentInfo[]> {
+  await loadDecomposition();
+  const components = decompose(char);
+  if (components.length === 0) return [];
+
+  await loadCedict();
+
+  const results: ComponentInfo[] = [];
+  for (let i = 0; i < components.length; i++) {
+    const comp = components[i];
+
+    // Try to find an existing Meaning in the DB
+    const dbMeaning = await db.meanings
+      .where('headword')
+      .equals(comp)
+      .first();
+
+    // CEDICT fallback
+    let cedictEnglish: string | null = null;
+    let cedictPinyin: string | null = null;
+    if (!dbMeaning) {
+      const entries = cedictLookup(comp);
+      if (entries.length > 0) {
+        cedictEnglish = entries[0].english.split('/')[0];
+        cedictPinyin = numericStringToDiacritic(entries[0].pinyin);
+      }
+    }
+
+    results.push({
+      char: comp,
+      position: i,
+      meaning: dbMeaning ?? null,
+      cedictEnglish,
+      cedictPinyin,
+      canDecompose: decompose(comp).length > 0,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Ensure a Meaning record exists for a component character.
+ * Creates one from CEDICT data if needed, with type 'component'.
+ */
+export async function ensureComponentMeaning(char: string): Promise<Meaning> {
+  // Check DB first
+  const existing = await db.meanings
+    .where('headword')
+    .equals(char)
+    .first();
+  if (existing) return existing;
+
+  // Create from CEDICT
+  await loadCedict();
+  const entries = cedictLookup(char);
+  const english = entries.length > 0 ? entries[0].english.split('/')[0] : 'component';
+  const pinyin = entries.length > 0 ? entries[0].pinyin : '';
+
+  const meaning: Meaning = {
+    id: uuid(),
+    headword: char,
+    pinyin: pinyin ? numericStringToDiacritic(pinyin) : '',
+    pinyinNumeric: pinyin,
+    partOfSpeech: '',
+    englishShort: english,
+    englishFull: entries.length > 0 ? entries[0].english : english,
+    type: 'component',
+    level: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  await db.meanings.add(meaning);
+  return meaning;
 }
 
 /** Get all meanings that share the same pinyin (for pinyin card) */

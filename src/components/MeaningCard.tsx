@@ -6,7 +6,10 @@ import {
   getSentencesForMeaning,
   getOtherMeanings,
   getCharacterBreakdown,
+  getComponentBreakdown,
+  ensureComponentMeaning,
 } from '../services/ingestion';
+import type { ComponentInfo } from '../services/ingestion';
 import { ClickableChar } from './ClickableChar';
 import { ClickablePinyin } from './ClickablePinyin';
 import { PinyinCard } from './PinyinCard';
@@ -29,6 +32,7 @@ function MeaningContent() {
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [otherMeanings, setOtherMeanings] = useState<Meaning[]>([]);
   const [charBreakdown, setCharBreakdown] = useState<CharBreakdownItem[]>([]);
+  const [componentBreakdown, setComponentBreakdown] = useState<ComponentInfo[]>([]);
 
   const entry = current();
 
@@ -55,6 +59,14 @@ function MeaningContent() {
       setSentences(sents);
       setOtherMeanings(others);
       setCharBreakdown(breakdown);
+
+      // For single characters, also load component decomposition
+      if (m.type === 'character' || m.headword.length === 1) {
+        const components = await getComponentBreakdown(m.headword);
+        if (!cancelled) setComponentBreakdown(components);
+      } else {
+        setComponentBreakdown([]);
+      }
     }
 
     load();
@@ -152,7 +164,7 @@ function MeaningContent() {
         </div>
       )}
 
-      {/* Character breakdown */}
+      {/* Character breakdown (for multi-character words) */}
       {charBreakdown.length > 0 && (
         <div className="px-6 pb-6">
           <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-2">
@@ -172,6 +184,44 @@ function MeaningContent() {
                   {item.childMeaning.pinyin}
                 </span>
                 <span className="text-xs">{item.childMeaning.englishShort}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Component breakdown (for single characters → radicals/components) */}
+      {componentBreakdown.length > 0 && (
+        <div className="px-6 pb-6">
+          <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-2">
+            Component Breakdown
+          </h3>
+          <div className="flex gap-4 justify-center">
+            {componentBreakdown.map((comp) => (
+              <button
+                key={`${comp.char}-${comp.position}`}
+                onClick={async () => {
+                  if (comp.meaning) {
+                    push({ type: 'meaning', id: comp.meaning.id });
+                  } else {
+                    const m = await ensureComponentMeaning(comp.char);
+                    push({ type: 'meaning', id: m.id });
+                  }
+                }}
+                className="flex flex-col items-center p-3 rounded hover:bg-orange-50 cursor-pointer"
+              >
+                <span className="text-3xl">{comp.char}</span>
+                <span className="text-xs text-gray-500">
+                  {comp.meaning?.pinyin ?? comp.cedictPinyin ?? ''}
+                </span>
+                <span className="text-xs">
+                  {comp.meaning?.englishShort ?? comp.cedictEnglish ?? ''}
+                </span>
+                {comp.canDecompose && (
+                  <span className="text-[10px] text-orange-400 mt-0.5">
+                    decomposable
+                  </span>
+                )}
               </button>
             ))}
           </div>
