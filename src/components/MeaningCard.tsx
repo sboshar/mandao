@@ -16,6 +16,8 @@ import { PinyinDisplay } from './PinyinDisplay';
 import { ClickableEnglish } from './ClickableEnglish';
 import { EnglishCard } from './EnglishCard';
 import { getTokensForSentence } from '../services/ingestion';
+import { TutorialBanner } from './TutorialBanner';
+import { useTutorialStore } from '../stores/tutorialStore';
 import type { SentenceToken } from '../db/schema';
 
 interface CharBreakdownItem {
@@ -244,8 +246,17 @@ function SentenceContent() {
 export function MeaningCard() {
   const { isOpen, current, goBack, goForward, canGoBack, canGoForward, close } =
     useNavigationStore();
+  const tutorialStep = useTutorialStore((s) => s.step);
+  const advanceTutorial = useTutorialStore((s) => s.advance);
 
   const entry = current();
+
+  // Advance tutorial when meaning card first opens during step 3
+  useEffect(() => {
+    if (isOpen && entry && tutorialStep === 3) {
+      advanceTutorial();
+    }
+  }, [isOpen, entry, tutorialStep, advanceTutorial]);
 
   if (!isOpen || !entry) return null;
 
@@ -285,6 +296,19 @@ export function MeaningCard() {
           >
             &times;
           </button>
+        </div>
+
+        {/* Tutorial hint */}
+        <div className="px-4 pt-2">
+          <TutorialBanner visibleAt={4}>
+            This is the <strong>meaning explorer</strong>. You can click any character,
+            pinyin syllable, or English word to navigate deeper. Use the arrows to go
+            back and forward. Try clicking around, then close this to continue!
+            <div className="mt-2 text-xs text-gray-500">
+              When you add your own sentences later, every character and word will be
+              linked here automatically.
+            </div>
+          </TutorialBanner>
         </div>
 
         {/* Content based on entry type */}

@@ -8,6 +8,8 @@ import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
 import { ClickableEnglish } from '../components/ClickableEnglish';
 import { useNavigationStore } from '../stores/navigationStore';
+import { useTutorialStore } from '../stores/tutorialStore';
+import { TutorialBanner } from '../components/TutorialBanner';
 import type { SentenceToken, Meaning } from '../db/schema';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
@@ -15,6 +17,8 @@ type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 export function BrowsePage() {
   const navigate = useNavigate();
   const { open } = useNavigationStore();
+  const tutorialStep = useTutorialStore((s) => s.step);
+  const advanceTutorial = useTutorialStore((s) => s.advance);
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
@@ -28,6 +32,7 @@ export function BrowsePage() {
       setExpandedId(null);
       return;
     }
+    if (tutorialStep === 2) advanceTutorial();
     setExpandedId(sentenceId);
     const t = await getTokensForSentence(sentenceId);
     setTokens(t);
@@ -44,6 +49,17 @@ export function BrowsePage() {
           &larr; Back
         </button>
       </div>
+
+      <TutorialBanner visibleAt={2}>
+        Here are your sentences. <strong>Click on any sentence</strong> to expand it and
+        see its word-by-word breakdown with pinyin.
+      </TutorialBanner>
+
+      <TutorialBanner visibleAt={3}>
+        Nice! Now <strong>click on any character</strong> (the large Chinese text) to open
+        the meaning explorer. You'll see its definition, all the sentences it appears in,
+        and other meanings for the same character.
+      </TutorialBanner>
 
       {sentences.length === 0 ? (
         <div className="text-center text-gray-400 py-12">

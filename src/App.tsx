@@ -8,11 +8,13 @@ import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
 import { StatsPage } from './pages/StatsPage';
-import { IntroModal, useIntroSeen } from './components/IntroModal';
+import { IntroModal } from './components/IntroModal';
+import { useTutorialStore } from './stores/tutorialStore';
 
 function App() {
   const [ready, setReady] = useState(false);
-  const { seen, markSeen } = useIntroSeen();
+  const step = useTutorialStore((s) => s.step);
+  const advance = useTutorialStore((s) => s.advance);
 
   useEffect(() => {
     Promise.all([ensureDefaults(), loadCedict()]).then(() => setReady(true));
@@ -29,7 +31,7 @@ function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-gray-50">
-        {!seen && <IntroModal onClose={markSeen} />}
+        {step === 0 && <IntroModal onDone={advance} />}
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/review" element={<ReviewPage />} />
