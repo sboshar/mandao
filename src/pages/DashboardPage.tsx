@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router';
 import { getDueCounts } from '../services/srs';
 import { DEFAULT_DECK_ID } from '../db/schema';
 import { db } from '../db/db';
+import { TutorialBanner } from '../components/TutorialBanner';
+import { useTutorialStore } from '../stores/tutorialStore';
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -13,6 +15,9 @@ export function DashboardPage() {
   });
   const [totalSentences, setTotalSentences] = useState(0);
   const [totalMeanings, setTotalMeanings] = useState(0);
+
+  const tutorialStep = useTutorialStore((s) => s.step);
+  const advanceTutorial = useTutorialStore((s) => s.advance);
 
   useEffect(() => {
     async function load() {
@@ -29,6 +34,20 @@ export function DashboardPage() {
   return (
     <div className="max-w-2xl mx-auto p-6">
       <h1 className="text-3xl font-bold mb-8">Mandarin</h1>
+
+      <TutorialBanner visibleAt={2}>
+        Your 3 example sentences are in the deck. Click <strong>Browse</strong> below
+        to see them and explore how the app breaks down each sentence.
+      </TutorialBanner>
+
+      <TutorialBanner visibleAt={6}>
+        You've seen how Mandao works! Every sentence you add gets broken down
+        into clickable characters and meanings, with tone sandhi tracked automatically.
+        <div className="mt-2">
+          Click <strong>+ Add Sentence</strong> to add your own, or <strong>Study</strong> to
+          start reviewing the example sentences with spaced repetition.
+        </div>
+      </TutorialBanner>
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-8">
@@ -80,9 +99,15 @@ export function DashboardPage() {
           + Add Sentence
         </button>
         <button
-          onClick={() => navigate('/browse')}
-          className="py-3 rounded-lg bg-gray-100 font-medium
-            hover:bg-gray-200 transition-colors"
+          onClick={() => {
+            if (tutorialStep === 2) advanceTutorial();
+            navigate('/browse');
+          }}
+          className={`py-3 rounded-lg font-medium transition-colors ${
+            tutorialStep === 2
+              ? 'bg-blue-500 text-white hover:bg-blue-600 ring-2 ring-blue-300 ring-offset-2'
+              : 'bg-gray-100 hover:bg-gray-200'
+          }`}
         >
           Browse
         </button>

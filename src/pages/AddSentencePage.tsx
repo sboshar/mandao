@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { ingestSentence, type TokenInput, type CharacterInput } from '../services/ingestion';
 import {
   generateAnalysisPrompt,
@@ -9,6 +9,9 @@ import {
 import { tokenizeSentence } from '../services/tokenizer';
 import { loadCedict, isLoaded as cedictLoaded } from '../lib/cedict';
 import { numericStringToDiacritic } from '../services/toneSandhi';
+import { TutorialBanner } from '../components/TutorialBanner';
+import { useTutorialStore } from '../stores/tutorialStore';
+import { TUTORIAL_SENTENCES } from '../data/tutorialSentences';
 
 interface TokenFormData {
   surfaceForm: string;
@@ -21,6 +24,11 @@ interface TokenFormData {
 
 export function AddSentencePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const isTutorial = searchParams.get('tutorial') === '1';
+  const tutorialStep = useTutorialStore((s) => s.step);
+  const advanceTutorial = useTutorialStore((s) => s.advance);
+
   const [chinese, setChinese] = useState('');
   const [english, setEnglish] = useState('');
   const [segments, setSegments] = useState<string[]>([]);
@@ -39,6 +47,13 @@ export function AddSentencePage() {
       loadCedict().then(() => setDictLoading(false));
     }
   }, []);
+
+  // Tutorial mode: pre-fill Chinese sentence
+  useEffect(() => {
+    if (isTutorial && tutorialStep === 1 && step === 'input') {
+      setChinese(TUTORIAL_SENTENCES[0].chinese);
+    }
+  }, [isTutorial, tutorialStep, step]);
 
   // Step 1 → Step 2: Auto-segment with CC-CEDICT
   const handleSegment = () => {
@@ -112,6 +127,27 @@ export function AddSentencePage() {
     }
   };
 
+  // Tutorial mode: skip LLM step, use pre-built token data
+  const handleTutorialSkipLLM = () => {
+    const tutorialTokens = TUTORIAL_SENTENCES[0].tokens;
+    setEnglish(TUTORIAL_SENTENCES[0].english);
+    const formTokens: TokenFormData[] = tutorialTokens.map((t) => ({
+      surfaceForm: t.surfaceForm,
+      pinyinNumeric: t.pinyinNumeric,
+      pinyinSandhi: '',
+      english: t.english,
+      partOfSpeech: t.partOfSpeech || '',
+      characters: t.characters?.map((c) => ({
+        char: c.char,
+        pinyinNumeric: c.pinyinNumeric,
+        pinyinSandhi: c.pinyinSandhi,
+        english: c.english,
+      })),
+    }));
+    setTokens(formTokens);
+    setStep('review');
+  };
+
   // Token editing (in review step)
   const updateToken = (index: number, field: keyof TokenFormData, value: string) => {
     const newTokens = [...tokens];
@@ -157,18 +193,39 @@ export function AddSentencePage() {
         characters: t.characters,
       }));
 
-      await ingestSentence({
-        chinese: chinese.trim(),
-        english: english.trim(),
-        tokens: tokenInputs,
-      });
+      try {
+        await ingestSentence({
+          chinese: chinese.trim(),
+          english: english.trim(),
+          tokens: tokenInputs,
+        });
+      } catch (e: any) {
+        // In tutorial mode, skip duplicate errors so re-running works
+        if (!(isTutorial && e.message?.includes('already exists'))) {
+          throw e;
+        }
+      }
 
-      setChinese('');
-      setEnglish('');
-      setSegments([]);
-      setTokens([]);
-      setStep('input');
-      navigate('/');
+      // Tutorial mode: seed remaining sentences in the background, then advance
+      if (isTutorial && tutorialStep === 1) {
+        // Seed remaining 2 sentences silently
+        for (let i = 1; i < TUTORIAL_SENTENCES.length; i++) {
+          try {
+            await ingestSentence(TUTORIAL_SENTENCES[i]);
+          } catch {
+            // skip duplicates
+          }
+        }
+        advanceTutorial(); // step 1 → 2
+        navigate('/');
+      } else {
+        setChinese('');
+        setEnglish('');
+        setSegments([]);
+        setTokens([]);
+        setStep('input');
+        navigate('/');
+      }
     } catch (e: any) {
       setError(e.message || 'Failed to save sentence.');
     }
@@ -196,6 +253,12 @@ export function AddSentencePage() {
       {/* Step 1: Enter Chinese sentence */}
       {step === 'input' && (
         <div className="space-y-4">
+          {isTutorial && (
+            <TutorialBanner visibleAt={1}>
+              This is where you add sentences. We've pre-filled the first example for you.
+              Click <strong>Next: Segment Words</strong> to see how the app breaks it into tokens.
+            </TutorialBanner>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Chinese Sentence
@@ -208,13 +271,18 @@ export function AddSentencePage() {
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500
                 focus:border-blue-500 text-lg"
               lang="zh"
+              readOnly={isTutorial && tutorialStep === 1}
             />
           </div>
           <button
             onClick={handleSegment}
             disabled={dictLoading || !chinese.trim()}
-            className="w-full py-3 rounded-lg bg-blue-500 text-white font-medium
-              hover:bg-blue-600 disabled:opacity-50 transition-colors"
+            className={`w-full py-3 rounded-lg text-white font-medium
+              disabled:opacity-50 transition-colors ${
+                isTutorial && tutorialStep === 1
+                  ? 'bg-blue-500 hover:bg-blue-600 ring-2 ring-blue-300 ring-offset-2'
+                  : 'bg-blue-500 hover:bg-blue-600'
+              }`}
           >
             {dictLoading ? 'Loading dictionary...' : 'Next: Segment Words'}
           </button>
@@ -224,6 +292,14 @@ export function AddSentencePage() {
       {/* Step 2: Adjust segmentation + copy LLM prompt */}
       {step === 'segment' && (
         <div className="space-y-4">
+          {isTutorial && tutorialStep === 1 && (
+            <TutorialBanner visibleAt={1}>
+              The app auto-segmented the sentence using the CC-CEDICT dictionary. You can
+              split or merge tokens if needed. Normally you'd copy a prompt to an LLM to get
+              pinyin and meanings &mdash; for this tutorial, click <strong>Use Tutorial Data</strong> to skip that step.
+            </TutorialBanner>
+          )}
+
           <div className="p-3 bg-gray-50 rounded-lg">
             <div className="text-lg">{chinese}</div>
           </div>
@@ -258,38 +334,48 @@ export function AddSentencePage() {
             ))}
           </div>
 
-          {/* LLM prompt flow */}
-          <div className="p-4 border rounded-lg space-y-3 bg-gray-50">
-            <p className="text-sm font-medium text-gray-700">
-              1. Copy the analysis prompt (includes your segmentation + existing meanings)
-            </p>
+          {/* Tutorial shortcut or normal LLM flow */}
+          {isTutorial && tutorialStep === 1 ? (
             <button
-              onClick={handleCopyPrompt}
-              className="w-full py-2 rounded bg-blue-500 text-white font-medium
-                hover:bg-blue-600 text-sm transition-colors"
+              onClick={handleTutorialSkipLLM}
+              className="w-full py-3 rounded-lg bg-blue-500 text-white font-medium
+                hover:bg-blue-600 transition-colors ring-2 ring-blue-300 ring-offset-2"
             >
-              {promptCopied ? 'Copied!' : 'Copy Prompt to Clipboard'}
+              Use Tutorial Data
             </button>
+          ) : (
+            <div className="p-4 border rounded-lg space-y-3 bg-gray-50">
+              <p className="text-sm font-medium text-gray-700">
+                1. Copy the analysis prompt (includes your segmentation + existing meanings)
+              </p>
+              <button
+                onClick={handleCopyPrompt}
+                className="w-full py-2 rounded bg-blue-500 text-white font-medium
+                  hover:bg-blue-600 text-sm transition-colors"
+              >
+                {promptCopied ? 'Copied!' : 'Copy Prompt to Clipboard'}
+              </button>
 
-            <p className="text-sm font-medium text-gray-700">
-              2. Paste it into ChatGPT / Claude / any LLM, then paste the response below
-            </p>
-            <textarea
-              value={llmPasteValue}
-              onChange={(e) => setLlmPasteValue(e.target.value)}
-              placeholder="Paste the JSON response here..."
-              rows={6}
-              className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
-            />
-            <button
-              onClick={handleParseLLMResponse}
-              disabled={!llmPasteValue.trim()}
-              className="w-full py-2 rounded bg-green-500 text-white font-medium
-                hover:bg-green-600 text-sm transition-colors disabled:opacity-50"
-            >
-              Parse &amp; Fill
-            </button>
-          </div>
+              <p className="text-sm font-medium text-gray-700">
+                2. Paste it into ChatGPT / Claude / any LLM, then paste the response below
+              </p>
+              <textarea
+                value={llmPasteValue}
+                onChange={(e) => setLlmPasteValue(e.target.value)}
+                placeholder="Paste the JSON response here..."
+                rows={6}
+                className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
+              />
+              <button
+                onClick={handleParseLLMResponse}
+                disabled={!llmPasteValue.trim()}
+                className="w-full py-2 rounded bg-green-500 text-white font-medium
+                  hover:bg-green-600 text-sm transition-colors disabled:opacity-50"
+              >
+                Parse &amp; Fill
+              </button>
+            </div>
+          )}
 
           <button
             onClick={() => setStep('input')}
@@ -303,6 +389,13 @@ export function AddSentencePage() {
       {/* Step 3: Review filled tokens */}
       {step === 'review' && (
         <div className="space-y-4">
+          {isTutorial && tutorialStep === 1 && (
+            <TutorialBanner visibleAt={1}>
+              Here's each token with its pinyin, part of speech, and English meaning. You can
+              edit any field by clicking "Edit fields." When you're happy, click <strong>Review &amp; Save</strong>.
+            </TutorialBanner>
+          )}
+
           <div className="p-3 bg-gray-50 rounded-lg">
             <div className="text-lg">{chinese}</div>
           </div>
@@ -434,7 +527,11 @@ export function AddSentencePage() {
             </button>
             <button
               onClick={handleConfirm}
-              className="flex-1 py-3 rounded-lg bg-blue-500 text-white font-medium hover:bg-blue-600"
+              className={`flex-1 py-3 rounded-lg bg-blue-500 text-white font-medium hover:bg-blue-600 ${
+                isTutorial && tutorialStep === 1
+                  ? 'ring-2 ring-blue-300 ring-offset-2'
+                  : ''
+              }`}
             >
               Review &amp; Save
             </button>
@@ -445,6 +542,13 @@ export function AddSentencePage() {
       {/* Step 4: Confirm */}
       {step === 'confirm' && (
         <div className="space-y-4">
+          {isTutorial && tutorialStep === 1 && (
+            <TutorialBanner visibleAt={1}>
+              Everything looks good! Click <strong>Save Sentence</strong> to add it to your deck.
+              The other two example sentences will be added automatically.
+            </TutorialBanner>
+          )}
+
           <div className="p-4 border rounded-lg">
             <div className="text-2xl mb-1">{chinese}</div>
             <div className="text-gray-600 mb-3">{english}</div>
@@ -466,8 +570,8 @@ export function AddSentencePage() {
           </div>
 
           <p className="text-sm text-gray-500">
-            This will create meaning entries for each token and 2 review cards
-            (EN&rarr;ZH and ZH&rarr;EN).
+            This will create meaning entries for each token and 3 review cards
+            (EN&rarr;ZH, ZH&rarr;EN, and PY&rarr;EN+ZH).
           </p>
 
           <div className="flex gap-2">
@@ -480,8 +584,12 @@ export function AddSentencePage() {
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex-1 py-3 rounded-lg bg-green-500 text-white font-medium
-                hover:bg-green-600 disabled:opacity-50"
+              className={`flex-1 py-3 rounded-lg bg-green-500 text-white font-medium
+                hover:bg-green-600 disabled:opacity-50 ${
+                  isTutorial && tutorialStep === 1
+                    ? 'ring-2 ring-green-300 ring-offset-2'
+                    : ''
+                }`}
             >
               {saving ? 'Saving...' : 'Save Sentence'}
             </button>
