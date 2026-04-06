@@ -11,11 +11,12 @@ import {
   PieChart,
   Pie,
   Cell,
+  Legend,
   LineChart,
   Line,
 } from 'recharts';
 import { db } from '../db/db';
-import type { ReviewLog } from '../db/schema';
+import type { ReviewLog, Sentence } from '../db/schema';
 
 interface DayBucket {
   date: string;
@@ -114,6 +115,8 @@ export function StatsPage() {
   const navigate = useNavigate();
   const [logs, setLogs] = useState<ReviewLog[]>([]);
   const [cardStates, setCardStates] = useState<StateSummary[]>([]);
+  const [tagCounts, setTagCounts] = useState<{ name: string; count: number }[]>([]);
+  const [reviewsByTag, setReviewsByTag] = useState<{ name: string; reviews: number; again: number; hard: number; good: number; easy: number }[]>([]);
   const [days, setDays] = useState(30);
   const [totalReviews, setTotalReviews] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -158,6 +161,60 @@ export function StatsPage() {
       const counts = [0, 0, 0, 0];
       for (const c of cards) counts[c.state]++;
       setCardStates(stateNames.map((name, i) => ({ name, value: counts[i] })));
+
+      // Tag distribution + reviews by tag
+      const sentences = await db.sentences.toArray();
+      const sentenceTagMap = new Map<string, string[]>();
+      for (const s of sentences) {
+        sentenceTagMap.set(s.id, s.tags || []);
+      }
+
+      // Build card → sentenceId lookup
+      const cardSentenceMap = new Map<string, string>();
+      for (const c of cards) {
+        cardSentenceMap.set(c.id, c.sentenceId);
+      }
+
+      // Count reviews per tag
+      const reviewTagData = new Map<string, { reviews: number; again: number; hard: number; good: number; easy: number }>();
+      let untaggedReviews = { reviews: 0, again: 0, hard: 0, good: 0, easy: 0 };
+      for (const log of allLogs) {
+        const sentenceId = cardSentenceMap.get(log.cardId);
+        const tags = sentenceId ? sentenceTagMap.get(sentenceId) : undefined;
+        const ratingKey = log.rating === 1 ? 'again' : log.rating === 2 ? 'hard' : log.rating === 3 ? 'good' : 'easy';
+        if (!tags || tags.length === 0) {
+          untaggedReviews.reviews++;
+          untaggedReviews[ratingKey]++;
+        } else {
+          for (const t of tags) {
+            if (!reviewTagData.has(t)) reviewTagData.set(t, { reviews: 0, again: 0, hard: 0, good: 0, easy: 0 });
+            const entry = reviewTagData.get(t)!;
+            entry.reviews++;
+            entry[ratingKey]++;
+          }
+        }
+      }
+      const rByTag = [...reviewTagData.entries()]
+        .map(([name, data]) => ({ name, ...data }))
+        .sort((a, b) => b.reviews - a.reviews);
+      if (untaggedReviews.reviews > 0) rByTag.push({ name: 'untagged', ...untaggedReviews });
+      setReviewsByTag(rByTag);
+      const tagMap = new Map<string, number>();
+      let untagged = 0;
+      for (const s of sentences) {
+        if (!s.tags || s.tags.length === 0) {
+          untagged++;
+        } else {
+          for (const t of s.tags) {
+            tagMap.set(t, (tagMap.get(t) || 0) + 1);
+          }
+        }
+      }
+      const tagData = [...tagMap.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+      if (untagged > 0) tagData.push({ name: 'untagged', count: untagged });
+      setTagCounts(tagData);
     }
     load();
   }, []);
@@ -279,19 +336,16 @@ export function StatsPage() {
         <div className="surface rounded-lg p-6">
           <h2 className="text-lg font-medium mb-4">Rating Distribution</h2>
           {totalReviews > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie
                   data={ratingTotals}
                   cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
+                  cy="45%"
+                  innerRadius={40}
+                  outerRadius={70}
                   paddingAngle={2}
                   dataKey="value"
-                  label={({ name, percent }) =>
-                    `${name} ${(percent * 100).toFixed(0)}%`
-                  }
                 >
                   {ratingTotals.map((entry, i) => (
                     <Cell key={i} fill={entry.color} />
@@ -305,6 +359,13 @@ export function StatsPage() {
                     color: 'var(--text-primary)',
                   }}
                 />
+                <Legend
+                  formatter={(value) => {
+                    const item = ratingTotals.find((r) => r.name === value);
+                    const pct = totalReviews > 0 && item ? Math.round((item.value / totalReviews) * 100) : 0;
+                    return `${value} ${pct}%`;
+                  }}
+                />
               </PieChart>
             </ResponsiveContainer>
           ) : (
@@ -315,19 +376,16 @@ export function StatsPage() {
         <div className="surface rounded-lg p-6">
           <h2 className="text-lg font-medium mb-4">Card States</h2>
           {cardStates.some((s) => s.value > 0) ? (
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie
                   data={cardStates}
                   cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
+                  cy="45%"
+                  innerRadius={40}
+                  outerRadius={70}
                   paddingAngle={2}
                   dataKey="value"
-                  label={({ name, percent }) =>
-                    `${name} ${(percent * 100).toFixed(0)}%`
-                  }
                 >
                   {cardStates.map((_, i) => (
                     <Cell key={i} fill={colors.state[i]} />
@@ -341,6 +399,7 @@ export function StatsPage() {
                     color: 'var(--text-primary)',
                   }}
                 />
+                <Legend />
               </PieChart>
             </ResponsiveContainer>
           ) : (
@@ -348,6 +407,42 @@ export function StatsPage() {
           )}
         </div>
       </div>
+
+      {/* Sentences by tag */}
+      {tagCounts.length > 0 && (
+        <div className="surface rounded-lg p-6 mt-6">
+          <h2 className="text-lg font-medium mb-4">Sentences by Tag</h2>
+          <ResponsiveContainer width="100%" height={Math.max(150, tagCounts.length * 40)}>
+            <BarChart data={tagCounts} layout="vertical" margin={{ left: 10, right: 30 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+              <XAxis type="number" allowDecimals={false} tick={{ fill: colors.text }} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 13, fill: colors.text }} width={100} />
+              <Tooltip contentStyle={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)' }} />
+              <Bar dataKey="count" fill={colors.accent} radius={[0, 4, 4, 0]} name="Sentences" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Reviews by tag */}
+      {reviewsByTag.length > 0 && (
+        <div className="surface rounded-lg p-6 mt-6">
+          <h2 className="text-lg font-medium mb-4">Reviews by Tag</h2>
+          <ResponsiveContainer width="100%" height={Math.max(150, reviewsByTag.length * 40)}>
+            <BarChart data={reviewsByTag} layout="vertical" margin={{ left: 10, right: 30 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+              <XAxis type="number" allowDecimals={false} tick={{ fill: colors.text }} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 13, fill: colors.text }} width={100} />
+              <Tooltip contentStyle={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)' }} />
+              <Bar dataKey="again" stackId="a" fill={colors.rating.again} name="Again" />
+              <Bar dataKey="hard" stackId="a" fill={colors.rating.hard} name="Hard" />
+              <Bar dataKey="good" stackId="a" fill={colors.rating.good} name="Good" />
+              <Bar dataKey="easy" stackId="a" fill={colors.rating.easy} name="Easy" radius={[0, 4, 4, 0]} />
+              <Legend />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }

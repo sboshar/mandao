@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useReviewStore } from '../stores/reviewStore';
 import { getReviewQueue } from '../services/srs';
+import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
 import { DEFAULT_DECK_ID } from '../db/schema';
@@ -23,9 +24,16 @@ export function ReviewPage() {
   const effectiveDeckId = deckId || DEFAULT_DECK_ID;
   const [mode, setMode] = useState<ModeOption>('en-to-zh');
   const [started, setStarted] = useState(false);
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [showFilter, setShowFilter] = useState(false);
+
+  useEffect(() => {
+    getAllTags().then(setAllTags);
+  }, []);
 
   const startReview = async (selectedMode: ModeOption) => {
-    const queue = await getReviewQueue(effectiveDeckId, selectedMode);
+    const queue = await getReviewQueue(effectiveDeckId, selectedMode, filterTags.length > 0 ? filterTags : null);
     setQueue(queue);
     setStarted(true);
   };
@@ -50,6 +58,50 @@ export function ReviewPage() {
         </div>
 
         <div className="space-y-3">
+          {allTags.length > 0 && (
+            <div className="mb-4">
+              <button
+                onClick={() => setShowFilter(!showFilter)}
+                className="text-xs px-2.5 py-1 rounded-full transition-colors"
+                style={filterTags.length > 0
+                  ? { background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }
+                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                }
+              >
+                Filter by tag{filterTags.length > 0 ? ` (${filterTags.length})` : ''} {showFilter ? '\u25B2' : '\u25BC'}
+              </button>
+              {showFilter && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  <button
+                    onClick={() => setFilterTags([])}
+                    className="px-2.5 py-1 text-xs rounded-full transition-colors"
+                    style={filterTags.length === 0
+                      ? { background: 'var(--text-primary)', color: 'var(--bg-surface)' }
+                      : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                    }
+                  >
+                    All sentences
+                  </button>
+                  {allTags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => setFilterTags((prev) =>
+                        prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+                      )}
+                      className="px-2.5 py-1 text-xs rounded-full transition-colors"
+                      style={filterTags.includes(tag)
+                        ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
+                        : { background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-surface))', color: 'var(--accent)' }
+                      }
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
             Choose review mode:
           </p>

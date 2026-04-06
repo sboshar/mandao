@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { db } from '../db/db';
 import type { Sentence } from '../db/schema';
-import { getTokensForSentence } from '../services/ingestion';
+import { getTokensForSentence, updateSentenceTags, getAllTags } from '../services/ingestion';
 import { TokenSpan } from '../components/TokenSpan';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
 import { ClickableEnglish } from '../components/ClickableEnglish';
+import { TagInput } from '../components/TagInput';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TutorialBanner } from '../components/TutorialBanner';
@@ -22,12 +23,35 @@ export function BrowsePage() {
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [showFilter, setShowFilter] = useState(false);
 
   useEffect(() => {
     db.sentences.orderBy('createdAt').reverse().toArray().then(setSentences);
+    getAllTags().then(setAllTags);
   }, []);
 
   const huaSentence = sentences.find((s) => s.chinese === '她花了很多钱买花。');
+
+  const handleTagsChange = async (sentenceId: string, newTags: string[]) => {
+    await updateSentenceTags(sentenceId, newTags);
+    setSentences((prev) =>
+      prev.map((s) => (s.id === sentenceId ? { ...s, tags: newTags } : s))
+    );
+    getAllTags().then(setAllTags);
+  };
+
+  const toggleFilterTag = (tag: string) => {
+    setFilterTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const filteredSentences = filterTags.length > 0
+    ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
+    : sentences;
 
   const handleExpand = async (sentenceId: string) => {
     if (expandedId === sentenceId) {
@@ -64,6 +88,48 @@ export function BrowsePage() {
         <strong> shì</strong> pinyin to see all characters that share that sound.
       </TutorialBanner>
 
+      {allTags.length > 0 && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowFilter(!showFilter)}
+            className="text-xs px-2.5 py-1 rounded-full transition-colors"
+            style={filterTags.length > 0
+              ? { background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }
+              : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+            }
+          >
+            Filter by tag{filterTags.length > 0 ? ` (${filterTags.length})` : ''} {showFilter ? '\u25B2' : '\u25BC'}
+          </button>
+          {showFilter && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              <button
+                onClick={() => setFilterTags([])}
+                className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                style={filterTags.length === 0
+                  ? { background: 'var(--text-primary)', color: 'var(--bg-surface)' }
+                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                }
+              >
+                All
+              </button>
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => toggleFilterTag(tag)}
+                  className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                  style={filterTags.includes(tag)
+                    ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
+                    : { background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-surface))', color: 'var(--accent)' }
+                  }
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {sentences.length === 0 ? (
         <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
           No sentences yet.{' '}
@@ -77,7 +143,7 @@ export function BrowsePage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {sentences.map((s) => {
+          {filteredSentences.map((s) => {
             const isTutorialTarget = tutorialStep === 3 && huaSentence && s.id === huaSentence.id;
 
             return (
@@ -116,13 +182,33 @@ export function BrowsePage() {
                         />
                       ))}
                     </div>
-                    <button
-                      onClick={() => open({ type: 'sentence', id: s.id })}
-                      className="mt-3 text-sm transition-colors"
-                      style={{ color: 'var(--accent)' }}
-                    >
-                      View sentence card &rarr;
-                    </button>
+                    <div className="mt-3 flex items-center justify-between">
+                      <button
+                        onClick={() => open({ type: 'sentence', id: s.id })}
+                        className="text-sm transition-colors"
+                        style={{ color: 'var(--accent)' }}
+                      >
+                        View sentence card &rarr;
+                      </button>
+                      {editingTagsId !== s.id ? (
+                        <button
+                          onClick={() => setEditingTagsId(s.id)}
+                          className="text-xs transition-colors"
+                          style={{ color: 'var(--text-tertiary)' }}
+                        >
+                          {s.tags && s.tags.length > 0 ? 'edit tags' : '+ tag'}
+                        </button>
+                      ) : null}
+                    </div>
+                    {editingTagsId === s.id && (
+                      <div className="mt-2">
+                        <TagInput
+                          tags={s.tags || []}
+                          onChange={(newTags) => handleTagsChange(s.id, newTags)}
+                          compact
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -10,6 +10,7 @@ import { tokenizeSentence } from '../services/tokenizer';
 import { loadCedict, isLoaded as cedictLoaded } from '../lib/cedict';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { TutorialBanner } from '../components/TutorialBanner';
+import { TagInput } from '../components/TagInput';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TUTORIAL_SENTENCES } from '../data/tutorialSentences';
 
@@ -39,6 +40,7 @@ export function AddSentencePage() {
   const [dictLoading, setDictLoading] = useState(false);
   const [llmPasteValue, setLlmPasteValue] = useState('');
   const [promptCopied, setPromptCopied] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
 
   // Load dictionary on mount
   useEffect(() => {
@@ -198,6 +200,7 @@ export function AddSentencePage() {
           chinese: chinese.trim(),
           english: english.trim(),
           tokens: tokenInputs,
+          tags,
         });
       } catch (e: any) {
         // In tutorial mode, skip duplicate errors so re-running works
@@ -223,6 +226,7 @@ export function AddSentencePage() {
         setEnglish('');
         setSegments([]);
         setTokens([]);
+        setTags([]);
         setStep('input');
         navigate('/');
       }
@@ -275,6 +279,12 @@ export function AddSentencePage() {
               lang="zh"
               readOnly={isTutorial && tutorialStep === 1}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Tags <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <TagInput tags={tags} onChange={setTags} />
           </div>
           <button
             onClick={handleSegment}
@@ -580,6 +590,17 @@ export function AddSentencePage() {
               ))}
             </div>
           </div>
+
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {tags.map((tag) => (
+                <span key={tag} className="px-2 py-0.5 text-xs rounded-full"
+                  style={{ background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
 
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             This will create meaning entries for each token and 3 review cards

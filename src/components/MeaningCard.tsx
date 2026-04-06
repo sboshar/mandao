@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { db } from '../db/db';
-import type { Meaning, Sentence } from '../db/schema';
+import type { Meaning, Sentence, SrsCard } from '../db/schema';
 import {
   getSentencesForMeaning,
   getOtherMeanings,
@@ -178,10 +178,26 @@ function MeaningContent() {
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
+const SRS_STATE_LABELS = ['New', 'Learning', 'Review', 'Relearning'] as const;
+const SRS_STATE_COLORS = ['var(--state-new, #3b82f6)', 'var(--state-learning, #f97316)', 'var(--state-review, #22c55e)', 'var(--state-relearning, #a855f7)'];
+const SRS_MODE_LABELS: Record<string, string> = { 'en-to-zh': 'EN\u2192ZH', 'zh-to-en': 'ZH\u2192EN', 'py-to-en-zh': 'PY\u2192EN+ZH' };
+
+function formatDue(due: number): string {
+  const diff = due - Date.now();
+  if (diff <= 0) return 'now';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 function SentenceContent() {
   const { current } = useNavigationStore();
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
+  const [srsCards, setSrsCards] = useState<SrsCard[]>([]);
+  const [showSrs, setShowSrs] = useState(false);
 
   const entry = current();
 
@@ -197,8 +213,14 @@ function SentenceContent() {
       if (cancelled || !s) return;
       setSentence(s);
 
-      const toks = await getTokensForSentence(s.id);
-      if (!cancelled) setTokens(toks);
+      const [toks, cards] = await Promise.all([
+        getTokensForSentence(s.id),
+        db.srsCards.where('sentenceId').equals(s.id).toArray(),
+      ]);
+      if (!cancelled) {
+        setTokens(toks);
+        setSrsCards(cards);
+      }
     }
     load();
     return () => { cancelled = true; };
@@ -231,6 +253,45 @@ function SentenceContent() {
         </div>
         <AudioButton text={sentence.chinese} className="mt-2" />
       </div>
+
+      {srsCards.length > 0 && (
+        <div className="pt-3 text-center">
+          <button
+            onClick={() => setShowSrs(!showSrs)}
+            className="text-xs px-2.5 py-1 rounded-full transition-colors"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}
+          >
+            SRS status {showSrs ? '\u25B2' : '\u25BC'}
+          </button>
+          {showSrs && (
+            <div className="flex flex-wrap justify-center gap-2 mt-2">
+              {srsCards
+                .sort((a, b) => a.reviewMode.localeCompare(b.reviewMode))
+                .map((card) => (
+                <div
+                  key={card.id}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded text-xs"
+                  style={{ background: 'var(--bg-inset)' }}
+                >
+                  <span style={{ color: 'var(--text-secondary)' }}>{SRS_MODE_LABELS[card.reviewMode]}</span>
+                  <span
+                    className="px-1.5 py-0.5 rounded-full"
+                    style={{ background: SRS_STATE_COLORS[card.state], color: 'white', fontSize: '0.65rem' }}
+                  >
+                    {SRS_STATE_LABELS[card.state]}
+                  </span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>
+                    {card.state === 0 ? '' : `due ${formatDue(card.due)}`}
+                  </span>
+                  {card.reps > 0 && (
+                    <span style={{ color: 'var(--text-tertiary)' }}>· {card.reps} reps</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

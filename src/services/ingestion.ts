@@ -44,6 +44,7 @@ export interface SentenceInput {
   english: string;
   tokens: TokenInput[];
   source?: string;
+  tags?: string[];
 }
 
 // ============================================================
@@ -123,6 +124,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
         pinyinSandhi: sandhiPinyin,
         audioUrl: null,
         source: input.source || 'manual',
+        tags: input.tags || [],
         createdAt: Date.now(),
       };
 
@@ -371,6 +373,23 @@ export async function getTokensForSentence(
     }
   }
   return results;
+}
+
+/** Get all unique tags across all sentences */
+export async function getAllTags(): Promise<string[]> {
+  const sentences = await db.sentences.toArray();
+  const tagSet = new Set<string>();
+  for (const s of sentences) {
+    if (s.tags) {
+      for (const t of s.tags) tagSet.add(t);
+    }
+  }
+  return [...tagSet].sort();
+}
+
+/** Update tags on a sentence */
+export async function updateSentenceTags(sentenceId: string, tags: string[]): Promise<void> {
+  await db.sentences.update(sentenceId, { tags });
 }
 
 /** Get all meanings that share the same pinyin (for pinyin card) */
