@@ -4,7 +4,6 @@ import { db } from '../db/db';
 import { lookupByEnglish, type DictEntry } from '../lib/cedict';
 import type { Meaning } from '../db/schema';
 
-/** Compute stemmed word forms for English lookup */
 function getStemmedForms(word: string): Set<string> {
   const forms = new Set<string>([word]);
   if (word.endsWith('ies')) forms.add(word.slice(0, -3) + 'y');
@@ -23,7 +22,6 @@ function getStemmedForms(word: string): Set<string> {
   if (word.endsWith('est')) forms.add(word.slice(0, -3));
   if (word.endsWith('est')) forms.add(word.slice(0, -2));
   forms.add('to ' + word);
-  // Also add "to X" for each stemmed form
   for (const f of [...forms]) {
     if (!f.startsWith('to ')) forms.add('to ' + f);
   }
@@ -49,7 +47,6 @@ export function EnglishCard() {
 
     async function load() {
       const all = await db.meanings.toArray();
-      // Build a single regex that matches any form as a whole word
       const pattern = [...forms].map(f => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
       const re = new RegExp(`\\b(?:${pattern})\\b`, 'i');
       const results = all.filter(
@@ -65,11 +62,9 @@ export function EnglishCard() {
       if (cancelled) return;
       setMeanings(results);
 
-      // If no personal meanings, fall back to CEDICT
       if (results.length === 0) {
         const headwordsInDb = new Set(all.map((m) => m.headword));
         const dictResults = lookupByEnglish([...forms]);
-        // Deduplicate by simplified form and exclude entries already in personal DB
         const seen = new Set<string>();
         const unique = dictResults.filter((d) => {
           if (seen.has(d.simplified) || headwordsInDb.has(d.simplified)) return false;
@@ -95,15 +90,14 @@ export function EnglishCard() {
     <>
       <div className="p-6 text-center">
         <div className="text-3xl font-medium">{word}</div>
-        <div className="text-sm text-gray-400 mt-1">
+        <div className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
           {totalCount} Chinese meaning{totalCount !== 1 ? 's' : ''}
         </div>
       </div>
 
-      {/* Personal database results */}
       {meanings.length > 0 && (
         <div className="px-6 pb-4">
-          <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-2">
+          <h3 className="text-sm font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
             Your Vocabulary
           </h3>
           <div className="space-y-2">
@@ -111,46 +105,46 @@ export function EnglishCard() {
               <button
                 key={m.id}
                 onClick={() => push({ type: 'meaning', id: m.id })}
-                className="w-full text-left p-3 rounded-lg border hover:bg-blue-50
-                  transition-colors flex items-center gap-3"
+                className="w-full text-left p-3 rounded-lg transition-colors surface-hover
+                  flex items-center gap-3"
+                style={{ border: '1px solid var(--border)' }}
               >
                 <span className="text-3xl">{m.headword}</span>
                 <div className="flex-1">
-                  <div className="text-sm text-gray-500">{m.pinyin}</div>
+                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{m.pinyin}</div>
                   <div className="text-sm">
                     {m.englishShort}
                     {m.partOfSpeech && (
-                      <span className="text-xs text-gray-400 ml-1">({m.partOfSpeech})</span>
+                      <span className="text-xs ml-1" style={{ color: 'var(--text-tertiary)' }}>({m.partOfSpeech})</span>
                     )}
                   </div>
                   {m.englishFull !== m.englishShort && (
-                    <div className="text-xs text-gray-400">{m.englishFull}</div>
+                    <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{m.englishFull}</div>
                   )}
                 </div>
-                <span className="text-xs text-gray-300">{m.type}</span>
+                <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{m.type}</span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* CEDICT fallback results */}
       {dictEntries.length > 0 && (
         <div className="px-6 pb-6">
-          <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-2">
+          <h3 className="text-sm font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
             Dictionary (CEDICT)
           </h3>
           <div className="space-y-2">
             {dictEntries.map((d, i) => (
               <div
                 key={i}
-                className="w-full text-left p-3 rounded-lg border border-dashed
-                  border-gray-300 flex items-center gap-3"
+                className="w-full text-left p-3 rounded-lg flex items-center gap-3"
+                style={{ border: '1px dashed var(--border)' }}
               >
                 <span className="text-3xl">{d.simplified}</span>
                 <div className="flex-1">
-                  <div className="text-sm text-gray-500">{d.pinyin}</div>
-                  <div className="text-sm text-gray-600">
+                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{d.pinyin}</div>
+                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                     {d.english.replace(/\//g, ' / ')}
                   </div>
                 </div>
@@ -161,7 +155,7 @@ export function EnglishCard() {
       )}
 
       {totalCount === 0 && (
-        <div className="px-6 pb-6 text-center text-gray-400">
+        <div className="px-6 pb-6 text-center" style={{ color: 'var(--text-tertiary)' }}>
           No Chinese meanings found for "{word}"
         </div>
       )}

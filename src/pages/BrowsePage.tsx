@@ -27,7 +27,6 @@ export function BrowsePage() {
     db.sentences.orderBy('createdAt').reverse().toArray().then(setSentences);
   }, []);
 
-  // Find the 花 sentence for tutorial highlighting
   const huaSentence = sentences.find((s) => s.chinese === '她花了很多钱买花。');
 
   const handleExpand = async (sentenceId: string) => {
@@ -47,7 +46,8 @@ export function BrowsePage() {
         <h1 className="text-2xl font-bold">Browse Sentences</h1>
         <button
           onClick={() => navigate('/')}
-          className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm"
+          className="px-3 py-1 rounded text-sm transition-colors"
+          style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
         >
           &larr; Back
         </button>
@@ -55,23 +55,22 @@ export function BrowsePage() {
 
       <TutorialBanner visibleAt={3}>
         Here are your sentences. Click on <strong>"她花了很多钱买花。"</strong> to expand it
-        and see the word-by-word breakdown. This is the sentence where 花 has two different
-        meanings!
+        and see the word-by-word breakdown.
       </TutorialBanner>
 
       <TutorialBanner visibleAt={4}>
-        Now <strong>click on one of the 花 characters</strong> (the large Chinese text) to
-        open the meaning explorer. You'll see that 花 has two separate meaning entries &mdash;
-        "to spend" and "flower." You can also click on the <strong>shì</strong> pinyin to see
-        all characters that share that sound.
+        Now <strong>click on one of the 花 characters</strong> to open the meaning explorer.
+        You'll see that 花 has two separate meaning entries. You can also click on the
+        <strong> shì</strong> pinyin to see all characters that share that sound.
       </TutorialBanner>
 
       {sentences.length === 0 ? (
-        <div className="text-center text-gray-400 py-12">
+        <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
           No sentences yet.{' '}
           <button
             onClick={() => navigate('/add')}
-            className="text-blue-500 underline"
+            style={{ color: 'var(--accent)' }}
+            className="underline"
           >
             Add one
           </button>
@@ -84,23 +83,22 @@ export function BrowsePage() {
             return (
               <div
                 key={s.id}
-                className={`bg-white rounded-lg shadow ${
-                  isTutorialTarget ? 'ring-2 ring-blue-300 ring-offset-2' : ''
-                }`}
+                className={`surface rounded-lg ${isTutorialTarget ? 'ring-2 ring-offset-2' : ''}`}
+                style={isTutorialTarget ? { '--tw-ring-color': 'var(--accent)' } as React.CSSProperties : undefined}
               >
                 <button
                   onClick={() => handleExpand(s.id)}
-                  className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
+                  className="w-full text-left p-4 surface-hover transition-colors rounded-lg"
                 >
                   <div className="text-lg">{s.chinese}</div>
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                     <ClickableEnglish text={s.english} />
                   </div>
                 </button>
 
                 {expandedId === s.id && (
-                  <div className="px-4 pb-4 pt-0 border-t">
-                    <div className="text-sm text-gray-500 mb-2">
+                  <div className="px-4 pb-4 pt-0" style={{ borderTop: '1px solid var(--border)' }}>
+                    <div className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
                       <PinyinDisplay
                         pinyin={s.pinyinSandhi}
                         basePinyin={s.pinyin}
@@ -120,7 +118,8 @@ export function BrowsePage() {
                     </div>
                     <button
                       onClick={() => open({ type: 'sentence', id: s.id })}
-                      className="mt-3 text-sm text-blue-500 hover:text-blue-700 transition-colors"
+                      className="mt-3 text-sm transition-colors"
+                      style={{ color: 'var(--accent)' }}
                     >
                       View sentence card &rarr;
                     </button>

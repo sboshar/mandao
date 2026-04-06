@@ -43,7 +43,7 @@ export function ClickableChar({ char, meaningId, className = '' }: ClickableChar
   return (
     <span
       onClick={handleClick}
-      className={`cursor-pointer hover:bg-blue-100 rounded transition-colors ${className}`}
+      className={`cursor-pointer rounded transition-colors surface-hover ${className}`}
       title={`View meaning of ${char}`}
     >
       {char}

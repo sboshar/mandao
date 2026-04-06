@@ -31,24 +31,35 @@ interface StateSummary {
   value: number;
 }
 
-const RATING_COLORS = {
-  again: '#ef4444',
-  hard: '#f97316',
-  good: '#22c55e',
-  easy: '#3b82f6',
-};
-
-const STATE_COLORS = ['#3b82f6', '#f97316', '#22c55e', '#a855f7'];
+function getChartColors() {
+  const s = getComputedStyle(document.documentElement);
+  return {
+    rating: {
+      again: s.getPropertyValue('--rating-again').trim() || '#ef4444',
+      hard: s.getPropertyValue('--rating-hard').trim() || '#f97316',
+      good: s.getPropertyValue('--rating-good').trim() || '#22c55e',
+      easy: s.getPropertyValue('--rating-easy').trim() || '#3b82f6',
+    },
+    state: [
+      s.getPropertyValue('--state-new').trim() || '#3b82f6',
+      s.getPropertyValue('--state-learning').trim() || '#f97316',
+      s.getPropertyValue('--state-review').trim() || '#22c55e',
+      s.getPropertyValue('--state-relearning').trim() || '#a855f7',
+    ],
+    accent: s.getPropertyValue('--accent').trim() || '#6366f1',
+    grid: s.getPropertyValue('--border').trim() || '#e5e5e5',
+    text: s.getPropertyValue('--text-secondary').trim() || '#525252',
+  };
+}
 
 function bucketByDay(logs: ReviewLog[], days: number): DayBucket[] {
   const now = new Date();
   const buckets: Map<string, DayBucket> = new Map();
 
-  // Pre-fill all days so the chart has no gaps
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(5, 10); // MM-DD
+    const key = d.toISOString().slice(5, 10);
     buckets.set(key, { date: key, count: 0, again: 0, hard: 0, good: 0, easy: 0 });
   }
 
@@ -107,6 +118,14 @@ export function StatsPage() {
   const [totalReviews, setTotalReviews] = useState(0);
   const [streak, setStreak] = useState(0);
   const [todayCount, setTodayCount] = useState(0);
+  const [colors, setColors] = useState(getChartColors);
+
+  useEffect(() => {
+    // Re-read colors when theme changes
+    const observer = new MutationObserver(() => setColors(getChartColors()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -114,19 +133,16 @@ export function StatsPage() {
       setLogs(allLogs);
       setTotalReviews(allLogs.length);
 
-      // Today's count
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       setTodayCount(allLogs.filter((l) => l.reviewedAt >= todayStart.getTime()).length);
 
-      // Streak: consecutive days with at least 1 review
       const daySet = new Set<string>();
       for (const l of allLogs) {
         daySet.add(new Date(l.reviewedAt).toISOString().slice(0, 10));
       }
       let s = 0;
       const d = new Date();
-      // Check if today has reviews; if not, start checking from yesterday
       const todayKey = d.toISOString().slice(0, 10);
       if (!daySet.has(todayKey)) {
         d.setDate(d.getDate() - 1);
@@ -137,7 +153,6 @@ export function StatsPage() {
       }
       setStreak(s);
 
-      // Card state distribution
       const cards = await db.srsCards.toArray();
       const stateNames = ['New', 'Learning', 'Review', 'Relearning'];
       const counts = [0, 0, 0, 0];
@@ -150,21 +165,20 @@ export function StatsPage() {
   const daily = bucketByDay(logs, days);
   const cumulative = cumulativeReviews(logs, days);
 
-  // Rating distribution totals
   const ratingTotals = [
-    { name: 'Again', value: logs.filter((l) => l.rating === 1).length, color: RATING_COLORS.again },
-    { name: 'Hard', value: logs.filter((l) => l.rating === 2).length, color: RATING_COLORS.hard },
-    { name: 'Good', value: logs.filter((l) => l.rating === 3).length, color: RATING_COLORS.good },
-    { name: 'Easy', value: logs.filter((l) => l.rating === 4).length, color: RATING_COLORS.easy },
+    { name: 'Again', value: logs.filter((l) => l.rating === 1).length, color: colors.rating.again },
+    { name: 'Hard', value: logs.filter((l) => l.rating === 2).length, color: colors.rating.hard },
+    { name: 'Good', value: logs.filter((l) => l.rating === 3).length, color: colors.rating.good },
+    { name: 'Easy', value: logs.filter((l) => l.rating === 4).length, color: colors.rating.easy },
   ];
 
   return (
     <div className="max-w-4xl mx-auto p-6">
-      {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <button
           onClick={() => navigate('/')}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
+          className="transition-colors"
+          style={{ color: 'var(--text-tertiary)' }}
         >
           &larr; Back
         </button>
@@ -173,42 +187,36 @@ export function StatsPage() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-4 mb-8">
-        <div className="p-4 bg-white rounded-lg shadow text-center">
-          <div className="text-3xl font-bold">{totalReviews}</div>
-          <div className="text-sm text-gray-500">Total Reviews</div>
-        </div>
-        <div className="p-4 bg-white rounded-lg shadow text-center">
-          <div className="text-3xl font-bold">{todayCount}</div>
-          <div className="text-sm text-gray-500">Today</div>
-        </div>
-        <div className="p-4 bg-white rounded-lg shadow text-center">
-          <div className="text-3xl font-bold">{streak}</div>
-          <div className="text-sm text-gray-500">Day Streak</div>
-        </div>
-        <div className="p-4 bg-white rounded-lg shadow text-center">
-          <div className="text-3xl font-bold">
-            {totalReviews > 0
-              ? Math.round(
-                  (logs.filter((l) => l.rating >= 3).length / totalReviews) * 100
-                )
-              : 0}
-            %
+        {[
+          { value: totalReviews, label: 'Total Reviews' },
+          { value: todayCount, label: 'Today' },
+          { value: streak, label: 'Day Streak' },
+          {
+            value: totalReviews > 0
+              ? Math.round((logs.filter((l) => l.rating >= 3).length / totalReviews) * 100) + '%'
+              : '0%',
+            label: 'Pass Rate',
+          },
+        ].map((s) => (
+          <div key={s.label} className="surface rounded-lg p-4 text-center">
+            <div className="text-3xl font-bold">{s.value}</div>
+            <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{s.label}</div>
           </div>
-          <div className="text-sm text-gray-500">Pass Rate</div>
-        </div>
+        ))}
       </div>
 
-      {/* Time range selector */}
+      {/* Time range */}
       <div className="flex gap-2 mb-6">
         {[7, 14, 30, 90].map((d) => (
           <button
             key={d}
             onClick={() => setDays(d)}
-            className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+            className="px-3 py-1 rounded-lg text-sm font-medium transition-colors"
+            style={
               days === d
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
+                ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
+                : { background: 'var(--bg-inset)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+            }
           >
             {d}d
           </button>
@@ -216,35 +224,49 @@ export function StatsPage() {
       </div>
 
       {/* Reviews per day */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="surface rounded-lg p-6 mb-6">
         <h2 className="text-lg font-medium mb-4">Reviews per Day</h2>
         <ResponsiveContainer width="100%" height={250}>
           <BarChart data={daily}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-            <YAxis allowDecimals={false} />
-            <Tooltip />
-            <Bar dataKey="again" stackId="a" fill={RATING_COLORS.again} name="Again" />
-            <Bar dataKey="hard" stackId="a" fill={RATING_COLORS.hard} name="Hard" />
-            <Bar dataKey="good" stackId="a" fill={RATING_COLORS.good} name="Good" />
-            <Bar dataKey="easy" stackId="a" fill={RATING_COLORS.easy} name="Easy" />
+            <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+            <XAxis dataKey="date" tick={{ fontSize: 12, fill: colors.text }} />
+            <YAxis allowDecimals={false} tick={{ fill: colors.text }} />
+            <Tooltip
+              contentStyle={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+              }}
+            />
+            <Bar dataKey="again" stackId="a" fill={colors.rating.again} name="Again" />
+            <Bar dataKey="hard" stackId="a" fill={colors.rating.hard} name="Hard" />
+            <Bar dataKey="good" stackId="a" fill={colors.rating.good} name="Good" />
+            <Bar dataKey="easy" stackId="a" fill={colors.rating.easy} name="Easy" />
           </BarChart>
         </ResponsiveContainer>
       </div>
 
       {/* Cumulative reviews */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="surface rounded-lg p-6 mb-6">
         <h2 className="text-lg font-medium mb-4">Cumulative Reviews</h2>
         <ResponsiveContainer width="100%" height={250}>
           <LineChart data={cumulative}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-            <YAxis allowDecimals={false} />
-            <Tooltip />
+            <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+            <XAxis dataKey="date" tick={{ fontSize: 12, fill: colors.text }} />
+            <YAxis allowDecimals={false} tick={{ fill: colors.text }} />
+            <Tooltip
+              contentStyle={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+              }}
+            />
             <Line
               type="monotone"
               dataKey="total"
-              stroke="#6366f1"
+              stroke={colors.accent}
               strokeWidth={2}
               dot={false}
             />
@@ -252,10 +274,9 @@ export function StatsPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* Bottom row: rating distribution + card states */}
+      {/* Bottom row */}
       <div className="grid grid-cols-2 gap-6">
-        {/* Rating distribution */}
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="surface rounded-lg p-6">
           <h2 className="text-lg font-medium mb-4">Rating Distribution</h2>
           {totalReviews > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
@@ -276,16 +297,22 @@ export function StatsPage() {
                     <Cell key={i} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip
+                  contentStyle={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    color: 'var(--text-primary)',
+                  }}
+                />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <div className="text-gray-400 text-center py-12">No reviews yet</div>
+            <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>No reviews yet</div>
           )}
         </div>
 
-        {/* Card state breakdown */}
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="surface rounded-lg p-6">
           <h2 className="text-lg font-medium mb-4">Card States</h2>
           {cardStates.some((s) => s.value > 0) ? (
             <ResponsiveContainer width="100%" height={200}>
@@ -303,14 +330,21 @@ export function StatsPage() {
                   }
                 >
                   {cardStates.map((_, i) => (
-                    <Cell key={i} fill={STATE_COLORS[i]} />
+                    <Cell key={i} fill={colors.state[i]} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip
+                  contentStyle={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    color: 'var(--text-primary)',
+                  }}
+                />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <div className="text-gray-400 text-center py-12">No cards yet</div>
+            <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>No cards yet</div>
           )}
         </div>
       </div>

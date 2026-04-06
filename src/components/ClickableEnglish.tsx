@@ -38,7 +38,7 @@ export function ClickableEnglish({ text, className = '' }: ClickableEnglishProps
           <span
             key={i}
             onClick={() => handleClick(part)}
-            className="cursor-pointer hover:bg-yellow-100 rounded transition-colors"
+            className="cursor-pointer rounded transition-colors surface-hover"
             title={`View Chinese meanings of "${part.toLowerCase()}"`}
           >
             {part}

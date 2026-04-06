@@ -42,9 +42,10 @@ export function PinyinDisplay({
             key={i}
             className={`${TONE_CLASSES[tone]}${
               isSandhiChange
-                ? ' underline decoration-orange-400 decoration-2 underline-offset-2 font-semibold'
+                ? ' underline decoration-2 underline-offset-2 font-semibold'
                 : ''
             }`}
+            style={isSandhiChange ? { textDecorationColor: 'var(--sandhi-underline)' } : undefined}
             title={
               isSandhiChange
                 ? `Base: ${baseSyllables![i]} → Sandhi: ${syllable}`
