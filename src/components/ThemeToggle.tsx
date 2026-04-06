@@ -3,22 +3,20 @@ import { useThemeStore } from '../stores/themeStore';
 export function ThemeToggle() {
   const { theme, setTheme } = useThemeStore();
 
-  const next = () => {
-    const cycle = { light: 'dark' as const, dark: 'system' as const, system: 'light' as const };
-    setTheme(cycle[theme]);
+  const toggle = () => {
+    setTheme(theme === 'light' ? 'dark' : 'light');
   };
 
-  const label = { light: 'Light', dark: 'Dark', system: 'Auto' }[theme];
-  const icon = { light: '\u2600', dark: '\u263E', system: '\u25D1' }[theme];
+  const icon = theme === 'dark' ? '\u263E' : '\u2600';
 
   return (
     <button
-      onClick={next}
+      onClick={toggle}
       className="px-2.5 py-1 rounded-md text-xs transition-colors"
       style={{ color: 'var(--text-tertiary)' }}
-      title={`Theme: ${label}`}
+      title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
     >
-      {icon} {label}
+      {icon}
     </button>
   );
 }
