@@ -193,11 +193,18 @@ export function AddSentencePage() {
         characters: t.characters,
       }));
 
-      await ingestSentence({
-        chinese: chinese.trim(),
-        english: english.trim(),
-        tokens: tokenInputs,
-      });
+      try {
+        await ingestSentence({
+          chinese: chinese.trim(),
+          english: english.trim(),
+          tokens: tokenInputs,
+        });
+      } catch (e: any) {
+        // In tutorial mode, skip duplicate errors so re-running works
+        if (!(isTutorial && e.message?.includes('already exists'))) {
+          throw e;
+        }
+      }
 
       // Tutorial mode: seed remaining sentences in the background, then advance
       if (isTutorial && tutorialStep === 1) {
