@@ -40,6 +40,15 @@ export function DashboardPage() {
         to see them and explore how the app breaks down each sentence.
       </TutorialBanner>
 
+      <TutorialBanner visibleAt={5}>
+        You've seen how Mandao works! Every sentence you add gets broken down
+        into clickable characters and meanings, with tone sandhi tracked automatically.
+        <div className="mt-2">
+          Click <strong>+ Add Sentence</strong> to add your own, or <strong>Study</strong> to
+          start reviewing the example sentences with spaced repetition.
+        </div>
+      </TutorialBanner>
+
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-8">
         <div className="p-4 bg-white rounded-lg shadow text-center">

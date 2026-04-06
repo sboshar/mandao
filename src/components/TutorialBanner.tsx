@@ -29,12 +29,12 @@ export function TutorialBanner({ visibleAt, children }: TutorialBannerProps) {
               Skip tutorial
             </button>
           )}
-          {visibleAt === 4 && (
+          {(visibleAt === 4 || visibleAt === 5) && (
             <button
               onClick={advance}
               className="text-xs px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600"
             >
-              Got it!
+              {visibleAt === 4 ? 'Got it!' : 'Finish tutorial'}
             </button>
           )}
         </div>
