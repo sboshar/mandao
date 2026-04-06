@@ -8,6 +8,8 @@ interface TokenSpanProps {
   pinyin?: string;
   /** Base pinyin with tone numbers */
   pinyinNumeric?: string;
+  /** Tone-sandhi pinyin for this token in context (diacritics) */
+  pinyinSandhi?: string;
   showPinyin?: boolean;
 }
 
@@ -16,12 +18,14 @@ export function TokenSpan({
   surfaceForm,
   pinyin,
   pinyinNumeric,
+  pinyinSandhi,
   showPinyin = false,
 }: TokenSpanProps) {
   const { open, push, isOpen } = useNavigationStore();
 
   const pinyinSyllables = pinyin?.split(/\s+/) || [];
   const pinyinNumericSyllables = pinyinNumeric?.split(/\s+/) || [];
+  const hasSandhi = pinyinSandhi && pinyin && pinyinSandhi !== pinyin;
 
   const handleWordClick = () => {
     if (isOpen) {
@@ -50,6 +54,16 @@ export function TokenSpan({
               pinyinNumeric={pinyinNumericSyllables[i] || ''}
             />
           ))}
+        </span>
+      )}
+
+      {showPinyin && hasSandhi && (
+        <span
+          className="text-xs font-medium"
+          style={{ color: 'var(--sandhi-underline)' }}
+          title={`Spoken: ${pinyinSandhi} (dictionary: ${pinyin})`}
+        >
+          {pinyinSandhi}
         </span>
       )}
     </span>
