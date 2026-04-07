@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { deleteTutorialSentences } from '../services/ingestion';
 
 /**
  * Tutorial steps:
@@ -35,10 +36,12 @@ export const useTutorialStore = create<TutorialState>((set) => ({
     set((s) => {
       const next = Math.min(s.step + 1, MAX_STEP) as TutorialStep;
       localStorage.setItem(STORAGE_KEY, String(next));
+      if (s.step === 6) deleteTutorialSentences();
       return { step: next };
     }),
   skipAll: () => {
     localStorage.setItem(STORAGE_KEY, String(MAX_STEP));
+    deleteTutorialSentences();
     set({ step: MAX_STEP as TutorialStep });
   },
 }));
