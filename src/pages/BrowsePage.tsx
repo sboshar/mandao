@@ -178,6 +178,7 @@ export function BrowsePage() {
                           surfaceForm={t.surfaceForm}
                           pinyin={t.meaning.pinyin}
                           pinyinNumeric={t.meaning.pinyinNumeric}
+
                           showPinyin
                         />
                       ))}

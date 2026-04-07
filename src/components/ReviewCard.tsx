@@ -110,6 +110,7 @@ export function ReviewCard() {
                       surfaceForm={t.surfaceForm}
                       pinyin={t.meaning.pinyin}
                       pinyinNumeric={t.meaning.pinyinNumeric}
+
                       showPinyin={!isPyToEnZh}
                     />
                   ))}
@@ -176,6 +177,7 @@ export function ReviewCard() {
                       surfaceForm={t.surfaceForm}
                       pinyin={t.meaning.pinyin}
                       pinyinNumeric={t.meaning.pinyinNumeric}
+
                       showPinyin
                     />
                   ))}

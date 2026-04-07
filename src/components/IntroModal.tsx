@@ -118,7 +118,7 @@ export function IntroModal({ onDone }: { onDone: () => void }) {
             <div className="mb-4 p-3 rounded-lg text-sm space-y-1 inset" style={{ color: 'var(--text-secondary)' }}>
               <div><strong>Top:</strong> Chinese characters</div>
               <div><strong>Middle:</strong> Dictionary pinyin (base tones)</div>
-              <div><strong>Bottom (orange):</strong> Spoken pinyin where tone sandhi changes the pronunciation</div>
+              <div><strong>Bottom:</strong> Spoken pinyin &mdash; syllables that change due to tone sandhi appear in the text color (not tone-colored) so you can spot them at a glance</div>
             </div>
 
             <div className="space-y-4">
@@ -134,7 +134,7 @@ export function IntroModal({ onDone }: { onDone: () => void }) {
                 <ExampleSentenceDisplay sentenceIndex={1} />
                 <div className="text-xs rounded p-2 mt-1 inset" style={{ color: 'var(--text-secondary)' }}>
                   <strong>Tone sandhi:</strong> 你好 is nǐ hǎo (3+3) in the dictionary but
-                  spoken as ní hǎo (2+3). The orange row shows what you actually say.
+                  spoken as ní hǎo (2+3). In the sandhi line, ní loses its tone color to show the change.
                 </div>
               </div>
 
