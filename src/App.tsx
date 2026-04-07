@@ -30,6 +30,9 @@ function App() {
     if (user && !ready) {
       Promise.all([ensureDefaults(), loadCedict()]).then(() => setReady(true));
     }
+    if (!user && ready) {
+      setReady(false);
+    }
   }, [user, ready]);
 
   // Auth loading

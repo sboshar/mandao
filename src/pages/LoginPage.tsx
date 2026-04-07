@@ -68,7 +68,7 @@ export function LoginPage() {
             placeholder="Email"
             required
             className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)' }}
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
           />
           <input
             type="password"
@@ -78,13 +78,13 @@ export function LoginPage() {
             required
             minLength={6}
             className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)' }}
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
           />
           <button
             type="submit"
             disabled={loading}
             className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-            style={{ background: 'var(--accent)', color: '#fff' }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
             {loading ? '...' : isSignUp ? 'Sign up' : 'Sign in'}
           </button>
@@ -99,7 +99,7 @@ export function LoginPage() {
         <button
           onClick={handleGoogle}
           className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-strong)', color: 'var(--text-primary)' }}
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
         >
           Continue with Google
         </button>

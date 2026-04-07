@@ -13,16 +13,21 @@ interface AuthState {
   signOut: () => Promise<void>;
 }
 
+let initialized = false;
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   session: null,
   loading: true,
 
   initialize: async () => {
+    if (initialized) return;
+    initialized = true;
+
     const { data: { session } } = await supabase.auth.getSession();
     set({ user: session?.user ?? null, session, loading: false });
 
-    supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription: _ } } = supabase.auth.onAuthStateChange((_event, session) => {
       set({ user: session?.user ?? null, session });
     });
   },

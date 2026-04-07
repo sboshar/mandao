@@ -173,7 +173,7 @@ create or replace function public.handle_new_user()
 returns trigger as $$
 begin
   insert into public.decks (id, user_id, name, description, new_cards_per_day, reviews_per_day, created_at)
-  values ('default', new.id, 'Default', 'Default deck', 20, 200, extract(epoch from now()) * 1000);
+  values ('default-' || new.id, new.id, 'Default', 'Default deck', 20, 200, extract(epoch from now()) * 1000);
   return new;
 end;
 $$ language plpgsql security definer;
