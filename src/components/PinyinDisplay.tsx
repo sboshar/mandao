@@ -41,7 +41,8 @@ export function PinyinDisplay({
         return (
           <span
             key={i}
-            className={`${TONE_CLASSES[tone]}${isSandhiChange ? ' font-bold' : ''}`}
+            className={isSandhiChange ? '' : TONE_CLASSES[tone]}
+            style={isSandhiChange ? { color: 'var(--text-primary)' } : undefined}
             title={
               isSandhiChange
                 ? `Dictionary: ${baseSyllables![i]} → Spoken: ${syllable}`
