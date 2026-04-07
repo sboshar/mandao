@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
+import { db } from '../db/db';
 import type { User } from '@supabase/supabase-js';
+
+const GENERIC_AUTH_ERROR = 'Something went wrong. Please try again.';
 
 interface AuthState {
   user: User | null;
@@ -41,25 +44,31 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   signInWithEmail: async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return error?.message ?? null;
+    if (!error) return null;
+    return 'Invalid email or password';
   },
 
   signUpWithEmail: async (email, password) => {
     const { error } = await supabase.auth.signUp({ email, password });
-    return error?.message ?? null;
+    if (!error) return null;
+    if (error.message?.toLowerCase().includes('password'))
+      return 'Password must be at least 8 characters';
+    return GENERIC_AUTH_ERROR;
   },
 
   resetPassword: async (email) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-    return error?.message ?? null;
+    // Always return null to avoid leaking whether the email exists
+    if (error) console.error('resetPassword error:', error.message);
+    return null;
   },
 
   updatePassword: async (password) => {
     const { error } = await supabase.auth.updateUser({ password });
-    if (!error) set({ needsPasswordReset: false });
-    return error?.message ?? null;
+    if (!error) { set({ needsPasswordReset: false }); return null; }
+    return GENERIC_AUTH_ERROR;
   },
 
   signInWithGoogle: async () => {
@@ -67,7 +76,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       provider: 'google',
       options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
-    return error?.message ?? null;
+    if (!error) return null;
+    return GENERIC_AUTH_ERROR;
   },
 
   signOut: async () => {
@@ -75,6 +85,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     authSubscription = null;
     initialized = false;
     await supabase.auth.signOut();
+    await db.delete();
     set({ user: null });
   },
 }));

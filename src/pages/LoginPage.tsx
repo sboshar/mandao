@@ -3,11 +3,6 @@ import { useAuthStore } from '../stores/authStore';
 
 const THROTTLE_MS = 2000;
 
-function sanitizeAuthError(err: string, isSignUp: boolean): string {
-  if (isSignUp) return err;
-  return 'Invalid email or password';
-}
-
 export function LoginPage() {
   const { signInWithEmail, signUpWithEmail, signInWithGoogle, resetPassword } = useAuthStore();
   const [email, setEmail] = useState('');
@@ -32,7 +27,7 @@ export function LoginPage() {
     if (isForgot) {
       const err = await resetPassword(email);
       if (err) {
-        setError(sanitizeAuthError(err, false));
+        setError(err);
       } else {
         setCheckEmail(true);
       }
@@ -45,7 +40,7 @@ export function LoginPage() {
       : await signInWithEmail(email, password);
 
     if (err) {
-      setError(sanitizeAuthError(err, isSignUp));
+      setError(err);
     } else if (isSignUp) {
       setCheckEmail(true);
     }
@@ -111,7 +106,7 @@ export function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
               required
-              minLength={6}
+              minLength={8}
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             />
