@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
 import { getAllTags } from '../services/ingestion';
 import { speakChinese } from '../services/audio';
@@ -57,7 +57,8 @@ export function SpeakPage() {
     const parts: string[] = [];
     for (const char of chars) {
       // Try app's meanings DB first
-      const meaning = await db.meanings.where('headword').equals(char).first();
+      const meanings = await repo.getMeaningsByHeadword(char);
+      const meaning = meanings[0] ?? null;
       if (meaning) {
         parts.push(meaning.pinyin);
         continue;
@@ -88,11 +89,11 @@ export function SpeakPage() {
   const startPractice = async () => {
     let sents: Sentence[];
     if (filterTags.length > 0) {
-      const raw = await db.sentences.where('tags').anyOf(filterTags).toArray();
+      const raw = await repo.getSentencesByTags(filterTags);
       const seen = new Set<string>();
       sents = raw.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
     } else {
-      sents = await db.sentences.toArray();
+      sents = await repo.getAllSentences();
     }
     if (sents.length === 0) {
       setError('No sentences found. Add some first!');

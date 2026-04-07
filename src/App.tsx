@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
-import { ensureDefaults } from './db/db';
 import { loadCedict } from './lib/cedict';
 import { DashboardPage } from './pages/DashboardPage';
 import { ReviewPage } from './pages/ReviewPage';
@@ -36,7 +35,7 @@ function App() {
   const userId = user?.id;
   useEffect(() => {
     if (userId && !ready) {
-      Promise.all([ensureDefaults(), loadCedict()]).then(() => setReady(true));
+      loadCedict().then(() => setReady(true));
     }
     if (!userId && ready) {
       setReady(false);

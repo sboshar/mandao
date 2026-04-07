@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigationStore } from '../stores/navigationStore';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import { lookupByEnglish, type DictEntry } from '../lib/cedict';
 import type { Meaning } from '../db/schema';
 
@@ -46,7 +46,7 @@ export function EnglishCard() {
     const forms = getStemmedForms(word);
 
     async function load() {
-      const all = await db.meanings.toArray();
+      const all = await repo.getAllMeanings();
       const pattern = [...forms].map(f => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
       const re = new RegExp(`\\b(?:${pattern})\\b`, 'i');
       const results = all.filter(

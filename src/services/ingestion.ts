@@ -7,7 +7,7 @@
  * - Creates SrsCards for review
  */
 import { v4 as uuid } from 'uuid';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import type {
   Meaning,
   MeaningLink,
@@ -16,7 +16,7 @@ import type {
   SrsCard,
   ReviewMode,
 } from '../db/schema';
-import { DEFAULT_DECK_ID } from '../db/schema';
+import { getDefaultDeckId } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 
 // ============================================================
@@ -55,106 +55,99 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
   const sentenceId = uuid();
 
   // Check for duplicate sentence
-  const existing = await db.sentences
-    .where('chinese')
-    .equals(input.chinese.trim())
-    .first();
+  const existing = await repo.getSentenceByChinese(input.chinese.trim());
   if (existing) {
     throw new Error(`This sentence already exists in the app.`);
   }
 
-  return await db.transaction(
-    'rw',
-    [db.meanings, db.meaningLinks, db.sentences, db.sentenceTokens, db.srsCards],
-    async () => {
-      const tokenRecords: SentenceToken[] = [];
-      const allPinyinNumeric: string[] = [];
+  const tokenRecords: SentenceToken[] = [];
+  const allPinyinNumeric: string[] = [];
 
-      for (let i = 0; i < input.tokens.length; i++) {
-        const token = input.tokens[i];
+  for (let i = 0; i < input.tokens.length; i++) {
+    const token = input.tokens[i];
 
-        // Find or create the meaning for this token
-        const meaning = await findOrCreateMeaning(token);
+    // Find or create the meaning for this token
+    const meaning = await findOrCreateMeaning(token);
 
-        // Collect pinyin syllables for tone sandhi
-        const syllables = token.pinyinNumeric.split(/\s+/);
-        allPinyinNumeric.push(...syllables);
+    // Collect pinyin syllables for tone sandhi
+    const syllables = token.pinyinNumeric.split(/\s+/);
+    allPinyinNumeric.push(...syllables);
 
-        // If multi-character word, decompose into character meanings
-        if (token.surfaceForm.length > 1 && meaning.type === 'word') {
-          await decomposeWord(meaning, token);
-        }
-
-        tokenRecords.push({
-          id: uuid(),
-          sentenceId,
-          meaningId: meaning.id,
-          position: i,
-          surfaceForm: token.surfaceForm,
-          pinyinSandhi: '', // filled in below
-        });
-      }
-
-      // Compute tone sandhi for the full sentence
-      const sandhiSyllables = applyToneSandhi(allPinyinNumeric);
-      const basePinyin = numericStringToDiacritic(allPinyinNumeric.join(' '));
-      const sandhiPinyin = numericStringToDiacritic(sandhiSyllables.join(' '));
-
-      // Assign sandhi pinyin per token
-      let syllableIdx = 0;
-      for (const tokenRec of tokenRecords) {
-        const token = input.tokens[tokenRecords.indexOf(tokenRec)];
-        const count = token.pinyinNumeric.split(/\s+/).length;
-        const tokenSandhiSyllables = sandhiSyllables.slice(
-          syllableIdx,
-          syllableIdx + count
-        );
-        tokenRec.pinyinSandhi = numericStringToDiacritic(
-          tokenSandhiSyllables.join(' ')
-        );
-        syllableIdx += count;
-      }
-
-      // Create the sentence
-      const sentence: Sentence = {
-        id: sentenceId,
-        chinese: input.chinese,
-        english: input.english,
-        pinyin: basePinyin,
-        pinyinSandhi: sandhiPinyin,
-        audioUrl: null,
-        source: input.source || 'manual',
-        tags: input.tags || [],
-        createdAt: Date.now(),
-      };
-
-      await db.sentences.add(sentence);
-      await db.sentenceTokens.bulkAdd(tokenRecords);
-
-      // Create SRS cards (one per review mode)
-      const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
-      const cards: SrsCard[] = modes.map((mode) => ({
-        id: uuid(),
-        sentenceId,
-        deckId: DEFAULT_DECK_ID,
-        reviewMode: mode,
-        due: Date.now(),
-        stability: 0,
-        difficulty: 0,
-        elapsedDays: 0,
-        scheduledDays: 0,
-        reps: 0,
-        lapses: 0,
-        state: 0, // new
-        lastReview: null,
-        createdAt: Date.now(),
-      }));
-
-      await db.srsCards.bulkAdd(cards);
-
-      return sentenceId;
+    // If multi-character word, decompose into character meanings
+    if (token.surfaceForm.length > 1 && meaning.type === 'word') {
+      await decomposeWord(meaning, token);
     }
-  );
+
+    tokenRecords.push({
+      id: uuid(),
+      sentenceId,
+      meaningId: meaning.id,
+      position: i,
+      surfaceForm: token.surfaceForm,
+      pinyinSandhi: '', // filled in below
+    });
+  }
+
+  // Compute tone sandhi for the full sentence
+  const sandhiSyllables = applyToneSandhi(allPinyinNumeric);
+  const basePinyin = numericStringToDiacritic(allPinyinNumeric.join(' '));
+  const sandhiPinyin = numericStringToDiacritic(sandhiSyllables.join(' '));
+
+  // Assign sandhi pinyin per token
+  let syllableIdx = 0;
+  for (const tokenRec of tokenRecords) {
+    const token = input.tokens[tokenRecords.indexOf(tokenRec)];
+    const count = token.pinyinNumeric.split(/\s+/).length;
+    const tokenSandhiSyllables = sandhiSyllables.slice(
+      syllableIdx,
+      syllableIdx + count
+    );
+    tokenRec.pinyinSandhi = numericStringToDiacritic(
+      tokenSandhiSyllables.join(' ')
+    );
+    syllableIdx += count;
+  }
+
+  // Create the sentence
+  const sentence: Sentence = {
+    id: sentenceId,
+    chinese: input.chinese,
+    english: input.english,
+    pinyin: basePinyin,
+    pinyinSandhi: sandhiPinyin,
+    audioUrl: null,
+    source: input.source || 'manual',
+    tags: input.tags || [],
+    createdAt: Date.now(),
+  };
+
+  await repo.insertSentence(sentence);
+  await repo.insertSentenceTokens(tokenRecords);
+
+  // Create SRS cards (one per review mode)
+  const userId = await repo.getUserId();
+  const deckId = getDefaultDeckId(userId);
+  const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
+  const cards: SrsCard[] = modes.map((mode) => ({
+    id: uuid(),
+    sentenceId,
+    deckId,
+    reviewMode: mode,
+    due: Date.now(),
+    stability: 0,
+    difficulty: 0,
+    elapsedDays: 0,
+    scheduledDays: 0,
+    reps: 0,
+    lapses: 0,
+    state: 0, // new
+    lastReview: null,
+    createdAt: Date.now(),
+  }));
+
+  await repo.insertSrsCards(cards);
+
+  return sentenceId;
 }
 
 // ============================================================
@@ -168,15 +161,12 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
  * - Same char, different pronunciation or meaning → new node
  */
 async function findOrCreateMeaning(token: TokenInput): Promise<Meaning> {
-  const existing = await db.meanings
-    .where('headword')
-    .equals(token.surfaceForm)
-    .filter(
-      (m) =>
-        m.pinyinNumeric === token.pinyinNumeric &&
-        m.englishShort === token.english
-    )
-    .first();
+  const candidates = await repo.getMeaningsByHeadword(token.surfaceForm);
+  const existing = candidates.find(
+    (m) =>
+      m.pinyinNumeric === token.pinyinNumeric &&
+      m.englishShort === token.english
+  );
 
   if (existing) return existing;
 
@@ -195,7 +185,7 @@ async function findOrCreateMeaning(token: TokenInput): Promise<Meaning> {
     updatedAt: Date.now(),
   };
 
-  await db.meanings.add(meaning);
+  await repo.insertMeaning(meaning);
   return meaning;
 }
 
@@ -208,17 +198,13 @@ async function findOrCreateCharacterMeaning(
   pinyinNumeric: string,
   english: string
 ): Promise<Meaning> {
-  // Exact match: same char + same pinyin + same english
-  const exact = await db.meanings
-    .where('headword')
-    .equals(char)
-    .filter(
-      (m) =>
-        m.type === 'character' &&
-        m.pinyinNumeric === pinyinNumeric &&
-        m.englishShort === english
-    )
-    .first();
+  const candidates = await repo.getMeaningsByHeadword(char);
+  const exact = candidates.find(
+    (m) =>
+      m.type === 'character' &&
+      m.pinyinNumeric === pinyinNumeric &&
+      m.englishShort === english
+  );
 
   if (exact) return exact;
 
@@ -237,7 +223,7 @@ async function findOrCreateCharacterMeaning(
     updatedAt: Date.now(),
   };
 
-  await db.meanings.add(meaning);
+  await repo.insertMeaning(meaning);
   return meaning;
 }
 
@@ -250,12 +236,8 @@ async function decomposeWord(
   token: TokenInput
 ): Promise<void> {
   // Check if already decomposed
-  const existingLinks = await db.meaningLinks
-    .where('parentMeaningId')
-    .equals(wordMeaning.id)
-    .count();
-
-  if (existingLinks > 0) return;
+  const existingCount = await repo.getMeaningLinkCountByParent(wordMeaning.id);
+  if (existingCount > 0) return;
 
   const chars = Array.from(token.surfaceForm);
   const syllables = wordMeaning.pinyinNumeric.split(/\s+/);
@@ -283,7 +265,7 @@ async function decomposeWord(
       position: i,
       role: 'character',
     };
-    await db.meaningLinks.add(link);
+    await repo.insertMeaningLink(link);
   }
 }
 
@@ -293,35 +275,18 @@ async function decomposeWord(
 
 /** Delete a single sentence and its tokens, SRS cards, and review logs. */
 export async function deleteSentence(sentenceId: string): Promise<void> {
-  await db.transaction(
-    'rw',
-    [db.sentences, db.sentenceTokens, db.srsCards, db.reviewLogs],
-    async () => {
-      const cards = await db.srsCards.where('sentenceId').equals(sentenceId).toArray();
-      const cardIds = cards.map((c) => c.id);
+  const cards = await repo.getSrsCardsBySentence(sentenceId);
+  const cardIds = cards.map((c) => c.id);
 
-      await db.reviewLogs.where('cardId').anyOf(cardIds).delete();
-      await db.srsCards.where('sentenceId').equals(sentenceId).delete();
-      await db.sentenceTokens.where('sentenceId').equals(sentenceId).delete();
-      await db.sentences.delete(sentenceId);
-    }
-  );
+  await repo.deleteReviewLogsByCardIds(cardIds);
+  await repo.deleteSrsCardsBySentence(sentenceId);
+  await repo.deleteTokensBySentence(sentenceId);
+  await repo.deleteSentenceById(sentenceId);
 }
 
 /** Delete ALL sentences, tokens, SRS cards, and review logs. */
 export async function deleteAllData(): Promise<void> {
-  await db.transaction(
-    'rw',
-    [db.sentences, db.sentenceTokens, db.srsCards, db.reviewLogs, db.meanings, db.meaningLinks],
-    async () => {
-      await db.reviewLogs.clear();
-      await db.srsCards.clear();
-      await db.sentenceTokens.clear();
-      await db.sentences.clear();
-      await db.meaningLinks.clear();
-      await db.meanings.clear();
-    }
-  );
+  await repo.deleteAllUserData();
 }
 
 // ============================================================
@@ -337,55 +302,37 @@ export async function getSentencesForMeaning(
   meaningId: string
 ): Promise<Sentence[]> {
   // Direct: this meaning is a token in the sentence
-  const directTokens = await db.sentenceTokens
-    .where('meaningId')
-    .equals(meaningId)
-    .toArray();
-
+  const directTokens = await repo.getTokensByMeaning(meaningId);
   const sentenceIds = new Set(directTokens.map((t) => t.sentenceId));
 
   // Indirect: this meaning is a character inside a compound word token
-  // Find all parent meanings that link to this meaning as a character
-  const parentLinks = await db.meaningLinks
-    .where('childMeaningId')
-    .equals(meaningId)
-    .toArray();
+  const parentLinks = await repo.getMeaningLinksByChild(meaningId);
 
   for (const link of parentLinks) {
-    const parentTokens = await db.sentenceTokens
-      .where('meaningId')
-      .equals(link.parentMeaningId)
-      .toArray();
+    const parentTokens = await repo.getTokensByMeaning(link.parentMeaningId);
     for (const t of parentTokens) {
       sentenceIds.add(t.sentenceId);
     }
   }
 
-  const sentences = await db.sentences.bulkGet([...sentenceIds]);
-  return sentences.filter((s): s is Sentence => s !== undefined);
+  return repo.getSentencesByIds([...sentenceIds]);
 }
 
 /** Get all meanings that share the same headword (for "other meanings" section) */
 export async function getOtherMeanings(meaning: Meaning): Promise<Meaning[]> {
-  return db.meanings
-    .where('headword')
-    .equals(meaning.headword)
-    .filter((m) => m.id !== meaning.id)
-    .toArray();
+  const all = await repo.getMeaningsByHeadword(meaning.headword);
+  return all.filter((m) => m.id !== meaning.id);
 }
 
 /** Get character breakdown for a meaning */
 export async function getCharacterBreakdown(
   meaningId: string
 ): Promise<(MeaningLink & { childMeaning: Meaning })[]> {
-  const links = await db.meaningLinks
-    .where('parentMeaningId')
-    .equals(meaningId)
-    .sortBy('position');
+  const links = await repo.getMeaningLinksByParent(meaningId);
 
   const results = [];
   for (const link of links) {
-    const childMeaning = await db.meanings.get(link.childMeaningId);
+    const childMeaning = await repo.getMeaning(link.childMeaningId);
     if (childMeaning) {
       results.push({ ...link, childMeaning });
     }
@@ -397,14 +344,11 @@ export async function getCharacterBreakdown(
 export async function getTokensForSentence(
   sentenceId: string
 ): Promise<(SentenceToken & { meaning: Meaning })[]> {
-  const tokens = await db.sentenceTokens
-    .where('sentenceId')
-    .equals(sentenceId)
-    .sortBy('position');
+  const tokens = await repo.getTokensBySentence(sentenceId);
 
   const results = [];
   for (const token of tokens) {
-    const meaning = await db.meanings.get(token.meaningId);
+    const meaning = await repo.getMeaning(token.meaningId);
     if (meaning) {
       results.push({ ...token, meaning });
     }
@@ -414,7 +358,7 @@ export async function getTokensForSentence(
 
 /** Get all unique tags across all sentences */
 export async function getAllTags(): Promise<string[]> {
-  const sentences = await db.sentences.toArray();
+  const sentences = await repo.getAllSentences();
   const tagSet = new Set<string>();
   for (const s of sentences) {
     if (s.tags) {
@@ -425,40 +369,23 @@ export async function getAllTags(): Promise<string[]> {
 }
 
 /** Update tags on a sentence */
-export async function updateSentenceTags(sentenceId: string, tags: string[]): Promise<void> {
-  await db.sentences.update(sentenceId, { tags });
-}
+export { updateSentenceTags } from '../db/repo';
 
 /** Delete all tutorial sentences and their associated tokens and SRS cards */
 export async function deleteTutorialSentences(): Promise<void> {
-  const tutorialSentences = await db.sentences
-    .where('source')
-    .equals('tutorial')
-    .toArray();
-
+  const tutorialSentences = await repo.getSentencesBySource('tutorial');
   if (tutorialSentences.length === 0) return;
 
-  const sentenceIds = tutorialSentences.map((s) => s.id);
-
-  await db.transaction(
-    'rw',
-    [db.sentences, db.sentenceTokens, db.srsCards],
-    async () => {
-      for (const id of sentenceIds) {
-        await db.sentenceTokens.where('sentenceId').equals(id).delete();
-        await db.srsCards.where('sentenceId').equals(id).delete();
-      }
-      await db.sentences.where('source').equals('tutorial').delete();
-    }
-  );
+  for (const s of tutorialSentences) {
+    await repo.deleteTokensBySentence(s.id);
+    await repo.deleteSrsCardsBySentence(s.id);
+  }
+  await repo.deleteSentencesBySource('tutorial');
 }
 
 /** Get all meanings that share the same pinyin (for pinyin card) */
 export async function getMeaningsByPinyin(
   pinyinNumeric: string
 ): Promise<Meaning[]> {
-  return db.meanings
-    .where('pinyinNumeric')
-    .equals(pinyinNumeric)
-    .toArray();
+  return repo.getMeaningsByPinyinNumeric(pinyinNumeric);
 }

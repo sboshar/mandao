@@ -1,5 +1,5 @@
 import { useNavigationStore } from '../stores/navigationStore';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 
 interface ClickableCharProps {
   char: string;
@@ -20,11 +20,8 @@ export function ClickableChar({ char, meaningId, className = '' }: ClickableChar
     let id = meaningId;
 
     if (!id) {
-      const meaning = await db.meanings
-        .where('headword')
-        .equals(char)
-        .first();
-      if (meaning) id = meaning.id;
+      const meanings = await repo.getMeaningsByHeadword(char);
+      if (meanings[0]) id = meanings[0].id;
     }
 
     if (!id) return;

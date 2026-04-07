@@ -8,7 +8,7 @@ import {
   type Grade,
   Rating,
 } from 'ts-fsrs';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import type { SrsCard, ReviewLog, ReviewMode } from '../db/schema';
 import { v4 as uuid } from 'uuid';
 
@@ -37,7 +37,7 @@ export async function reviewCard(
   cardId: string,
   rating: Grade
 ): Promise<void> {
-  const card = await db.srsCards.get(cardId);
+  const card = await repo.getSrsCard(cardId);
   if (!card) throw new Error(`Card not found: ${cardId}`);
 
   const fsrsCard = toFSRSCard(card);
@@ -46,7 +46,7 @@ export async function reviewCard(
   const next = result[rating].card;
 
   // Update card
-  await db.srsCards.update(cardId, {
+  await repo.updateSrsCard(cardId, {
     due: next.due.getTime(),
     stability: next.stability,
     difficulty: next.difficulty,
@@ -71,7 +71,7 @@ export async function reviewCard(
     scheduledDays: card.scheduledDays,
     reviewedAt: now.getTime(),
   };
-  await db.reviewLogs.add(log);
+  await repo.insertReviewLog(log);
 }
 
 /** Get review queue for a deck, optionally filtered by review mode and/or tags */
@@ -81,16 +81,13 @@ export async function getReviewQueue(
   tagFilter?: string[] | null
 ): Promise<SrsCard[]> {
   const now = Date.now();
-  const deck = await db.decks.get(deckId);
+  const deck = await repo.getDeck(deckId);
   if (!deck) return [];
 
   // If filtering by tags, get the set of matching sentence IDs (union of all selected tags)
   let tagSentenceIds: Set<string> | null = null;
   if (tagFilter && tagFilter.length > 0) {
-    const tagged = await db.sentences
-      .where('tags')
-      .anyOf(tagFilter)
-      .toArray();
+    const tagged = await repo.getSentencesByTags(tagFilter);
     tagSentenceIds = new Set(tagged.map((s) => s.id));
   }
 
@@ -100,53 +97,38 @@ export async function getReviewQueue(
     !tagSentenceIds || tagSentenceIds.has(c.sentenceId);
   const ok = (c: SrsCard) => modeOk(c) && tagOk(c);
 
-  // Learning cards (state=1, due now)
-  const learningCards = await db.srsCards
-    .where('[deckId+state]')
-    .equals([deckId, 1])
-    .filter((c) => c.due <= now && ok(c))
-    .toArray();
+  // Fetch all cards for this deck in relevant states
+  // Learning (1) + Relearning (3) + Review (2) + New (0)
+  const [learningRelearning, reviewCards, newCards] = await Promise.all([
+    repo.getSrsCardsByDeckAndStates(deckId, [1, 3]),
+    repo.getSrsCardsByDeckAndState(deckId, 2),
+    repo.getSrsCardsByDeckAndState(deckId, 0),
+  ]);
 
-  // Relearning cards (state=3, due now)
-  const relearningCards = await db.srsCards
-    .where('[deckId+state]')
-    .equals([deckId, 3])
-    .filter((c) => c.due <= now && ok(c))
-    .toArray();
+  // Learning cards (state=1 or 3, due now)
+  const duelearning = learningRelearning.filter((c) => c.due <= now && ok(c));
 
-  // Review cards (state=2, due now)
-  const reviewCards = await db.srsCards
-    .where('[deckId+state]')
-    .equals([deckId, 2])
+  // Review cards (state=2, due now, up to daily limit)
+  const dueReview = reviewCards
     .filter((c) => c.due <= now && ok(c))
-    .limit(deck.reviewsPerDay)
-    .toArray();
+    .slice(0, deck.reviewsPerDay);
 
   // New cards (state=0) up to daily limit
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const todayNewReviewed = await db.reviewLogs
-    .where('reviewedAt')
-    .aboveOrEqual(todayStart.getTime())
-    .toArray();
+  const todayLogs = await repo.getReviewLogsSince(todayStart.getTime());
 
-  const todayNewCardIds = new Set(todayNewReviewed.map((r) => r.cardId));
-  const newReviewedToday = (
-    await Promise.all(
-      [...todayNewCardIds].map((id) => db.srsCards.get(id))
-    )
-  ).filter((c) => c && c.reps === 1).length;
+  const todayNewCardIds = new Set(todayLogs.map((r) => r.cardId));
+  const todayCards = await Promise.all(
+    [...todayNewCardIds].map((id) => repo.getSrsCard(id))
+  );
+  const newReviewedToday = todayCards.filter((c) => c && c.reps === 1).length;
 
   const remaining = Math.max(0, deck.newCardsPerDay - newReviewedToday);
-  const newCards = await db.srsCards
-    .where('[deckId+state]')
-    .equals([deckId, 0])
-    .filter((c) => ok(c))
-    .limit(remaining)
-    .toArray();
+  const dueNew = newCards.filter((c) => ok(c)).slice(0, remaining);
 
   // Priority: learning/relearning > review > new
-  return [...learningCards, ...relearningCards, ...reviewCards, ...newCards];
+  return [...duelearning, ...dueReview, ...dueNew];
 }
 
 /** Get counts for dashboard display */
@@ -155,25 +137,15 @@ export async function getDueCounts(
 ): Promise<{ newCount: number; reviewCount: number; learningCount: number }> {
   const now = Date.now();
 
-  const newCount = await db.srsCards
-    .where('[deckId+state]')
-    .equals([deckId, 0])
-    .count();
+  const [newCards, reviewCards, learningCards] = await Promise.all([
+    repo.getSrsCardsByDeckAndState(deckId, 0),
+    repo.getSrsCardsByDeckAndState(deckId, 2),
+    repo.getSrsCardsByDeckAndStates(deckId, [1, 3]),
+  ]);
 
-  const reviewCount = await db.srsCards
-    .where('[deckId+state]')
-    .equals([deckId, 2])
-    .filter((c) => c.due <= now)
-    .count();
-
-  const learningCount = await db.srsCards
-    .where('[deckId+state]')
-    .anyOf([
-      [deckId, 1],
-      [deckId, 3],
-    ])
-    .filter((c) => c.due <= now)
-    .count();
-
-  return { newCount, reviewCount, learningCount };
+  return {
+    newCount: newCards.length,
+    reviewCount: reviewCards.filter((c) => c.due <= now).length,
+    learningCount: learningCards.filter((c) => c.due <= now).length,
+  };
 }

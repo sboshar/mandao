@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
 import { getTokensForSentence, updateSentenceTags, getAllTags, deleteSentence, deleteAllData } from '../services/ingestion';
 import { TokenSpan } from '../components/TokenSpan';
@@ -32,7 +32,7 @@ export function BrowsePage() {
   const [deleteAllInput, setDeleteAllInput] = useState('');
 
   useEffect(() => {
-    db.sentences.orderBy('createdAt').reverse().toArray().then(setSentences);
+    repo.getSentencesOrderByCreatedDesc().then(setSentences);
     getAllTags().then(setAllTags);
   }, []);
 

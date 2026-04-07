@@ -4,7 +4,7 @@
  * Flow: CC-CEDICT tokenizer segments first → user adjusts → segments passed to LLM
  * The LLM fills in: English translation, pinyin, tone sandhi, character breakdowns, POS.
  */
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 
 export interface ExistingMeaning {
   headword: string;
@@ -20,10 +20,7 @@ export async function getExistingMeaningsForSegments(
   const results: ExistingMeaning[] = [];
 
   for (const seg of unique) {
-    const meanings = await db.meanings
-      .where('headword')
-      .equals(seg)
-      .toArray();
+    const meanings = await repo.getMeaningsByHeadword(seg);
 
     for (const m of meanings) {
       results.push({

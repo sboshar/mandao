@@ -5,8 +5,9 @@ import { getReviewQueue } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
-import { DEFAULT_DECK_ID } from '../db/schema';
+import { getDefaultDeckId } from '../db/schema';
 import type { ReviewMode } from '../db/schema';
+import { useAuthStore } from '../stores/authStore';
 
 type ModeOption = ReviewMode | 'both';
 
@@ -21,7 +22,8 @@ export function ReviewPage() {
   const { deckId } = useParams();
   const navigate = useNavigate();
   const { setQueue, remaining, reset } = useReviewStore();
-  const effectiveDeckId = deckId || DEFAULT_DECK_ID;
+  const user = useAuthStore((s) => s.user);
+  const effectiveDeckId = deckId || (user ? getDefaultDeckId(user.id) : 'default');
   const [mode, setMode] = useState<ModeOption>('en-to-zh');
   const [started, setStarted] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
