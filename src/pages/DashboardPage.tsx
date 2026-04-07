@@ -6,6 +6,7 @@ import { db } from '../db/db';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { useTutorialStore } from '../stores/tutorialStore';
 
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const [counts, setCounts] = useState({
@@ -32,8 +33,8 @@ export function DashboardPage() {
   const totalDue = counts.newCount + counts.reviewCount + counts.learningCount;
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-8">Mandarin</h1>
+    <div className="max-w-xl mx-auto px-6 py-10">
+      <h1 className="text-2xl font-semibold tracking-tight mb-10">Mandarin</h1>
 
       <TutorialBanner visibleAt={2}>
         Your 3 example sentences are in the deck. Click <strong>Browse</strong> below
@@ -49,82 +50,72 @@ export function DashboardPage() {
         </div>
       </TutorialBanner>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="p-4 bg-white rounded-lg shadow text-center">
-          <div className="text-3xl font-bold">{totalSentences}</div>
-          <div className="text-sm text-gray-500">Sentences</div>
-        </div>
-        <div className="p-4 bg-white rounded-lg shadow text-center">
-          <div className="text-3xl font-bold">{totalMeanings}</div>
-          <div className="text-sm text-gray-500">Meanings</div>
-        </div>
-        <div className="p-4 bg-white rounded-lg shadow text-center">
-          <div className="text-3xl font-bold">{totalDue}</div>
-          <div className="text-sm text-gray-500">Due Today</div>
-        </div>
+      {/* Stats — subtle inline row */}
+      <div className="flex gap-8 mb-10">
+        {[
+          { value: totalSentences, label: 'Sentences' },
+          { value: totalMeanings, label: 'Meanings' },
+          { value: totalDue, label: 'Due today' },
+        ].map((s) => (
+          <div key={s.label}>
+            <div className="text-2xl font-semibold">{s.value}</div>
+            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{s.label}</div>
+          </div>
+        ))}
       </div>
 
       {/* Default Deck */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-lg font-medium mb-4">Default Deck</h2>
-        <div className="flex gap-4 text-sm mb-4">
-          <span className="text-blue-600">
-            {counts.newCount} new
-          </span>
-          <span className="text-orange-600">
-            {counts.learningCount} learning
-          </span>
-          <span className="text-green-600">
-            {counts.reviewCount} review
-          </span>
+      <div className="mb-10">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Default Deck</h2>
+          <div className="flex gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+            <span style={{ color: 'var(--state-new)' }}>{counts.newCount} new</span>
+            <span style={{ color: 'var(--state-learning)' }}>{counts.learningCount} learning</span>
+            <span style={{ color: 'var(--state-review)' }}>{counts.reviewCount} review</span>
+          </div>
         </div>
         <button
           onClick={() => navigate('/review')}
           disabled={totalDue === 0}
-          className="w-full py-3 rounded-lg bg-blue-500 text-white font-medium
-            hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          style={{ background: 'var(--accent)', color: '#fff' }}
         >
           {totalDue > 0 ? `Study (${totalDue} cards)` : 'No cards due'}
         </button>
       </div>
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-4 gap-3">
-        <button
-          onClick={() => navigate('/add')}
-          className="py-3 rounded-lg bg-green-500 text-white font-medium
-            hover:bg-green-600 transition-colors"
-        >
-          + Add Sentence
-        </button>
-        <button
-          onClick={() => {
-            if (tutorialStep === 2) advanceTutorial();
-            navigate('/browse');
-          }}
-          className={`py-3 rounded-lg font-medium transition-colors ${
-            tutorialStep === 2
-              ? 'bg-blue-500 text-white hover:bg-blue-600 ring-2 ring-blue-300 ring-offset-2'
-              : 'bg-gray-100 hover:bg-gray-200'
-          }`}
-        >
-          Browse
-        </button>
-        <button
-          onClick={() => navigate('/graph')}
-          className="py-3 rounded-lg bg-indigo-500 text-white font-medium
-            hover:bg-indigo-600 transition-colors"
-        >
-          Graph
-        </button>
-        <button
-          onClick={() => navigate('/stats')}
-          className="py-3 rounded-lg bg-purple-500 text-white font-medium
-            hover:bg-purple-600 transition-colors"
-        >
-          Stats
-        </button>
+      {/* Quick actions — ghost buttons */}
+      <div className="flex gap-2">
+        {[
+          { label: '+ Add', path: '/add', onClick: () => navigate('/add') },
+          {
+            label: 'Browse',
+            path: '/browse',
+            onClick: () => {
+              if (tutorialStep === 2) advanceTutorial();
+              navigate('/browse');
+            },
+            highlight: tutorialStep === 2,
+          },
+          { label: 'Graph', path: '/graph', onClick: () => navigate('/graph') },
+          { label: 'Stats', path: '/stats', onClick: () => navigate('/stats') },
+        ].map((btn) => (
+          <button
+            key={btn.label}
+            onClick={btn.onClick}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+              btn.highlight ? 'ring-1' : ''
+            }`}
+            style={{
+              background: btn.highlight ? 'var(--accent-subtle)' : 'transparent',
+              color: btn.highlight ? 'var(--accent)' : 'var(--text-secondary)',
+              border: `1px solid ${btn.highlight ? 'var(--accent)' : 'var(--border-strong)'}`,
+              ...(btn.highlight ? { '--tw-ring-color': 'var(--accent)' } as React.CSSProperties : {}),
+            }}
+          >
+            {btn.label}
+          </button>
+        ))}
       </div>
     </div>
   );

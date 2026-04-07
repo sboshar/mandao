@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { db } from '../db/db';
 import type { Sentence } from '../db/schema';
-import { getTokensForSentence } from '../services/ingestion';
+import { getTokensForSentence, updateSentenceTags, getAllTags } from '../services/ingestion';
 import { TokenSpan } from '../components/TokenSpan';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
 import { ClickableEnglish } from '../components/ClickableEnglish';
+import { TagInput } from '../components/TagInput';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TutorialBanner } from '../components/TutorialBanner';
@@ -22,13 +23,35 @@ export function BrowsePage() {
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [showFilter, setShowFilter] = useState(false);
 
   useEffect(() => {
     db.sentences.orderBy('createdAt').reverse().toArray().then(setSentences);
+    getAllTags().then(setAllTags);
   }, []);
 
-  // Find the 花 sentence for tutorial highlighting
   const huaSentence = sentences.find((s) => s.chinese === '她花了很多钱买花。');
+
+  const handleTagsChange = async (sentenceId: string, newTags: string[]) => {
+    await updateSentenceTags(sentenceId, newTags);
+    setSentences((prev) =>
+      prev.map((s) => (s.id === sentenceId ? { ...s, tags: newTags } : s))
+    );
+    getAllTags().then(setAllTags);
+  };
+
+  const toggleFilterTag = (tag: string) => {
+    setFilterTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const filteredSentences = filterTags.length > 0
+    ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
+    : sentences;
 
   const handleExpand = async (sentenceId: string) => {
     if (expandedId === sentenceId) {
@@ -47,7 +70,8 @@ export function BrowsePage() {
         <h1 className="text-2xl font-bold">Browse Sentences</h1>
         <button
           onClick={() => navigate('/')}
-          className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm"
+          className="px-3 py-1 rounded text-sm transition-colors"
+          style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
         >
           &larr; Back
         </button>
@@ -55,52 +79,92 @@ export function BrowsePage() {
 
       <TutorialBanner visibleAt={3}>
         Here are your sentences. Click on <strong>"她花了很多钱买花。"</strong> to expand it
-        and see the word-by-word breakdown. This is the sentence where 花 has two different
-        meanings!
+        and see the word-by-word breakdown.
       </TutorialBanner>
 
       <TutorialBanner visibleAt={4}>
-        Now <strong>click on one of the 花 characters</strong> (the large Chinese text) to
-        open the meaning explorer. You'll see that 花 has two separate meaning entries &mdash;
-        "to spend" and "flower." You can also click on the <strong>shì</strong> pinyin to see
-        all characters that share that sound.
+        Now <strong>click on one of the 花 characters</strong> to open the meaning explorer.
+        You'll see that 花 has two separate meaning entries. You can also click on the
+        <strong> shì</strong> pinyin to see all characters that share that sound.
       </TutorialBanner>
 
+      {allTags.length > 0 && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowFilter(!showFilter)}
+            className="text-xs px-2.5 py-1 rounded-full transition-colors"
+            style={filterTags.length > 0
+              ? { background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }
+              : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+            }
+          >
+            Filter by tag{filterTags.length > 0 ? ` (${filterTags.length})` : ''} {showFilter ? '\u25B2' : '\u25BC'}
+          </button>
+          {showFilter && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              <button
+                onClick={() => setFilterTags([])}
+                className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                style={filterTags.length === 0
+                  ? { background: 'var(--text-primary)', color: 'var(--bg-surface)' }
+                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                }
+              >
+                All
+              </button>
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => toggleFilterTag(tag)}
+                  className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                  style={filterTags.includes(tag)
+                    ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
+                    : { background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-surface))', color: 'var(--accent)' }
+                  }
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {sentences.length === 0 ? (
-        <div className="text-center text-gray-400 py-12">
+        <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
           No sentences yet.{' '}
           <button
             onClick={() => navigate('/add')}
-            className="text-blue-500 underline"
+            style={{ color: 'var(--accent)' }}
+            className="underline"
           >
             Add one
           </button>
         </div>
       ) : (
         <div className="space-y-2">
-          {sentences.map((s) => {
+          {filteredSentences.map((s) => {
             const isTutorialTarget = tutorialStep === 3 && huaSentence && s.id === huaSentence.id;
 
             return (
               <div
                 key={s.id}
-                className={`bg-white rounded-lg shadow ${
-                  isTutorialTarget ? 'ring-2 ring-blue-300 ring-offset-2' : ''
-                }`}
+                className={`surface rounded-lg ${isTutorialTarget ? 'ring-2 ring-offset-2' : ''}`}
+                style={isTutorialTarget ? { '--tw-ring-color': 'var(--accent)' } as React.CSSProperties : undefined}
               >
                 <button
                   onClick={() => handleExpand(s.id)}
-                  className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
+                  className="w-full text-left p-4 surface-hover transition-colors rounded-lg"
                 >
                   <div className="text-lg">{s.chinese}</div>
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                     <ClickableEnglish text={s.english} />
                   </div>
                 </button>
 
                 {expandedId === s.id && (
-                  <div className="px-4 pb-4 pt-0 border-t">
-                    <div className="text-sm text-gray-500 mb-2">
+                  <div className="px-4 pb-4 pt-0" style={{ borderTop: '1px solid var(--border)' }}>
+                    <div className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
                       <PinyinDisplay
                         pinyin={s.pinyinSandhi}
                         basePinyin={s.pinyin}
@@ -118,12 +182,33 @@ export function BrowsePage() {
                         />
                       ))}
                     </div>
-                    <button
-                      onClick={() => open({ type: 'sentence', id: s.id })}
-                      className="mt-3 text-sm text-blue-500 hover:text-blue-700 transition-colors"
-                    >
-                      View sentence card &rarr;
-                    </button>
+                    <div className="mt-3 flex items-center justify-between">
+                      <button
+                        onClick={() => open({ type: 'sentence', id: s.id })}
+                        className="text-sm transition-colors"
+                        style={{ color: 'var(--accent)' }}
+                      >
+                        View sentence card &rarr;
+                      </button>
+                      {editingTagsId !== s.id ? (
+                        <button
+                          onClick={() => setEditingTagsId(s.id)}
+                          className="text-xs transition-colors"
+                          style={{ color: 'var(--text-tertiary)' }}
+                        >
+                          {s.tags && s.tags.length > 0 ? 'edit tags' : '+ tag'}
+                        </button>
+                      ) : null}
+                    </div>
+                    {editingTagsId === s.id && (
+                      <div className="mt-2">
+                        <TagInput
+                          tags={s.tags || []}
+                          onChange={(newTags) => handleTagsChange(s.id, newTags)}
+                          compact
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -34,7 +34,7 @@ export function ClickablePinyin({
   return (
     <span
       onClick={handleClick}
-      className={`cursor-pointer hover:bg-purple-100 rounded transition-colors
+      className={`cursor-pointer rounded transition-colors surface-hover
         ${TONE_CLASSES[tone]} ${className}`}
       title={`View all characters pronounced ${pinyin}`}
     >

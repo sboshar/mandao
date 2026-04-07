@@ -33,6 +33,14 @@ export class MandarinDB extends Dexie {
       decks: 'id, name',
       reviewLogs: 'id, cardId, reviewedAt',
     });
+
+    this.version(3).stores({
+      sentences: 'id, chinese, createdAt, source, *tags',
+    }).upgrade((tx) => {
+      return tx.table('sentences').toCollection().modify((sentence) => {
+        if (!sentence.tags) sentence.tags = [];
+      });
+    });
   }
 }
 

@@ -74,37 +74,51 @@ export async function reviewCard(
   await db.reviewLogs.add(log);
 }
 
-/** Get review queue for a deck, optionally filtered by review mode */
+/** Get review queue for a deck, optionally filtered by review mode and/or tags */
 export async function getReviewQueue(
   deckId: string,
-  modeFilter?: ReviewMode | 'both'
+  modeFilter?: ReviewMode | 'both',
+  tagFilter?: string[] | null
 ): Promise<SrsCard[]> {
   const now = Date.now();
   const deck = await db.decks.get(deckId);
   if (!deck) return [];
 
+  // If filtering by tags, get the set of matching sentence IDs (union of all selected tags)
+  let tagSentenceIds: Set<string> | null = null;
+  if (tagFilter && tagFilter.length > 0) {
+    const tagged = await db.sentences
+      .where('tags')
+      .anyOf(tagFilter)
+      .toArray();
+    tagSentenceIds = new Set(tagged.map((s) => s.id));
+  }
+
   const modeOk = (c: SrsCard) =>
     !modeFilter || modeFilter === 'both' || c.reviewMode === modeFilter;
+  const tagOk = (c: SrsCard) =>
+    !tagSentenceIds || tagSentenceIds.has(c.sentenceId);
+  const ok = (c: SrsCard) => modeOk(c) && tagOk(c);
 
   // Learning cards (state=1, due now)
   const learningCards = await db.srsCards
     .where('[deckId+state]')
     .equals([deckId, 1])
-    .filter((c) => c.due <= now && modeOk(c))
+    .filter((c) => c.due <= now && ok(c))
     .toArray();
 
   // Relearning cards (state=3, due now)
   const relearningCards = await db.srsCards
     .where('[deckId+state]')
     .equals([deckId, 3])
-    .filter((c) => c.due <= now && modeOk(c))
+    .filter((c) => c.due <= now && ok(c))
     .toArray();
 
   // Review cards (state=2, due now)
   const reviewCards = await db.srsCards
     .where('[deckId+state]')
     .equals([deckId, 2])
-    .filter((c) => c.due <= now && modeOk(c))
+    .filter((c) => c.due <= now && ok(c))
     .limit(deck.reviewsPerDay)
     .toArray();
 
@@ -127,7 +141,7 @@ export async function getReviewQueue(
   const newCards = await db.srsCards
     .where('[deckId+state]')
     .equals([deckId, 0])
-    .filter((c) => modeOk(c))
+    .filter((c) => ok(c))
     .limit(remaining)
     .toArray();
 
