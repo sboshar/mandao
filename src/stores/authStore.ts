@@ -10,10 +10,12 @@ interface AuthState {
   signInWithEmail: (email: string, password: string) => Promise<string | null>;
   signUpWithEmail: (email: string, password: string) => Promise<string | null>;
   signInWithGoogle: () => Promise<string | null>;
+  resetPassword: (email: string) => Promise<string | null>;
   signOut: () => Promise<void>;
 }
 
 let initialized = false;
+let authSubscription: { unsubscribe: () => void } | null = null;
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
@@ -27,9 +29,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { data: { session } } = await supabase.auth.getSession();
     set({ user: session?.user ?? null, session, loading: false });
 
-    const { data: { subscription: _ } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       set({ user: session?.user ?? null, session });
     });
+    authSubscription = subscription;
   },
 
   signInWithEmail: async (email, password) => {
@@ -42,6 +45,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     return error?.message ?? null;
   },
 
+  resetPassword: async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}`,
+    });
+    return error?.message ?? null;
+  },
+
   signInWithGoogle: async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
@@ -51,6 +61,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    authSubscription?.unsubscribe();
+    authSubscription = null;
+    initialized = false;
     await supabase.auth.signOut();
     set({ user: null, session: null });
   },

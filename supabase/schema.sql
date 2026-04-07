@@ -176,7 +176,7 @@ begin
   values ('default-' || new.id, new.id, 'Default', 'Default deck', 20, 200, extract(epoch from now()) * 1000);
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 create trigger on_auth_user_created
   after insert on auth.users
