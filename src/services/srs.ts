@@ -16,6 +16,7 @@ const params = generatorParameters();
 const scheduler = fsrs(params);
 
 export { Rating };
+export type { Grade };
 
 /** Convert our SrsCard to an FSRS Card for scheduling */
 function toFSRSCard(card: SrsCard): FSRSCard {
@@ -119,10 +120,8 @@ export async function getReviewQueue(
   const todayLogs = await repo.getReviewLogsSince(todayStart.getTime());
 
   const todayNewCardIds = new Set(todayLogs.map((r) => r.cardId));
-  const todayCards = await Promise.all(
-    [...todayNewCardIds].map((id) => repo.getSrsCard(id))
-  );
-  const newReviewedToday = todayCards.filter((c) => c && c.reps === 1).length;
+  const todayCards = await repo.getSrsCardsByIds([...todayNewCardIds]);
+  const newReviewedToday = todayCards.filter((c) => c.reps === 1).length;
 
   const remaining = Math.max(0, deck.newCardsPerDay - newReviewedToday);
   const dueNew = newCards.filter((c) => ok(c)).slice(0, remaining);

@@ -163,10 +163,3 @@ export const DEFAULT_ZH_TO_EN_BACK: CardFace = {
   showPinyinSandhi: true,
   showAudio: true,
 };
-
-export const DEFAULT_DECK_ID = 'default';
-
-/** Get the user-scoped default deck ID (matches the Postgres trigger) */
-export function getDefaultDeckId(userId: string): string {
-  return 'default-' + userId;
-}

@@ -320,7 +320,7 @@ export function BrowsePage() {
                 style={{
                   background: deleteAllInput === 'delete' ? 'var(--danger)' : 'var(--bg-inset)',
                   color: deleteAllInput === 'delete' ? 'white' : 'var(--text-tertiary)',
-                  cursor: deleteAllInput === 'delete' ? 'pointer' : 'not-allowed',
+                  cursor: deleteAllInput === 'delete' ? 'pointer' : 'default',
                 }}
               >
                 Delete All

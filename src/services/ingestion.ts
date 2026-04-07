@@ -16,7 +16,6 @@ import type {
   SrsCard,
   ReviewMode,
 } from '../db/schema';
-import { getDefaultDeckId } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 
 // ============================================================
@@ -121,33 +120,45 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     createdAt: Date.now(),
   };
 
-  await repo.insertSentence(sentence);
-  await repo.insertSentenceTokens(tokenRecords);
+  let sentenceInserted = false;
+  try {
+    await repo.insertSentence(sentence);
+    sentenceInserted = true;
+    await repo.insertSentenceTokens(tokenRecords);
 
-  // Create SRS cards (one per review mode)
-  const userId = await repo.getUserId();
-  const deckId = getDefaultDeckId(userId);
-  const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
-  const cards: SrsCard[] = modes.map((mode) => ({
-    id: uuid(),
-    sentenceId,
-    deckId,
-    reviewMode: mode,
-    due: Date.now(),
-    stability: 0,
-    difficulty: 0,
-    elapsedDays: 0,
-    scheduledDays: 0,
-    reps: 0,
-    lapses: 0,
-    state: 0, // new
-    lastReview: null,
-    createdAt: Date.now(),
-  }));
+    // Create SRS cards (one per review mode)
+    const deckId = await repo.ensureDefaultDeck();
+    const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
+    const cards: SrsCard[] = modes.map((mode) => ({
+      id: uuid(),
+      sentenceId,
+      deckId,
+      reviewMode: mode,
+      due: Date.now(),
+      stability: 0,
+      difficulty: 0,
+      elapsedDays: 0,
+      scheduledDays: 0,
+      reps: 0,
+      lapses: 0,
+      state: 0, // new
+      lastReview: null,
+      createdAt: Date.now(),
+    }));
 
-  await repo.insertSrsCards(cards);
-
-  return sentenceId;
+    await repo.insertSrsCards(cards);
+    return sentenceId;
+  } catch (error) {
+    if (sentenceInserted) {
+      try {
+        // Cascades remove tokens, cards, and review logs if any were created.
+        await repo.deleteSentenceById(sentenceId);
+      } catch (cleanupError) {
+        console.error('Failed to roll back partial sentence insert', cleanupError);
+      }
+    }
+    throw error;
+  }
 }
 
 // ============================================================
@@ -275,12 +286,7 @@ async function decomposeWord(
 
 /** Delete a single sentence and its tokens, SRS cards, and review logs. */
 export async function deleteSentence(sentenceId: string): Promise<void> {
-  const cards = await repo.getSrsCardsBySentence(sentenceId);
-  const cardIds = cards.map((c) => c.id);
-
-  await repo.deleteReviewLogsByCardIds(cardIds);
-  await repo.deleteSrsCardsBySentence(sentenceId);
-  await repo.deleteTokensBySentence(sentenceId);
+  // Sentence deletion cascades to tokens, SRS cards, and review logs.
   await repo.deleteSentenceById(sentenceId);
 }
 
@@ -329,15 +335,13 @@ export async function getCharacterBreakdown(
   meaningId: string
 ): Promise<(MeaningLink & { childMeaning: Meaning })[]> {
   const links = await repo.getMeaningLinksByParent(meaningId);
+  const meanings = await repo.getMeaningsByIds(links.map((link) => link.childMeaningId));
+  const meaningsById = new Map(meanings.map((meaning) => [meaning.id, meaning]));
 
-  const results = [];
-  for (const link of links) {
-    const childMeaning = await repo.getMeaning(link.childMeaningId);
-    if (childMeaning) {
-      results.push({ ...link, childMeaning });
-    }
-  }
-  return results;
+  return links.flatMap((link) => {
+    const childMeaning = meaningsById.get(link.childMeaningId);
+    return childMeaning ? [{ ...link, childMeaning }] : [];
+  });
 }
 
 /** Get tokens for a sentence, ordered by position */
@@ -345,15 +349,13 @@ export async function getTokensForSentence(
   sentenceId: string
 ): Promise<(SentenceToken & { meaning: Meaning })[]> {
   const tokens = await repo.getTokensBySentence(sentenceId);
+  const meanings = await repo.getMeaningsByIds(tokens.map((token) => token.meaningId));
+  const meaningsById = new Map(meanings.map((meaning) => [meaning.id, meaning]));
 
-  const results = [];
-  for (const token of tokens) {
-    const meaning = await repo.getMeaning(token.meaningId);
-    if (meaning) {
-      results.push({ ...token, meaning });
-    }
-  }
-  return results;
+  return tokens.flatMap((token) => {
+    const meaning = meaningsById.get(token.meaningId);
+    return meaning ? [{ ...token, meaning }] : [];
+  });
 }
 
 /** Get all unique tags across all sentences */
@@ -373,13 +375,7 @@ export { updateSentenceTags } from '../db/repo';
 
 /** Delete all tutorial sentences and their associated tokens and SRS cards */
 export async function deleteTutorialSentences(): Promise<void> {
-  const tutorialSentences = await repo.getSentencesBySource('tutorial');
-  if (tutorialSentences.length === 0) return;
-
-  for (const s of tutorialSentences) {
-    await repo.deleteTokensBySentence(s.id);
-    await repo.deleteSrsCardsBySentence(s.id);
-  }
+  // Sentence deletion cascades to tokens, SRS cards, and review logs.
   await repo.deleteSentencesBySource('tutorial');
 }
 

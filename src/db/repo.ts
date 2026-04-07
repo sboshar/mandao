@@ -46,6 +46,43 @@ function throwOnError<T>(result: { data: T | null; error: any }): T {
   return result.data as T;
 }
 
+const PAGE_SIZE = 1000;
+const IN_FILTER_BATCH_SIZE = 500;
+type AwaitableResult<T> = PromiseLike<{ data: T[] | null; error: any }>;
+
+async function fetchAllPages<T>(
+  fetchPage: (from: number, to: number) => AwaitableResult<T>
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const batch = throwOnError(await fetchPage(from, from + PAGE_SIZE - 1));
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) return rows;
+  }
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function fetchByIdBatches<T>(
+  ids: string[],
+  fetchBatch: (batchIds: string[]) => AwaitableResult<T>
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+
+  const rows: T[] = [];
+  const uniqueIds = [...new Set(ids)];
+  for (const batchIds of chunkArray(uniqueIds, IN_FILTER_BATCH_SIZE)) {
+    rows.push(...throwOnError(await fetchBatch(batchIds)));
+  }
+  return rows;
+}
+
 // --- snake_case → camelCase mappers ---
 
 function meaningFromRow(r: any): Meaning {
@@ -246,21 +283,30 @@ export async function getMeaning(id: string): Promise<Meaning | undefined> {
 }
 
 export async function getMeaningsByHeadword(headword: string): Promise<Meaning[]> {
-  const data = throwOnError(
-    await supabase.from('meanings').select().eq('headword', headword)
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('meanings').select().eq('headword', headword).order('id').range(from, to)
   );
   return data.map(meaningFromRow);
 }
 
 export async function getMeaningsByPinyinNumeric(pinyinNumeric: string): Promise<Meaning[]> {
-  const data = throwOnError(
-    await supabase.from('meanings').select().eq('pinyin_numeric', pinyinNumeric)
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('meanings').select().eq('pinyin_numeric', pinyinNumeric).order('id').range(from, to)
   );
   return data.map(meaningFromRow);
 }
 
 export async function getAllMeanings(): Promise<Meaning[]> {
-  const data = throwOnError(await supabase.from('meanings').select().range(0, 9999));
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('meanings').select().order('id').range(from, to)
+  );
+  return data.map(meaningFromRow);
+}
+
+export async function getMeaningsByIds(ids: string[]): Promise<Meaning[]> {
+  const data = await fetchByIdBatches(ids, (batchIds) =>
+    supabase.from('meanings').select().in('id', batchIds)
+  );
   return data.map(meaningFromRow);
 }
 
@@ -279,15 +325,25 @@ export async function insertMeaning(meaning: Meaning): Promise<void> {
 // ============================================================
 
 export async function getMeaningLinksByParent(parentMeaningId: string): Promise<MeaningLink[]> {
-  const data = throwOnError(
-    await supabase.from('meaning_links').select().eq('parent_meaning_id', parentMeaningId).order('position')
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('meaning_links')
+      .select()
+      .eq('parent_meaning_id', parentMeaningId)
+      .order('position')
+      .range(from, to)
   );
   return data.map(meaningLinkFromRow);
 }
 
 export async function getMeaningLinksByChild(childMeaningId: string): Promise<MeaningLink[]> {
-  const data = throwOnError(
-    await supabase.from('meaning_links').select().eq('child_meaning_id', childMeaningId)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('meaning_links')
+      .select()
+      .eq('child_meaning_id', childMeaningId)
+      .order('id')
+      .range(from, to)
   );
   return data.map(meaningLinkFromRow);
 }
@@ -301,7 +357,9 @@ export async function getMeaningLinkCountByParent(parentMeaningId: string): Prom
 }
 
 export async function getAllMeaningLinks(): Promise<MeaningLink[]> {
-  const data = throwOnError(await supabase.from('meaning_links').select().range(0, 9999));
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('meaning_links').select().order('id').range(from, to)
+  );
   return data.map(meaningLinkFromRow);
 }
 
@@ -327,28 +385,52 @@ export async function getSentenceByChinese(chinese: string): Promise<Sentence | 
 }
 
 export async function getSentencesBySource(source: string): Promise<Sentence[]> {
-  const data = throwOnError(
-    await supabase.from('sentences').select().eq('source', source)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('sentences')
+      .select()
+      .eq('source', source)
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(from, to)
   );
   return data.map(sentenceFromRow);
 }
 
 export async function getSentencesByTags(tags: string[]): Promise<Sentence[]> {
-  const data = throwOnError(
-    await supabase.from('sentences').select().overlaps('tags', tags)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('sentences')
+      .select()
+      .overlaps('tags', tags)
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(from, to)
   );
   return data.map(sentenceFromRow);
 }
 
 export async function getSentencesOrderByCreatedDesc(): Promise<Sentence[]> {
-  const data = throwOnError(
-    await supabase.from('sentences').select().order('created_at', { ascending: false })
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('sentences')
+      .select()
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(from, to)
   );
   return data.map(sentenceFromRow);
 }
 
 export async function getAllSentences(): Promise<Sentence[]> {
-  const data = throwOnError(await supabase.from('sentences').select().range(0, 9999));
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('sentences')
+      .select()
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(from, to)
+  );
   return data.map(sentenceFromRow);
 }
 
@@ -358,9 +440,8 @@ export async function getSentencesCount(): Promise<number> {
 }
 
 export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {
-  if (ids.length === 0) return [];
-  const data = throwOnError(
-    await supabase.from('sentences').select().in('id', ids)
+  const data = await fetchByIdBatches(ids, (batchIds) =>
+    supabase.from('sentences').select().in('id', batchIds)
   );
   return data.map(sentenceFromRow);
 }
@@ -387,21 +468,33 @@ export async function deleteSentencesBySource(source: string): Promise<void> {
 // ============================================================
 
 export async function getTokensBySentence(sentenceId: string): Promise<SentenceToken[]> {
-  const data = throwOnError(
-    await supabase.from('sentence_tokens').select().eq('sentence_id', sentenceId).order('position')
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('sentence_tokens')
+      .select()
+      .eq('sentence_id', sentenceId)
+      .order('position')
+      .range(from, to)
   );
   return data.map(tokenFromRow);
 }
 
 export async function getTokensByMeaning(meaningId: string): Promise<SentenceToken[]> {
-  const data = throwOnError(
-    await supabase.from('sentence_tokens').select().eq('meaning_id', meaningId)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('sentence_tokens')
+      .select()
+      .eq('meaning_id', meaningId)
+      .order('id')
+      .range(from, to)
   );
   return data.map(tokenFromRow);
 }
 
 export async function getAllSentenceTokens(): Promise<SentenceToken[]> {
-  const data = throwOnError(await supabase.from('sentence_tokens').select().range(0, 9999));
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('sentence_tokens').select().order('id').range(from, to)
+  );
   return data.map(tokenFromRow);
 }
 
@@ -428,28 +521,56 @@ export async function getSrsCard(id: string): Promise<SrsCard | undefined> {
 }
 
 export async function getSrsCardsBySentence(sentenceId: string): Promise<SrsCard[]> {
-  const data = throwOnError(
-    await supabase.from('srs_cards').select().eq('sentence_id', sentenceId)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('srs_cards')
+      .select()
+      .eq('sentence_id', sentenceId)
+      .order('review_mode')
+      .range(from, to)
   );
   return data.map(srsCardFromRow);
 }
 
 export async function getSrsCardsByDeckAndState(deckId: string, state: number): Promise<SrsCard[]> {
-  const data = throwOnError(
-    await supabase.from('srs_cards').select().eq('deck_id', deckId).eq('state', state)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('srs_cards')
+      .select()
+      .eq('deck_id', deckId)
+      .eq('state', state)
+      .order('due')
+      .order('id')
+      .range(from, to)
   );
   return data.map(srsCardFromRow);
 }
 
 export async function getSrsCardsByDeckAndStates(deckId: string, states: number[]): Promise<SrsCard[]> {
-  const data = throwOnError(
-    await supabase.from('srs_cards').select().eq('deck_id', deckId).in('state', states)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('srs_cards')
+      .select()
+      .eq('deck_id', deckId)
+      .in('state', states)
+      .order('due')
+      .order('id')
+      .range(from, to)
   );
   return data.map(srsCardFromRow);
 }
 
 export async function getAllSrsCards(): Promise<SrsCard[]> {
-  const data = throwOnError(await supabase.from('srs_cards').select().range(0, 9999));
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('srs_cards').select().order('due').order('id').range(from, to)
+  );
+  return data.map(srsCardFromRow);
+}
+
+export async function getSrsCardsByIds(ids: string[]): Promise<SrsCard[]> {
+  const data = await fetchByIdBatches(ids, (batchIds) =>
+    supabase.from('srs_cards').select().in('id', batchIds)
+  );
   return data.map(srsCardFromRow);
 }
 
@@ -489,27 +610,59 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
   return data ? deckFromRow(data) : undefined;
 }
 
+/**
+ * Ensure the user's default deck exists (idempotent upsert).
+ * Covers users who signed up before the Postgres trigger was added,
+ * or cases where the trigger failed silently.
+ */
+export async function ensureDefaultDeck(): Promise<string> {
+  const userId = await getUserId();
+  const deckId = 'default-' + userId;
+  throwOnError(
+    await supabase.from('decks').upsert(
+      {
+        id: deckId,
+        user_id: userId,
+        name: 'Default',
+        description: 'Default deck',
+        new_cards_per_day: 20,
+        reviews_per_day: 200,
+        created_at: Date.now(),
+      },
+      { onConflict: 'id', ignoreDuplicates: true }
+    )
+  );
+  return deckId;
+}
+
 // ============================================================
 // ReviewLogs
 // ============================================================
 
 export async function getReviewLogsByCardIds(cardIds: string[]): Promise<ReviewLog[]> {
-  if (cardIds.length === 0) return [];
-  const data = throwOnError(
-    await supabase.from('review_logs').select().in('card_id', cardIds)
+  const data = await fetchByIdBatches(cardIds, (batchIds) =>
+    supabase.from('review_logs').select().in('card_id', batchIds)
   );
   return data.map(reviewLogFromRow);
 }
 
 export async function getReviewLogsSince(timestamp: number): Promise<ReviewLog[]> {
-  const data = throwOnError(
-    await supabase.from('review_logs').select().gte('reviewed_at', timestamp)
+  const data = await fetchAllPages((from, to) =>
+    supabase
+      .from('review_logs')
+      .select()
+      .gte('reviewed_at', timestamp)
+      .order('reviewed_at')
+      .order('id')
+      .range(from, to)
   );
   return data.map(reviewLogFromRow);
 }
 
 export async function getAllReviewLogs(): Promise<ReviewLog[]> {
-  const data = throwOnError(await supabase.from('review_logs').select().range(0, 9999));
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('review_logs').select().order('reviewed_at').order('id').range(from, to)
+  );
   return data.map(reviewLogFromRow);
 }
 
@@ -528,12 +681,9 @@ export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void
 // ============================================================
 
 export async function deleteAllUserData(): Promise<void> {
-  // Order matters due to foreign keys: logs → cards → tokens → sentences, links → meanings
-  // RLS ensures this only deletes the current user's data
-  throwOnError(await supabase.from('review_logs').delete().neq('id', ''));
-  throwOnError(await supabase.from('srs_cards').delete().neq('id', ''));
-  throwOnError(await supabase.from('sentence_tokens').delete().neq('id', ''));
+  // Use FK cascades to reduce the number of independent delete steps.
+  // RLS ensures this only deletes the current user's data.
   throwOnError(await supabase.from('sentences').delete().neq('id', ''));
-  throwOnError(await supabase.from('meaning_links').delete().neq('id', ''));
   throwOnError(await supabase.from('meanings').delete().neq('id', ''));
+  throwOnError(await supabase.from('decks').delete().neq('id', ''));
 }

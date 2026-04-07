@@ -10,6 +10,17 @@ function isRateLimited(error: { status?: number; message?: string }): boolean {
   return error.status === 429 || /rate limit|too many/i.test(error.message ?? '');
 }
 
+async function deleteLegacyIndexedDb(): Promise<void> {
+  if (typeof window === 'undefined' || !('indexedDB' in window)) return;
+
+  await new Promise<void>((resolve) => {
+    const request = window.indexedDB.deleteDatabase('MandarinApp');
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+  });
+}
+
 interface AuthState {
   user: User | null;
   loading: boolean;
@@ -100,6 +111,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     authSubscription = null;
     initialized = false;
     await supabase.auth.signOut();
+    await deleteLegacyIndexedDb();
     clearCachedUserId();
     set({ user: null });
   },

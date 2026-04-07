@@ -8,7 +8,7 @@ import { AudioButton } from './AudioButton';
 import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
-import { reviewCard, Rating } from '../services/srs';
+import { reviewCard, type Grade } from '../services/srs';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
@@ -17,6 +17,8 @@ export function ReviewCard() {
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
   const [editingTags, setEditingTags] = useState(false);
+  const [pendingRating, setPendingRating] = useState<number | null>(null);
+  const [rateError, setRateError] = useState<string | null>(null);
 
   const card = currentCard();
 
@@ -33,6 +35,7 @@ export function ReviewCard() {
     }
 
     setEditingTags(false);
+    setRateError(null);
     load();
     return () => { cancelled = true; };
   }, [card?.id]);
@@ -55,9 +58,17 @@ export function ReviewCard() {
     setSentence((prev) => prev ? { ...prev, tags: newTags } : prev);
   };
 
-  const handleRate = async (rating: 1 | 2 | 3 | 4) => {
-    await reviewCard(card.id, rating as unknown as typeof Rating.Again);
-    next();
+  const handleRate = async (rating: Grade) => {
+    setRateError(null);
+    setPendingRating(rating);
+    try {
+      await reviewCard(card.id, rating);
+      next();
+    } catch {
+      setRateError('Could not save this review. Check your connection and try again.');
+    } finally {
+      setPendingRating(null);
+    }
   };
 
   return (
@@ -93,7 +104,7 @@ export function ReviewCard() {
         {!isFlipped ? (
           <button
             onClick={flip}
-            className="mt-6 w-full py-3 rounded-lg font-medium transition-colors"
+            className="mt-6 w-full py-3 rounded-lg font-medium transition-all active:scale-[0.98] active:brightness-90"
             style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
             Show Answer
@@ -185,6 +196,12 @@ export function ReviewCard() {
               )}
             </div>
 
+            {rateError && (
+              <p className="mt-4 text-sm text-center" style={{ color: 'var(--danger)' }} role="alert">
+                {rateError}
+              </p>
+            )}
+
             {/* Rating buttons */}
             <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
               {([
@@ -192,19 +209,27 @@ export function ReviewCard() {
                 { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
                 { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
                 { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
-              ]).map((btn) => (
-                <button
-                  key={btn.rating}
-                  onClick={() => handleRate(btn.rating)}
-                  className="py-3 min-h-[44px] rounded-lg font-medium transition-colors"
-                  style={{
-                    background: `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
-                    color: btn.color,
-                  }}
-                >
-                  {btn.label}
-                </button>
-              ))}
+              ]).map((btn) => {
+                const isSelected = pendingRating === btn.rating;
+                const isDisabled = pendingRating !== null;
+                return (
+                  <button
+                    key={btn.rating}
+                    onClick={() => handleRate(btn.rating)}
+                    disabled={isDisabled}
+                    className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+                    style={{
+                      background: isSelected
+                        ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
+                        : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
+                      color: isSelected ? 'var(--text-inverted)' : btn.color,
+                      opacity: isDisabled && !isSelected ? 0.4 : 1,
+                    }}
+                  >
+                    {btn.label}
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
