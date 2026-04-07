@@ -23,6 +23,12 @@ import type {
 
 let cachedUserId: string | null = null;
 
+// Clear cached userId whenever auth state changes (sign-out, token refresh,
+// session expiry, etc.) so we never write data under a stale user ID.
+supabase.auth.onAuthStateChange((_event, session) => {
+  cachedUserId = session?.user?.id ?? null;
+});
+
 export function clearCachedUserId() {
   cachedUserId = null;
 }
