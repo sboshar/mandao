@@ -8,12 +8,16 @@ interface PinyinIMEInputProps {
   readOnly?: boolean;
 }
 
+/** Does the buffer end with a complete tone-numbered syllable? e.g. "wo3", "e4", "zhuang1" */
+const TONE_SYLLABLE_RE = /[a-züü]{1,6}[1-5]$/i;
+
 export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: PinyinIMEInputProps) {
   const [pinyinBuf, setPinyinBuf] = useState('');
   const [candidates, setCandidates] = useState<DictEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const autoCommitRef = useRef(false);
 
   // Update candidates when pinyin buffer changes
   useEffect(() => {
@@ -32,7 +36,20 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
     });
     setCandidates(deduped);
     setSelectedIndex(0);
-  }, [pinyinBuf]);
+
+    // Auto-commit: if the buffer ends with a tone number and we have a single-char match, select it
+    if (autoCommitRef.current && TONE_SYLLABLE_RE.test(pinyinBuf.trim()) && deduped.length > 0) {
+      const top = deduped[0];
+      // Only auto-commit single-character results for single syllables
+      if (top.simplified.length === 1) {
+        onChange(value + top.simplified);
+        setPinyinBuf('');
+        setCandidates([]);
+        inputRef.current?.focus();
+      }
+    }
+    autoCommitRef.current = false;
+  }, [pinyinBuf, onChange, value]);
 
   const selectCandidate = useCallback(
     (entry: DictEntry) => {
@@ -71,12 +88,9 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
       e.preventDefault();
       setPinyinBuf('');
       setCandidates([]);
-    } else if (e.key >= '1' && e.key <= '9') {
-      const idx = Number(e.key) - 1;
-      if (candidates[idx]) {
-        e.preventDefault();
-        selectCandidate(candidates[idx]);
-      }
+    } else if (e.key >= '1' && e.key <= '5') {
+      // Tone numbers: let them through to the input buffer and flag for auto-commit
+      autoCommitRef.current = true;
     }
   };
 
@@ -111,7 +125,6 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
               className={`w-full text-left px-3 py-2 flex items-center gap-3 text-sm
                 hover:bg-blue-50 ${i === selectedIndex ? 'bg-blue-50' : ''}`}
             >
-              <span className="text-gray-400 w-4 text-xs">{i < 9 ? i + 1 : ''}</span>
               <span className="text-xl" lang="zh">{entry.simplified}</span>
               <span className="text-gray-400 text-xs">{entry.pinyin}</span>
               <span className="text-gray-500 text-xs truncate flex-1">{entry.english.split('/')[0]}</span>
