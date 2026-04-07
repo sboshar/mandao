@@ -76,7 +76,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       redirectTo: `${window.location.origin}/reset-password`,
     });
     // Always return null to avoid leaking whether the email exists
-    if (error) console.error('resetPassword error:', error.message);
+    if (error) console.error('resetPassword failed');
     return null;
   },
 
