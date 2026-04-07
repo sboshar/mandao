@@ -30,10 +30,18 @@ export function clearCachedUserId() {
 
 export async function getUserId(): Promise<string> {
   if (cachedUserId) return cachedUserId;
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  cachedUserId = user.id;
-  return user.id;
+  // Use getSession() instead of getUser() — reads from local storage
+  // and works offline. getUser() makes a network request to validate the JWT.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error('Not authenticated');
+  cachedUserId = session.user.id;
+  return session.user.id;
+}
+
+/** Returns cached user ID without hitting the network. Throws if not cached. */
+export function getCachedUserIdOrThrow(): string {
+  if (!cachedUserId) throw new Error('User ID not cached — not authenticated or cache cleared');
+  return cachedUserId;
 }
 
 function throwOnError<T>(result: { data: T | null; error: any }): T {
@@ -55,17 +63,18 @@ async function fetchAllPages<T>(
   }
 }
 
-// --- snake_case → camelCase mappers ---
+// --- shared snake_case → camelCase mappers ---
+import {
+  meaningFromRow,
+  meaningLinkFromRow,
+  sentenceFromRow,
+  tokenFromRow,
+  srsCardFromRow,
+  deckFromRow,
+  reviewLogFromRow,
+} from './mappers';
 
-function meaningFromRow(r: any): Meaning {
-  return {
-    id: r.id, headword: r.headword, pinyin: r.pinyin,
-    pinyinNumeric: r.pinyin_numeric, partOfSpeech: r.part_of_speech,
-    englishShort: r.english_short, englishFull: r.english_full,
-    type: r.type, level: r.level,
-    createdAt: r.created_at, updatedAt: r.updated_at ?? r.created_at,
-  };
-}
+// --- camelCase → snake_case (used only by this module) ---
 
 function meaningToRow(m: Meaning, userId: string) {
   return {
@@ -77,26 +86,10 @@ function meaningToRow(m: Meaning, userId: string) {
   };
 }
 
-function meaningLinkFromRow(r: any): MeaningLink {
-  return {
-    id: r.id, parentMeaningId: r.parent_meaning_id,
-    childMeaningId: r.child_meaning_id, position: r.position, role: r.role,
-  };
-}
-
 function meaningLinkToRow(l: MeaningLink, userId: string) {
   return {
     id: l.id, user_id: userId, parent_meaning_id: l.parentMeaningId,
     child_meaning_id: l.childMeaningId, position: l.position, role: l.role,
-  };
-}
-
-function sentenceFromRow(r: any): Sentence {
-  return {
-    id: r.id, chinese: r.chinese, english: r.english,
-    pinyin: r.pinyin, pinyinSandhi: r.pinyin_sandhi,
-    audioUrl: r.audio_url, source: r.source,
-    tags: r.tags || [], createdAt: r.created_at,
   };
 }
 
@@ -109,30 +102,11 @@ function sentenceToRow(s: Sentence, userId: string) {
   };
 }
 
-function tokenFromRow(r: any): SentenceToken {
-  return {
-    id: r.id, sentenceId: r.sentence_id, meaningId: r.meaning_id,
-    position: r.position, surfaceForm: r.surface_form,
-    pinyinSandhi: r.pinyin_sandhi,
-  };
-}
-
 function tokenToRow(t: SentenceToken, userId: string) {
   return {
     id: t.id, user_id: userId, sentence_id: t.sentenceId,
     meaning_id: t.meaningId, position: t.position,
     surface_form: t.surfaceForm, pinyin_sandhi: t.pinyinSandhi,
-  };
-}
-
-function srsCardFromRow(r: any): SrsCard {
-  return {
-    id: r.id, sentenceId: r.sentence_id, deckId: r.deck_id,
-    reviewMode: r.review_mode, due: r.due,
-    stability: r.stability, difficulty: r.difficulty,
-    elapsedDays: r.elapsed_days, scheduledDays: r.scheduled_days,
-    reps: r.reps, lapses: r.lapses, state: r.state,
-    lastReview: r.last_review, createdAt: r.created_at,
   };
 }
 
@@ -144,24 +118,6 @@ function srsCardToRow(c: SrsCard, userId: string) {
     elapsed_days: c.elapsedDays, scheduled_days: c.scheduledDays,
     reps: c.reps, lapses: c.lapses, state: c.state,
     last_review: c.lastReview, created_at: c.createdAt,
-  };
-}
-
-function deckFromRow(r: any): Deck {
-  return {
-    id: r.id, name: r.name, description: r.description,
-    newCardsPerDay: r.new_cards_per_day, reviewsPerDay: r.reviews_per_day,
-    createdAt: r.created_at,
-  };
-}
-
-function reviewLogFromRow(r: any): ReviewLog {
-  return {
-    id: r.id, cardId: r.card_id, rating: r.rating,
-    state: r.state, due: r.due,
-    stability: r.stability, difficulty: r.difficulty,
-    elapsedDays: r.elapsed_days, scheduledDays: r.scheduled_days,
-    reviewedAt: r.reviewed_at,
   };
 }
 
@@ -245,7 +201,8 @@ export async function insertSentence(sentence: Sentence): Promise<void> {
 }
 
 export async function updateSentenceTags(id: string, tags: string[]): Promise<void> {
-  throwOnError(await supabase.from('sentences').update({ tags }).eq('id', id));
+  const userId = await getUserId();
+  throwOnError(await supabase.from('sentences').update({ tags }).eq('id', id).eq('user_id', userId));
 }
 
 export async function deleteSentenceById(id: string): Promise<void> {
@@ -358,11 +315,8 @@ export async function insertReviewLog(log: ReviewLog): Promise<void> {
 }
 
 // ============================================================
-// Bulk delete
+// Sync metadata
 // ============================================================
 
-export async function deleteAllUserData(): Promise<void> {
-  throwOnError(await supabase.from('sentences').delete().neq('id', ''));
-  throwOnError(await supabase.from('meanings').delete().neq('id', ''));
-  throwOnError(await supabase.from('decks').delete().neq('id', ''));
-}
+// Bulk delete is now handled by the delete_all_user_data RPC (via syncEngine).
+// No remote deleteAllUserData needed here.

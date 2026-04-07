@@ -12,80 +12,17 @@
  */
 import { supabase } from '../lib/supabase';
 import { localDb, type SyncOp } from './localDb';
-import type {
-  Meaning,
-  MeaningLink,
-  Sentence,
-  SentenceToken,
-  SrsCard,
-  Deck,
-  ReviewLog,
-} from './schema';
+import {
+  meaningFromRow,
+  meaningLinkFromRow,
+  sentenceFromRow,
+  tokenFromRow,
+  srsCardFromRow,
+  deckFromRow,
+  reviewLogFromRow,
+} from './mappers';
+import { computeSafeUsn, groupConsecutiveRuns, type TableStats } from './syncHelpers';
 import { useSyncStore } from '../stores/syncStore';
-
-// Row mappers (snake_case → camelCase) for pull results
-function meaningFromRow(r: any): Meaning {
-  return {
-    id: r.id, headword: r.headword, pinyin: r.pinyin,
-    pinyinNumeric: r.pinyin_numeric, partOfSpeech: r.part_of_speech,
-    englishShort: r.english_short, englishFull: r.english_full,
-    type: r.type, level: r.level,
-    createdAt: r.created_at, updatedAt: r.updated_at,
-  };
-}
-
-function meaningLinkFromRow(r: any): MeaningLink {
-  return {
-    id: r.id, parentMeaningId: r.parent_meaning_id,
-    childMeaningId: r.child_meaning_id, position: r.position, role: r.role,
-  };
-}
-
-function sentenceFromRow(r: any): Sentence {
-  return {
-    id: r.id, chinese: r.chinese, english: r.english,
-    pinyin: r.pinyin, pinyinSandhi: r.pinyin_sandhi,
-    audioUrl: r.audio_url, source: r.source,
-    tags: r.tags || [], createdAt: r.created_at,
-  };
-}
-
-function tokenFromRow(r: any): SentenceToken {
-  return {
-    id: r.id, sentenceId: r.sentence_id, meaningId: r.meaning_id,
-    position: r.position, surfaceForm: r.surface_form,
-    pinyinSandhi: r.pinyin_sandhi,
-  };
-}
-
-function srsCardFromRow(r: any): SrsCard {
-  return {
-    id: r.id, sentenceId: r.sentence_id, deckId: r.deck_id,
-    reviewMode: r.review_mode, due: r.due,
-    stability: r.stability, difficulty: r.difficulty,
-    elapsedDays: r.elapsed_days, scheduledDays: r.scheduled_days,
-    reps: r.reps, lapses: r.lapses, state: r.state,
-    lastReview: r.last_review, createdAt: r.created_at,
-  };
-}
-
-function deckFromRow(r: any): Deck {
-  return {
-    id: r.id, name: r.name, description: r.description,
-    newCardsPerDay: r.new_cards_per_day, reviewsPerDay: r.reviews_per_day,
-    createdAt: r.created_at,
-  };
-}
-
-function reviewLogFromRow(r: any): ReviewLog {
-  return {
-    id: r.id, cardId: r.card_id, rating: r.rating,
-    state: r.state, due: r.due,
-    stability: r.stability, difficulty: r.difficulty,
-    elapsedDays: r.elapsed_days, scheduledDays: r.scheduled_days,
-    reviewedAt: r.reviewed_at,
-  };
-}
 
 // ============================================================
 // Device ID (stable per browser)
@@ -131,45 +68,31 @@ async function pushOutbox(): Promise<void> {
   const ids = pending.map((o) => o.id!);
   await localDb.outbox.where('id').anyOf(ids).modify({ status: 'inflight' });
 
-  const groups = new Map<string, SyncOp[]>();
-  for (const op of pending) {
-    const arr = groups.get(op.op) || [];
-    arr.push(op);
-    groups.set(op.op, arr);
-  }
+  const runs = groupConsecutiveRuns(pending);
 
   const succeeded: number[] = [];
   const failed: number[] = [];
 
   try {
-    for (const [opType, ops] of groups) {
+    for (let i = 0; i < runs.length; i++) {
+      const ops = runs[i];
       try {
-        switch (opType) {
-          case 'reviewCard':
-            await pushReviewOps(ops);
-            break;
-          case 'ingestBundle':
-            for (const op of ops) await pushIngestBundle(op);
-            break;
-        case 'deleteEntity':
-          await pushDeleteOps(ops);
-          break;
-        case 'deleteAllData':
-          await pushDeleteAllData();
-          break;
-        case 'updateTags':
-          for (const op of ops) await pushUpdateTags(op);
-          break;
-        }
+        await pushOpBatch(ops);
         succeeded.push(...ops.map((o) => o.id!));
       } catch (e) {
-        console.error(`Sync push failed for ${opType}:`, e);
-        failed.push(...ops.map((o) => o.id!));
+        if (e instanceof PartialBatchError) {
+          succeeded.push(...e.succeeded);
+          failed.push(...e.failed);
+        } else {
+          console.error(`Sync push failed for ${ops[0].op}:`, e);
+          failed.push(...ops.map((o) => o.id!));
+        }
+        // Stop processing further runs to preserve causal ordering.
+        // Remaining un-attempted ops stay inflight → reset in finally.
+        break;
       }
     }
   } finally {
-    // Always reset state — even if bookkeeping itself throws,
-    // the remaining inflight rows are caught by recoverInflightOps on next startup.
     if (succeeded.length > 0) {
       await localDb.outbox.bulkDelete(succeeded);
     }
@@ -182,9 +105,8 @@ async function pushOutbox(): Promise<void> {
           op.attempts += 1;
         });
     }
-    // Safety net: any ids not in succeeded or failed are still inflight
-    // (shouldn't happen, but guard against it)
-    const unaccounted = ids.filter((id) => !succeeded.includes(id) && !failed.includes(id));
+    const handled = new Set([...succeeded, ...failed]);
+    const unaccounted = ids.filter((id) => !handled.has(id));
     if (unaccounted.length > 0) {
       await localDb.outbox
         .where('id')
@@ -192,6 +114,64 @@ async function pushOutbox(): Promise<void> {
         .modify({ status: 'pending' });
     }
   }
+}
+
+/**
+ * Push a batch of ops (all same type). For batch RPCs (reviewCard,
+ * deleteEntity), the entire batch succeeds or fails together. For
+ * sequential ops (ingestBundle, updateTags), each is attempted
+ * individually — partial results are returned via the thrown error.
+ */
+async function pushOpBatch(ops: SyncOp[]): Promise<void> {
+  switch (ops[0].op) {
+    case 'reviewCard':
+      await pushReviewOps(ops);
+      break;
+    case 'ingestBundle':
+      await pushSequential(ops, pushIngestBundle);
+      break;
+    case 'deleteEntity':
+      await pushDeleteOps(ops);
+      break;
+    case 'deleteAllData':
+      await pushDeleteAllData();
+      break;
+    case 'updateTags':
+      await pushSequential(ops, pushUpdateTags);
+      break;
+  }
+}
+
+/**
+ * Process ops one-at-a-time, recording individual success/failure.
+ * Throws a PartialBatchError if any fail, so the caller can
+ * mark only the actually-failed ops.
+ */
+class PartialBatchError extends Error {
+  succeeded: number[];
+  failed: number[];
+  constructor(succeeded: number[], failed: number[]) {
+    super('Partial batch failure');
+    this.succeeded = succeeded;
+    this.failed = failed;
+  }
+}
+
+async function pushSequential(
+  ops: SyncOp[],
+  fn: (op: SyncOp) => Promise<void>,
+): Promise<void> {
+  const ok: number[] = [];
+  const bad: number[] = [];
+  for (const op of ops) {
+    try {
+      await fn(op);
+      ok.push(op.id!);
+    } catch {
+      bad.push(op.id!);
+    }
+  }
+  if (bad.length > 0) throw new PartialBatchError(ok, bad);
 }
 
 async function pushReviewOps(ops: SyncOp[]): Promise<void> {
@@ -212,23 +192,22 @@ async function pushDeleteOps(ops: SyncOp[]): Promise<void> {
 }
 
 async function pushDeleteAllData(): Promise<void> {
-  // Server-side bulk delete via FK cascades + RLS
-  const { error: e1 } = await supabase.from('sentences').delete().neq('id', '');
-  if (e1) throw new Error(e1.message);
-  const { error: e2 } = await supabase.from('meanings').delete().neq('id', '');
-  if (e2) throw new Error(e2.message);
-  const { error: e3 } = await supabase.from('decks').delete().neq('id', '');
-  if (e3) throw new Error(e3.message);
+  const { error } = await supabase.rpc('delete_all_user_data');
+  if (error) throw new Error(error.message);
 }
 
 async function pushUpdateTags(op: SyncOp): Promise<void> {
   const { id, tags } = op.payload;
   // Uses RLS-protected direct update. The bump_sync_meta trigger
   // auto-sets usn + updated_at on the server side.
+  // Explicit user_id filter for defense-in-depth alongside RLS.
+  const userId = (await supabase.auth.getSession()).data.session?.user?.id;
+  if (!userId) throw new Error('Not authenticated');
   const { error } = await supabase
     .from('sentences')
     .update({ tags })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('user_id', userId);
   if (error) throw new Error(error.message);
 }
 
@@ -271,8 +250,17 @@ async function pullOnePage(): Promise<boolean> {
     graves: any[];
   };
 
-  let maxUsn = lastUsn;
-  let totalRows = 0;
+  const stats: TableStats[] = [];
+  let syncResult: { safeUsn: number; anyTruncated: boolean } | null = null;
+
+  function trackRows(rows: any[]): number {
+    let tableMax = lastUsn;
+    for (const r of rows) {
+      if (r.usn > tableMax) tableMax = r.usn;
+    }
+    stats.push({ maxUsn: tableMax, count: rows.length });
+    return tableMax;
+  }
 
   await localDb.transaction(
     'rw',
@@ -287,40 +275,36 @@ async function pullOnePage(): Promise<boolean> {
       localDb.syncMeta,
     ],
     async () => {
-      for (const r of changes.meanings) {
-        await localDb.meanings.put(meaningFromRow(r));
-        if (r.usn > maxUsn) maxUsn = r.usn;
+      // Simple tables: server-wins upsert via bulkPut (much faster than per-row put)
+      if (changes.meanings.length > 0) {
+        await localDb.meanings.bulkPut(changes.meanings.map(meaningFromRow));
       }
-      totalRows += changes.meanings.length;
+      trackRows(changes.meanings);
 
-      for (const r of changes.meaning_links) {
-        await localDb.meaningLinks.put(meaningLinkFromRow(r));
-        if (r.usn > maxUsn) maxUsn = r.usn;
+      if (changes.meaning_links.length > 0) {
+        await localDb.meaningLinks.bulkPut(changes.meaning_links.map(meaningLinkFromRow));
       }
-      totalRows += changes.meaning_links.length;
+      trackRows(changes.meaning_links);
 
-      for (const r of changes.sentences) {
-        await localDb.sentences.put(sentenceFromRow(r));
-        if (r.usn > maxUsn) maxUsn = r.usn;
+      if (changes.sentences.length > 0) {
+        await localDb.sentences.bulkPut(changes.sentences.map(sentenceFromRow));
       }
-      totalRows += changes.sentences.length;
+      trackRows(changes.sentences);
 
-      for (const r of changes.sentence_tokens) {
-        await localDb.sentenceTokens.put(tokenFromRow(r));
-        if (r.usn > maxUsn) maxUsn = r.usn;
+      if (changes.sentence_tokens.length > 0) {
+        await localDb.sentenceTokens.bulkPut(changes.sentence_tokens.map(tokenFromRow));
       }
-      totalRows += changes.sentence_tokens.length;
+      trackRows(changes.sentence_tokens);
 
-      for (const r of changes.decks) {
-        await localDb.decks.put(deckFromRow(r));
-        if (r.usn > maxUsn) maxUsn = r.usn;
+      if (changes.decks.length > 0) {
+        await localDb.decks.bulkPut(changes.decks.map(deckFromRow));
       }
-      totalRows += changes.decks.length;
+      trackRows(changes.decks);
 
+      // SRS cards: last-answered-wins merge (requires per-row check)
       for (const r of changes.srs_cards) {
         const remote = srsCardFromRow(r);
         const existing = await localDb.srsCards.get(remote.id);
-
         if (!existing) {
           await localDb.srsCards.put(remote);
         } else {
@@ -330,35 +314,52 @@ async function pullOnePage(): Promise<boolean> {
             await localDb.srsCards.put(remote);
           }
         }
-        if (r.usn > maxUsn) maxUsn = r.usn;
       }
-      totalRows += changes.srs_cards.length;
+      trackRows(changes.srs_cards);
 
+      // Review logs: append-only (skip duplicates, requires per-row check)
       for (const r of changes.review_logs) {
         const existing = await localDb.reviewLogs.get(r.id);
         if (!existing) {
           await localDb.reviewLogs.put(reviewLogFromRow(r));
         }
-        if (r.usn > maxUsn) maxUsn = r.usn;
       }
-      totalRows += changes.review_logs.length;
+      trackRows(changes.review_logs);
 
       for (const g of changes.graves) {
-        const { entity_type, entity_id, usn } = g;
+        const { entity_type, entity_id } = g;
         switch (entity_type) {
-          case 'sentence':
+          case 'sentence': {
+            const cards = await localDb.srsCards.where('sentenceId').equals(entity_id).toArray();
+            const cardIds = cards.map((c) => c.id);
+            if (cardIds.length > 0) {
+              await localDb.reviewLogs.where('cardId').anyOf(cardIds).delete();
+            }
+            await localDb.srsCards.where('sentenceId').equals(entity_id).delete();
             await localDb.sentenceTokens.where('sentenceId').equals(entity_id).delete();
             await localDb.sentences.delete(entity_id);
             break;
+          }
           case 'meaning':
+            await localDb.meaningLinks.where('parentMeaningId').equals(entity_id).delete();
+            await localDb.meaningLinks.where('childMeaningId').equals(entity_id).delete();
             await localDb.meanings.delete(entity_id);
             break;
-          case 'deck':
+          case 'deck': {
+            const deckCards = await localDb.srsCards.where('deckId').equals(entity_id).toArray();
+            const deckCardIds = deckCards.map((c) => c.id);
+            if (deckCardIds.length > 0) {
+              await localDb.reviewLogs.where('cardId').anyOf(deckCardIds).delete();
+            }
+            await localDb.srsCards.where('deckId').equals(entity_id).delete();
             await localDb.decks.delete(entity_id);
             break;
-          case 'srs_card':
+          }
+          case 'srs_card': {
+            await localDb.reviewLogs.where('cardId').equals(entity_id).delete();
             await localDb.srsCards.delete(entity_id);
             break;
+          }
           case 'review_log':
             await localDb.reviewLogs.delete(entity_id);
             break;
@@ -369,17 +370,18 @@ async function pullOnePage(): Promise<boolean> {
             await localDb.sentenceTokens.delete(entity_id);
             break;
         }
-        if (usn > maxUsn) maxUsn = usn;
       }
-      totalRows += changes.graves.length;
+      trackRows(changes.graves);
 
-      if (maxUsn > lastUsn) {
-        await localDb.syncMeta.put({ key: 'lastUsn', value: maxUsn });
+      syncResult = computeSafeUsn(stats, lastUsn, PULL_PAGE_SIZE);
+      if (syncResult.safeUsn > lastUsn) {
+        await localDb.syncMeta.put({ key: 'lastUsn', value: syncResult.safeUsn });
       }
     }
   );
 
-  return maxUsn > lastUsn && totalRows >= PULL_PAGE_SIZE;
+  const totalRows = stats.reduce((sum, s) => sum + s.count, 0);
+  return totalRows > 0 && syncResult!.anyTruncated;
 }
 
 // ============================================================
@@ -405,9 +407,14 @@ export async function runSync(): Promise<void> {
     await pullChanges();
 
     const remaining = await localDb.outbox.where('status').equals('pending').count();
-    store.setPendingCount(remaining);
+    const stuck = await localDb.outbox.where('status').equals('failed').count();
+    store.setPendingCount(remaining + stuck);
     store.setLastSyncedAt(Date.now());
-    store.setStatus('synced');
+    if (stuck > 0) {
+      store.setError(`${stuck} operation(s) failed permanently`);
+    } else {
+      store.setStatus('synced');
+    }
   } catch (e: any) {
     console.error('Sync failed:', e);
     store.setError(e.message || 'Sync failed');
@@ -435,23 +442,37 @@ export function scheduleSyncSoon(delayMs = 2000): void {
 // ============================================================
 
 let periodicInterval: ReturnType<typeof setInterval> | null = null;
+let onlineHandler: (() => void) | null = null;
+let offlineHandler: (() => void) | null = null;
 
 export function startSyncListeners(): void {
-  window.addEventListener('online', () => {
+  stopSyncListeners();
+
+  onlineHandler = () => {
     useSyncStore.getState().setOnline(true);
     runSync();
-  });
-  window.addEventListener('offline', () => {
+  };
+  offlineHandler = () => {
     useSyncStore.getState().setOnline(false);
-  });
+  };
 
-  // Periodic sync every 60s when online
+  window.addEventListener('online', onlineHandler);
+  window.addEventListener('offline', offlineHandler);
+
   periodicInterval = setInterval(() => {
     if (navigator.onLine) runSync();
   }, 60_000);
 }
 
 export function stopSyncListeners(): void {
+  if (onlineHandler) {
+    window.removeEventListener('online', onlineHandler);
+    onlineHandler = null;
+  }
+  if (offlineHandler) {
+    window.removeEventListener('offline', offlineHandler);
+    offlineHandler = null;
+  }
   if (periodicInterval) {
     clearInterval(periodicInterval);
     periodicInterval = null;
