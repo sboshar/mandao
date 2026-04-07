@@ -166,6 +166,14 @@ body {
   background: var(--bg-surface-hover);
 }
 
+.surface-hover:active {
+  background: var(--bg-inset);
+}
+
+button:active:not(:disabled) {
+  filter: brightness(0.92);
+}
+
 .inset {
   background: var(--bg-inset);
 }

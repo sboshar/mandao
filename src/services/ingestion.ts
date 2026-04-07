@@ -16,7 +16,6 @@ import type {
   SrsCard,
   ReviewMode,
 } from '../db/schema';
-import { getDefaultDeckId } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 
 // ============================================================
@@ -125,8 +124,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
   await repo.insertSentenceTokens(tokenRecords);
 
   // Create SRS cards (one per review mode)
-  const userId = await repo.getUserId();
-  const deckId = getDefaultDeckId(userId);
+  const deckId = await repo.ensureDefaultDeck();
   const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
   const cards: SrsCard[] = modes.map((mode) => ({
     id: uuid(),

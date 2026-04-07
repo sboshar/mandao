@@ -17,6 +17,7 @@ export function ReviewCard() {
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
   const [editingTags, setEditingTags] = useState(false);
+  const [pendingRating, setPendingRating] = useState<number | null>(null);
 
   const card = currentCard();
 
@@ -56,7 +57,9 @@ export function ReviewCard() {
   };
 
   const handleRate = async (rating: 1 | 2 | 3 | 4) => {
+    setPendingRating(rating);
     await reviewCard(card.id, rating as unknown as typeof Rating.Again);
+    setPendingRating(null);
     next();
   };
 
@@ -93,7 +96,7 @@ export function ReviewCard() {
         {!isFlipped ? (
           <button
             onClick={flip}
-            className="mt-6 w-full py-3 rounded-lg font-medium transition-colors"
+            className="mt-6 w-full py-3 rounded-lg font-medium transition-all active:scale-[0.98] active:brightness-90"
             style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
             Show Answer
@@ -192,19 +195,27 @@ export function ReviewCard() {
                 { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
                 { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
                 { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
-              ]).map((btn) => (
-                <button
-                  key={btn.rating}
-                  onClick={() => handleRate(btn.rating)}
-                  className="py-3 min-h-[44px] rounded-lg font-medium transition-colors"
-                  style={{
-                    background: `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
-                    color: btn.color,
-                  }}
-                >
-                  {btn.label}
-                </button>
-              ))}
+              ]).map((btn) => {
+                const isSelected = pendingRating === btn.rating;
+                const isDisabled = pendingRating !== null;
+                return (
+                  <button
+                    key={btn.rating}
+                    onClick={() => handleRate(btn.rating)}
+                    disabled={isDisabled}
+                    className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+                    style={{
+                      background: isSelected
+                        ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
+                        : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
+                      color: isSelected ? 'var(--text-inverted)' : btn.color,
+                      opacity: isDisabled && !isSelected ? 0.4 : 1,
+                    }}
+                  >
+                    {btn.label}
+                  </button>
+                );
+              })}
             </div>
           </>
         )}

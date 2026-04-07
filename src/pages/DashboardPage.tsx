@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getDueCounts } from '../services/srs';
-import { getDefaultDeckId } from '../db/schema';
 import * as repo from '../db/repo';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { useTutorialStore } from '../stores/tutorialStore';
@@ -25,7 +24,7 @@ export function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     async function load() {
-      const deckId = getDefaultDeckId(user!.id);
+      const deckId = await repo.ensureDefaultDeck();
       const c = await getDueCounts(deckId);
       setCounts(c);
       setTotalSentences(await repo.getSentencesCount());

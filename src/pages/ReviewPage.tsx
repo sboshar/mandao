@@ -5,8 +5,8 @@ import { getReviewQueue } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
-import { getDefaultDeckId } from '../db/schema';
 import type { ReviewMode } from '../db/schema';
+import { ensureDefaultDeck } from '../db/repo';
 import { useAuthStore } from '../stores/authStore';
 
 type ModeOption = ReviewMode | 'both';
@@ -23,18 +23,24 @@ export function ReviewPage() {
   const navigate = useNavigate();
   const { setQueue, remaining, reset } = useReviewStore();
   const user = useAuthStore((s) => s.user);
-  const effectiveDeckId = deckId || (user ? getDefaultDeckId(user.id) : 'default');
+  const [resolvedDeckId, setResolvedDeckId] = useState<string | null>(deckId ?? null);
   const [mode, setMode] = useState<ModeOption>('en-to-zh');
   const [started, setStarted] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [showFilter, setShowFilter] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     getAllTags().then(setAllTags);
+    if (!deckId) {
+      ensureDefaultDeck().then(setResolvedDeckId);
+    }
   }, []);
 
   const startReview = async (selectedMode: ModeOption) => {
+    setLoading(true);
+    const effectiveDeckId = resolvedDeckId ?? 'default';
     const queue = await getReviewQueue(effectiveDeckId, selectedMode, filterTags.length > 0 ? filterTags : null);
     setQueue(queue);
     setStarted(true);
@@ -113,20 +119,25 @@ export function ReviewPage() {
             { key: 'zh-to-en' as ModeOption, label: 'Chinese \u2192 English', desc: 'See characters, produce English meaning' },
             { key: 'py-to-en-zh' as ModeOption, label: 'Pinyin \u2192 English + Chinese', desc: 'See pinyin (tone sandhi), produce meaning + characters' },
             { key: 'both' as ModeOption, label: 'All (mixed)', desc: 'Interleave all directions' },
-          ]).map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => { setMode(opt.key); startReview(opt.key); }}
-              className="w-full p-3 sm:p-4 rounded-lg text-left transition-colors"
-              style={{
-                background: mode === opt.key ? 'var(--bg-inset)' : 'var(--bg-surface)',
-                border: `2px solid ${mode === opt.key ? MODE_COLORS[opt.key] : 'var(--border)'}`,
-              }}
-            >
-              <div className="font-medium">{opt.label}</div>
-              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{opt.desc}</div>
-            </button>
-          ))}
+          ]).map((opt) => {
+            const isSelected = loading && mode === opt.key;
+            return (
+              <button
+                key={opt.key}
+                onClick={() => { setMode(opt.key); startReview(opt.key); }}
+                disabled={loading}
+                className="w-full p-3 sm:p-4 rounded-lg text-left transition-all active:scale-[0.98]"
+                style={{
+                  background: isSelected ? `color-mix(in srgb, ${MODE_COLORS[opt.key]} 15%, var(--bg-inset))` : mode === opt.key ? 'var(--bg-inset)' : 'var(--bg-surface)',
+                  border: `2px solid ${isSelected ? MODE_COLORS[opt.key] : mode === opt.key ? MODE_COLORS[opt.key] : 'var(--border)'}`,
+                  opacity: loading && !isSelected ? 0.5 : 1,
+                }}
+              >
+                <div className="font-medium">{opt.label}{isSelected ? ' ...' : ''}</div>
+                <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{opt.desc}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     );

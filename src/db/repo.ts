@@ -489,6 +489,31 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
   return data ? deckFromRow(data) : undefined;
 }
 
+/**
+ * Ensure the user's default deck exists (idempotent upsert).
+ * Covers users who signed up before the Postgres trigger was added,
+ * or cases where the trigger failed silently.
+ */
+export async function ensureDefaultDeck(): Promise<string> {
+  const userId = await getUserId();
+  const deckId = 'default-' + userId;
+  throwOnError(
+    await supabase.from('decks').upsert(
+      {
+        id: deckId,
+        user_id: userId,
+        name: 'Default',
+        description: 'Default deck',
+        new_cards_per_day: 20,
+        reviews_per_day: 200,
+        created_at: Math.floor(Date.now()),
+      },
+      { onConflict: 'id', ignoreDuplicates: true }
+    )
+  );
+  return deckId;
+}
+
 // ============================================================
 // ReviewLogs
 // ============================================================
