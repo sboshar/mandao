@@ -9,6 +9,7 @@ import {
 import { tokenizeSentence } from '../services/tokenizer';
 import { loadCedict, isLoaded as cedictLoaded } from '../lib/cedict';
 import { numericStringToDiacritic } from '../services/toneSandhi';
+import { PinyinIMEInput } from '../components/PinyinIMEInput';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TUTORIAL_SENTENCES } from '../data/tutorialSentences';
@@ -39,6 +40,7 @@ export function AddSentencePage() {
   const [dictLoading, setDictLoading] = useState(false);
   const [llmPasteValue, setLlmPasteValue] = useState('');
   const [promptCopied, setPromptCopied] = useState(false);
+  const [usePinyinIME, setUsePinyinIME] = useState(false);
 
   // Load dictionary on mount
   useEffect(() => {
@@ -260,19 +262,42 @@ export function AddSentencePage() {
             </TutorialBanner>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Chinese Sentence
-            </label>
-            <input
-              type="text"
-              value={chinese}
-              onChange={(e) => setChinese(e.target.value)}
-              placeholder="他差不多吃完了。"
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500
-                focus:border-blue-500 text-lg"
-              lang="zh"
-              readOnly={isTutorial && tutorialStep === 1}
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-700">
+                Chinese Sentence
+              </label>
+              {!(isTutorial && tutorialStep === 1) && (
+                <button
+                  type="button"
+                  onClick={() => setUsePinyinIME(!usePinyinIME)}
+                  className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                    usePinyinIME
+                      ? 'bg-blue-100 border-blue-300 text-blue-700'
+                      : 'bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {usePinyinIME ? '拼 Pinyin ON' : '拼 Pinyin OFF'}
+                </button>
+              )}
+            </div>
+            {usePinyinIME && !(isTutorial && tutorialStep === 1) ? (
+              <PinyinIMEInput
+                value={chinese}
+                onChange={setChinese}
+                placeholder="Type pinyin, e.g. nihao"
+              />
+            ) : (
+              <input
+                type="text"
+                value={chinese}
+                onChange={(e) => setChinese(e.target.value)}
+                placeholder="他差不多吃完了。"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500
+                  focus:border-blue-500 text-lg"
+                lang="zh"
+                readOnly={isTutorial && tutorialStep === 1}
+              />
+            )}
           </div>
           <button
             onClick={handleSegment}
