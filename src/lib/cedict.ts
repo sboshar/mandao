@@ -7,9 +7,14 @@ export type { DictEntry };
 
 let simplifiedTrie: Trie | null = null;
 let traditionalTrie: Trie | null = null;
+let pinyinTrie: Trie | null = null;
 let allEntries: DictEntry[] = [];
 let loaded = false;
 let loading: Promise<void> | null = null;
+
+function stripTones(pinyin: string): string {
+  return pinyin.replace(/[0-9\s]/g, '').toLowerCase();
+}
 
 function parseLine(line: string): DictEntry | null {
   const match = line.match(/^(\S+)\s(\S+)\s\[([^\]]+)\]\s\/(.+)\//);
@@ -34,6 +39,7 @@ export async function loadCedict(): Promise<void> {
 
     simplifiedTrie = new Trie();
     traditionalTrie = new Trie();
+    pinyinTrie = new Trie();
 
     const lines = text.split('\n');
     const entries: DictEntry[] = [];
@@ -44,6 +50,8 @@ export async function loadCedict(): Promise<void> {
       entries.push(entry);
       simplifiedTrie.push(entry.simplified, entry);
       traditionalTrie.push(entry.traditional, entry);
+      const pyKey = stripTones(entry.pinyin);
+      if (pyKey) pinyinTrie.push(pyKey, entry);
     }
     allEntries = entries;
 
@@ -89,4 +97,59 @@ export function lookupPrefix(prefix: string): DictEntry[] {
   const simplified = simplifiedTrie.getPrefix(prefix);
   const traditional = traditionalTrie.getPrefix(prefix);
   return [...simplified, ...traditional];
+}
+
+function extractTones(input: string): string[] {
+  return Array.from(input.matchAll(/[1-5]/g), (m) => m[0]);
+}
+
+function matchesTonePattern(entryPinyin: string, inputTones: string[]): boolean {
+  if (inputTones.length === 0) return true;
+  const entryTones = extractTones(entryPinyin);
+  for (let i = 0; i < inputTones.length && i < entryTones.length; i++) {
+    if (inputTones[i] !== entryTones[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Look up CEDICT entries by pinyin. Strips tone numbers for trie lookup,
+ * then uses them to rank results (tone match first, then shorter words,
+ * then definition count as a frequency proxy). Deduplicates by simplified form.
+ */
+export function lookupByPinyin(input: string, limit = 30): DictEntry[] {
+  if (!pinyinTrie) return [];
+  const query = stripTones(input);
+  if (!query) return [];
+
+  const inputTones = extractTones(input);
+  const exact = pinyinTrie.get(query);
+  const allPrefix = pinyinTrie.getPrefix(query);
+  // getPrefix includes exact matches, so filter them out for separate sorting
+  const exactSet = new Set(exact);
+  const prefix = allPrefix.filter((e) => !exactSet.has(e));
+
+  const defCount = (e: DictEntry) => e.english.split('/').filter(Boolean).length;
+
+  const sortFn = (a: DictEntry, b: DictEntry) => {
+    const aTone = matchesTonePattern(a.pinyin, inputTones) ? 0 : 1;
+    const bTone = matchesTonePattern(b.pinyin, inputTones) ? 0 : 1;
+    if (aTone !== bTone) return aTone - bTone;
+    const lenDiff = a.simplified.length - b.simplified.length;
+    if (lenDiff !== 0) return lenDiff;
+    return defCount(b) - defCount(a);
+  };
+  exact.sort(sortFn);
+  prefix.sort(sortFn);
+
+  // Deduplicate by simplified form, preserving sort order
+  const seen = new Set<string>();
+  const results: DictEntry[] = [];
+  for (const entry of [...exact, ...prefix]) {
+    if (seen.has(entry.simplified)) continue;
+    seen.add(entry.simplified);
+    results.push(entry);
+    if (results.length >= limit) break;
+  }
+  return results;
 }
