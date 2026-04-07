@@ -8,16 +8,12 @@ interface PinyinIMEInputProps {
   readOnly?: boolean;
 }
 
-/** Does the buffer end with a complete tone-numbered syllable? e.g. "wo3", "e4", "zhuang1" */
-const TONE_SYLLABLE_RE = /[a-züü]{1,6}[1-5]$/i;
-
 export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: PinyinIMEInputProps) {
   const [pinyinBuf, setPinyinBuf] = useState('');
   const [candidates, setCandidates] = useState<DictEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const autoCommitRef = useRef(false);
 
   // Update candidates when pinyin buffer changes
   useEffect(() => {
@@ -36,20 +32,7 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
     });
     setCandidates(deduped);
     setSelectedIndex(0);
-
-    // Auto-commit: if the buffer ends with a tone number and we have a single-char match, select it
-    if (autoCommitRef.current && TONE_SYLLABLE_RE.test(pinyinBuf.trim()) && deduped.length > 0) {
-      const top = deduped[0];
-      // Only auto-commit single-character results for single syllables
-      if (top.simplified.length === 1) {
-        onChange(value + top.simplified);
-        setPinyinBuf('');
-        setCandidates([]);
-        inputRef.current?.focus();
-      }
-    }
-    autoCommitRef.current = false;
-  }, [pinyinBuf, onChange, value]);
+  }, [pinyinBuf]);
 
   const selectCandidate = useCallback(
     (entry: DictEntry) => {
@@ -88,10 +71,8 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
       e.preventDefault();
       setPinyinBuf('');
       setCandidates([]);
-    } else if (e.key >= '1' && e.key <= '5') {
-      // Tone numbers: let them through to the input buffer and flag for auto-commit
-      autoCommitRef.current = true;
     }
+    // Tone digits (1-5) and all other keys pass through to the input buffer naturally
   };
 
   return (

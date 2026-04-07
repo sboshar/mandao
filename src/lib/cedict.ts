@@ -155,14 +155,18 @@ export function lookupByPinyin(input: string, limit = 30): DictEntry[] {
     }
   }
 
-  // Sort: tone match first, then shorter words, then character frequency
+  // Sort: tone match first, then shorter words, then frequency, then definition count
+  const defCount = (e: DictEntry) => e.english.split('/').filter(Boolean).length;
   const sortFn = (a: DictEntry, b: DictEntry) => {
     const aTone = matchesTonePattern(a.pinyin, inputTones) ? 0 : 1;
     const bTone = matchesTonePattern(b.pinyin, inputTones) ? 0 : 1;
     if (aTone !== bTone) return aTone - bTone;
     const lenDiff = a.simplified.length - b.simplified.length;
     if (lenDiff !== 0) return lenDiff;
-    return wordFrequencyScore(a.simplified) - wordFrequencyScore(b.simplified);
+    const freqA = wordFrequencyScore(a.simplified);
+    const freqB = wordFrequencyScore(b.simplified);
+    if (freqA !== freqB) return freqA - freqB;
+    return defCount(b) - defCount(a); // more definitions = more common
   };
   exact.sort(sortFn);
   prefix.sort(sortFn);
