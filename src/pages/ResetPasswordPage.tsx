@@ -46,7 +46,8 @@ export function ResetPasswordPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="New password"
             required
-            minLength={6}
+            minLength={8}
+            autoComplete="new-password"
             className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
             style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
           />
@@ -56,7 +57,8 @@ export function ResetPasswordPage() {
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="Confirm password"
             required
-            minLength={6}
+            minLength={8}
+            autoComplete="new-password"
             className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
             style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
           />

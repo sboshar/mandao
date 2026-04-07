@@ -58,10 +58,15 @@ export function BrowsePage() {
 
   const handleDelete = async (sentenceId: string) => {
     await deleteSentence(sentenceId);
-    setSentences((prev) => prev.filter((s) => s.id !== sentenceId));
+    setSentences((prev) => {
+      const remaining = prev.filter((s) => s.id !== sentenceId);
+      const tagSet = new Set<string>();
+      for (const s of remaining) s.tags?.forEach((t) => tagSet.add(t));
+      setAllTags([...tagSet].sort());
+      return remaining;
+    });
     setConfirmDeleteId(null);
     if (expandedId === sentenceId) setExpandedId(null);
-    getAllTags().then(setAllTags);
   };
 
   const handleDeleteAll = async () => {
@@ -94,7 +99,7 @@ export function BrowsePage() {
             <button
               onClick={() => setShowDeleteAll(true)}
               className="px-3 py-1 rounded text-sm transition-colors"
-              style={{ background: 'var(--bg-inset)', color: '#ef4444' }}
+              style={{ background: 'var(--bg-inset)', color: 'var(--danger)' }}
             >
               Delete All
             </button>
@@ -226,11 +231,11 @@ export function BrowsePage() {
                       <div className="flex items-center gap-3">
                         {confirmDeleteId === s.id ? (
                           <div className="flex items-center gap-2">
-                            <span className="text-xs" style={{ color: '#ef4444' }}>Delete this sentence?</span>
+                            <span className="text-xs" style={{ color: 'var(--danger)' }}>Delete this sentence?</span>
                             <button
                               onClick={() => handleDelete(s.id)}
                               className="text-xs px-2 py-0.5 rounded transition-colors"
-                              style={{ background: '#ef4444', color: 'white' }}
+                              style={{ background: 'var(--danger)', color: 'white' }}
                             >
                               Yes
                             </button>
@@ -246,7 +251,7 @@ export function BrowsePage() {
                           <button
                             onClick={() => setConfirmDeleteId(s.id)}
                             className="text-xs transition-colors"
-                            style={{ color: '#ef4444' }}
+                            style={{ color: 'var(--danger)' }}
                           >
                             delete
                           </button>
@@ -284,7 +289,7 @@ export function BrowsePage() {
       {showDeleteAll && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }}>
           <div className="rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl" style={{ background: 'var(--bg-surface)' }}>
-            <h2 className="text-lg font-bold mb-2" style={{ color: '#ef4444' }}>Delete Everything</h2>
+            <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--danger)' }}>Delete Everything</h2>
             <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
               This will permanently delete all sentences, cards, meanings, and review history. This cannot be undone.
             </p>
@@ -313,7 +318,7 @@ export function BrowsePage() {
                 disabled={deleteAllInput !== 'delete'}
                 className="px-4 py-2 rounded-lg text-sm transition-colors"
                 style={{
-                  background: deleteAllInput === 'delete' ? '#ef4444' : 'var(--bg-inset)',
+                  background: deleteAllInput === 'delete' ? 'var(--danger)' : 'var(--bg-inset)',
                   color: deleteAllInput === 'delete' ? 'white' : 'var(--text-tertiary)',
                   cursor: deleteAllInput === 'delete' ? 'pointer' : 'not-allowed',
                 }}

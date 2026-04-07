@@ -97,6 +97,8 @@ function App() {
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/speak" element={<SpeakPage />} />
+          <Route path="/auth/callback" element={<Navigate to="/" replace />} />
+          <Route path="/reset-password" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
     </BrowserRouter>

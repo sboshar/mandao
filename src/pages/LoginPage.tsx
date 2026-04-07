@@ -25,12 +25,8 @@ export function LoginPage() {
     setLoading(true);
 
     if (isForgot) {
-      const err = await resetPassword(email);
-      if (err) {
-        setError(err);
-      } else {
-        setCheckEmail(true);
-      }
+      await resetPassword(email);
+      setCheckEmail(true);
       setLoading(false);
       return;
     }
@@ -47,10 +43,14 @@ export function LoginPage() {
     setLoading(false);
   };
 
+  const [googleLoading, setGoogleLoading] = useState(false);
+
   const handleGoogle = async () => {
+    if (googleLoading) return;
     setError('');
+    setGoogleLoading(true);
     const err = await signInWithGoogle();
-    if (err) setError(err);
+    if (err) { setError(err); setGoogleLoading(false); }
   };
 
   if (checkEmail) {
@@ -60,7 +60,7 @@ export function LoginPage() {
           <h1 className="text-2xl font-semibold mb-4">Check your email</h1>
           <p style={{ color: 'var(--text-secondary)' }}>
             {isForgot
-              ? <>We sent a password reset link to <strong>{email}</strong>.</>
+              ? <>If an account exists for <strong>{email}</strong>, we sent a password reset link.</>
               : <>We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account.</>}
           </p>
           <button
@@ -96,6 +96,7 @@ export function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email"
             required
+            autoComplete="email"
             className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
             style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
           />
@@ -107,6 +108,7 @@ export function LoginPage() {
               placeholder="Password"
               required
               minLength={8}
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             />
@@ -141,10 +143,11 @@ export function LoginPage() {
 
         <button
           onClick={handleGoogle}
-          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
+          disabled={googleLoading}
+          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
           style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
         >
-          Continue with Google
+          {googleLoading ? '...' : 'Continue with Google'}
         </button>
 
         <p className="text-center text-xs mt-6" style={{ color: 'var(--text-tertiary)' }}>
