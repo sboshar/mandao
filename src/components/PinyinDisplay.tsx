@@ -40,15 +40,11 @@ export function PinyinDisplay({
         return (
           <span
             key={i}
-            className={`${TONE_CLASSES[tone]}${
-              isSandhiChange
-                ? ' underline decoration-2 underline-offset-2 font-semibold'
-                : ''
-            }`}
-            style={isSandhiChange ? { textDecorationColor: 'var(--sandhi-underline)' } : undefined}
+            className={isSandhiChange ? 'font-bold' : TONE_CLASSES[tone]}
+            style={isSandhiChange ? { color: 'var(--sandhi-underline)' } : undefined}
             title={
               isSandhiChange
-                ? `Base: ${baseSyllables![i]} → Sandhi: ${syllable}`
+                ? `Dictionary: ${baseSyllables![i]} → Spoken: ${syllable}`
                 : undefined
             }
           >

@@ -8,8 +8,6 @@ interface TokenSpanProps {
   pinyin?: string;
   /** Base pinyin with tone numbers */
   pinyinNumeric?: string;
-  /** Tone-sandhi pinyin for this token in context (diacritics) */
-  pinyinSandhi?: string;
   showPinyin?: boolean;
 }
 
@@ -18,15 +16,11 @@ export function TokenSpan({
   surfaceForm,
   pinyin,
   pinyinNumeric,
-  pinyinSandhi,
   showPinyin = false,
 }: TokenSpanProps) {
   const { open, push, isOpen } = useNavigationStore();
 
-  // Use sandhi pinyin if available, fall back to dictionary pinyin
-  const displayPinyin = pinyinSandhi || pinyin;
-  const displaySyllables = displayPinyin?.split(/\s+/) || [];
-  const baseSyllables = pinyin?.split(/\s+/) || [];
+  const pinyinSyllables = pinyin?.split(/\s+/) || [];
   const pinyinNumericSyllables = pinyinNumeric?.split(/\s+/) || [];
 
   const handleWordClick = () => {
@@ -47,38 +41,15 @@ export function TokenSpan({
         {surfaceForm}
       </span>
 
-      {showPinyin && displaySyllables.length > 0 && (
-        <span className="text-xs flex gap-0.5">
-          {displaySyllables.map((syllable, i) => {
-            const baseSyllable = baseSyllables[i];
-            const isDifferent = baseSyllable && syllable !== baseSyllable;
-
-            if (isDifferent) {
-              return (
-                <span
-                  key={i}
-                  className="font-medium cursor-pointer rounded transition-colors surface-hover"
-                  style={{ color: 'var(--sandhi-underline)' }}
-                  title={`Dictionary: ${baseSyllable} → Spoken: ${syllable}`}
-                  onClick={() => {
-                    const id = pinyinNumericSyllables[i] || '';
-                    if (isOpen) push({ type: 'pinyin', id });
-                    else open({ type: 'pinyin', id });
-                  }}
-                >
-                  {syllable}
-                </span>
-              );
-            }
-
-            return (
-              <ClickablePinyin
-                key={i}
-                pinyin={syllable}
-                pinyinNumeric={pinyinNumericSyllables[i] || ''}
-              />
-            );
-          })}
+      {showPinyin && pinyinSyllables.length > 0 && (
+        <span className="text-xs flex gap-0.5" style={{ color: 'var(--text-secondary)' }}>
+          {pinyinSyllables.map((syllable, i) => (
+            <ClickablePinyin
+              key={i}
+              pinyin={syllable}
+              pinyinNumeric={pinyinNumericSyllables[i] || ''}
+            />
+          ))}
         </span>
       )}
     </span>

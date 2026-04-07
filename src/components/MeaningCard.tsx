@@ -239,7 +239,7 @@ function SentenceContent() {
               surfaceForm={t.surfaceForm}
               pinyin={t.meaning.pinyin}
               pinyinNumeric={t.meaning.pinyinNumeric}
-              pinyinSandhi={t.pinyinSandhi}
+
               showPinyin
             />
           ))}
