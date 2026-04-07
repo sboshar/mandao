@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { db } from '../db/db';
 import type { Sentence } from '../db/schema';
-import { getTokensForSentence, updateSentenceTags, getAllTags } from '../services/ingestion';
+import { getTokensForSentence, updateSentenceTags, getAllTags, deleteSentence, deleteAllData } from '../services/ingestion';
 import { TokenSpan } from '../components/TokenSpan';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
@@ -27,6 +27,9 @@ export function BrowsePage() {
   const [allTags, setAllTags] = useState<string[]>([]);
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [showFilter, setShowFilter] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const [deleteAllInput, setDeleteAllInput] = useState('');
 
   useEffect(() => {
     db.sentences.orderBy('createdAt').reverse().toArray().then(setSentences);
@@ -53,6 +56,24 @@ export function BrowsePage() {
     ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
     : sentences;
 
+  const handleDelete = async (sentenceId: string) => {
+    await deleteSentence(sentenceId);
+    setSentences((prev) => prev.filter((s) => s.id !== sentenceId));
+    setConfirmDeleteId(null);
+    if (expandedId === sentenceId) setExpandedId(null);
+    getAllTags().then(setAllTags);
+  };
+
+  const handleDeleteAll = async () => {
+    await deleteAllData();
+    setSentences([]);
+    setExpandedId(null);
+    setShowDeleteAll(false);
+    setDeleteAllInput('');
+    setAllTags([]);
+    setFilterTags([]);
+  };
+
   const handleExpand = async (sentenceId: string) => {
     if (expandedId === sentenceId) {
       setExpandedId(null);
@@ -68,13 +89,24 @@ export function BrowsePage() {
     <div className="max-w-2xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Browse Sentences</h1>
-        <button
-          onClick={() => navigate('/')}
-          className="px-3 py-1 rounded text-sm transition-colors"
-          style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-        >
-          &larr; Back
-        </button>
+        <div className="flex gap-2">
+          {sentences.length > 0 && (
+            <button
+              onClick={() => setShowDeleteAll(true)}
+              className="px-3 py-1 rounded text-sm transition-colors"
+              style={{ background: 'var(--bg-inset)', color: '#ef4444' }}
+            >
+              Delete All
+            </button>
+          )}
+          <button
+            onClick={() => navigate('/')}
+            className="px-3 py-1 rounded text-sm transition-colors"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+          >
+            &larr; Back
+          </button>
+        </div>
       </div>
 
       <TutorialBanner visibleAt={3}>
@@ -191,15 +223,44 @@ export function BrowsePage() {
                       >
                         View sentence card &rarr;
                       </button>
-                      {editingTagsId !== s.id ? (
-                        <button
-                          onClick={() => setEditingTagsId(s.id)}
-                          className="text-xs transition-colors"
-                          style={{ color: 'var(--text-tertiary)' }}
-                        >
-                          {s.tags && s.tags.length > 0 ? 'edit tags' : '+ tag'}
-                        </button>
-                      ) : null}
+                      <div className="flex items-center gap-3">
+                        {confirmDeleteId === s.id ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs" style={{ color: '#ef4444' }}>Delete this sentence?</span>
+                            <button
+                              onClick={() => handleDelete(s.id)}
+                              className="text-xs px-2 py-0.5 rounded transition-colors"
+                              style={{ background: '#ef4444', color: 'white' }}
+                            >
+                              Yes
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="text-xs px-2 py-0.5 rounded transition-colors"
+                              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDeleteId(s.id)}
+                            className="text-xs transition-colors"
+                            style={{ color: '#ef4444' }}
+                          >
+                            delete
+                          </button>
+                        )}
+                        {editingTagsId !== s.id ? (
+                          <button
+                            onClick={() => setEditingTagsId(s.id)}
+                            className="text-xs transition-colors"
+                            style={{ color: 'var(--text-tertiary)' }}
+                          >
+                            {s.tags && s.tags.length > 0 ? 'edit tags' : '+ tag'}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     {editingTagsId === s.id && (
                       <div className="mt-2">
@@ -219,6 +280,50 @@ export function BrowsePage() {
       )}
 
       <MeaningCard />
+
+      {showDeleteAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl" style={{ background: 'var(--bg-surface)' }}>
+            <h2 className="text-lg font-bold mb-2" style={{ color: '#ef4444' }}>Delete Everything</h2>
+            <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
+              This will permanently delete all sentences, cards, meanings, and review history. This cannot be undone.
+            </p>
+            <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+              Type <strong style={{ color: 'var(--text-primary)' }}>delete</strong> to confirm:
+            </p>
+            <input
+              type="text"
+              value={deleteAllInput}
+              onChange={(e) => setDeleteAllInput(e.target.value)}
+              placeholder="delete"
+              className="w-full px-3 py-2 rounded-lg text-sm mb-4"
+              style={{ background: 'var(--bg-inset)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+              autoFocus
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setShowDeleteAll(false); setDeleteAllInput(''); }}
+                className="px-4 py-2 rounded-lg text-sm transition-colors"
+                style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAll}
+                disabled={deleteAllInput !== 'delete'}
+                className="px-4 py-2 rounded-lg text-sm transition-colors"
+                style={{
+                  background: deleteAllInput === 'delete' ? '#ef4444' : 'var(--bg-inset)',
+                  color: deleteAllInput === 'delete' ? 'white' : 'var(--text-tertiary)',
+                  cursor: deleteAllInput === 'delete' ? 'pointer' : 'not-allowed',
+                }}
+              >
+                Delete All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

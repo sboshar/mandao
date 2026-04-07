@@ -288,6 +288,43 @@ async function decomposeWord(
 }
 
 // ============================================================
+// Deletion
+// ============================================================
+
+/** Delete a single sentence and its tokens, SRS cards, and review logs. */
+export async function deleteSentence(sentenceId: string): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.sentences, db.sentenceTokens, db.srsCards, db.reviewLogs],
+    async () => {
+      const cards = await db.srsCards.where('sentenceId').equals(sentenceId).toArray();
+      const cardIds = cards.map((c) => c.id);
+
+      await db.reviewLogs.where('cardId').anyOf(cardIds).delete();
+      await db.srsCards.where('sentenceId').equals(sentenceId).delete();
+      await db.sentenceTokens.where('sentenceId').equals(sentenceId).delete();
+      await db.sentences.delete(sentenceId);
+    }
+  );
+}
+
+/** Delete ALL sentences, tokens, SRS cards, and review logs. */
+export async function deleteAllData(): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.sentences, db.sentenceTokens, db.srsCards, db.reviewLogs, db.meanings, db.meaningLinks],
+    async () => {
+      await db.reviewLogs.clear();
+      await db.srsCards.clear();
+      await db.sentenceTokens.clear();
+      await db.sentences.clear();
+      await db.meaningLinks.clear();
+      await db.meanings.clear();
+    }
+  );
+}
+
+// ============================================================
 // Query helpers used by UI
 // ============================================================
 

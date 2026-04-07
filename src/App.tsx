@@ -10,41 +10,41 @@ import { GraphPage } from './pages/GraphPage';
 import { StatsPage } from './pages/StatsPage';
 import { SpeakPage } from './pages/SpeakPage';
 import { LoginPage } from './pages/LoginPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { IntroModal } from './components/IntroModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { useTutorialStore } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
 import './stores/themeStore';
 
+const LoadingScreen = () => (
+  <div className="min-h-screen flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}>
+    Loading...
+  </div>
+);
+
 function App() {
   const [ready, setReady] = useState(false);
   const step = useTutorialStore((s) => s.step);
   const advance = useTutorialStore((s) => s.advance);
-  const { user, loading: authLoading, initialize, signOut } = useAuthStore();
+  const { user, loading: authLoading, needsPasswordReset, initialize, signOut } = useAuthStore();
 
   useEffect(() => {
     initialize();
   }, []);
 
+  const userId = user?.id;
   useEffect(() => {
-    if (user && !ready) {
+    if (userId && !ready) {
       Promise.all([ensureDefaults(), loadCedict()]).then(() => setReady(true));
     }
-    if (!user && ready) {
+    if (!userId && ready) {
       setReady(false);
     }
-  }, [user, ready]);
+  }, [userId, ready]);
 
-  // Auth loading
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}>
-        Loading...
-      </div>
-    );
-  }
+  if (authLoading) return <LoadingScreen />;
 
-  // Not logged in
   if (!user) {
     return (
       <>
@@ -56,14 +56,18 @@ function App() {
     );
   }
 
-  // Logged in, loading data
-  if (!ready) {
+  if (needsPasswordReset) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}>
-        Loading...
-      </div>
+      <>
+        <div className="fixed top-3 right-4 z-40">
+          <ThemeToggle />
+        </div>
+        <ResetPasswordPage />
+      </>
     );
   }
+
+  if (!ready) return <LoadingScreen />;
 
   return (
     <BrowserRouter>
