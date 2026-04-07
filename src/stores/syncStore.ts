@@ -21,7 +21,7 @@ export const useSyncStore = create<SyncState>((set) => ({
   pendingCount: 0,
   errorMessage: null,
   online: navigator.onLine,
-  setStatus: (status) => set({ status, errorMessage: status === 'error' ? undefined : null }),
+  setStatus: (status) => set(status === 'error' ? { status } : { status, errorMessage: null }),
   setLastSyncedAt: (ts) => set({ lastSyncedAt: ts }),
   setPendingCount: (count) => set({ pendingCount: count }),
   setError: (msg) => set({ errorMessage: msg, status: msg ? 'error' : 'synced' }),

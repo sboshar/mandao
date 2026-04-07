@@ -166,15 +166,11 @@ export async function getDueCounts(
 ): Promise<{ newCount: number; reviewCount: number; learningCount: number }> {
   const now = Date.now();
 
-  const [newCards, reviewCards, learningCards] = await Promise.all([
-    repo.getSrsCardsByDeckAndState(deckId, 0),
-    repo.getSrsCardsByDeckAndState(deckId, 2),
-    repo.getSrsCardsByDeckAndStates(deckId, [1, 3]),
+  const [newCount, reviewCount, learningCount] = await Promise.all([
+    repo.countSrsCardsByDeckAndState(deckId, 0),
+    repo.countDueSrsCardsByDeckAndStates(deckId, [2], now),
+    repo.countDueSrsCardsByDeckAndStates(deckId, [1, 3], now),
   ]);
 
-  return {
-    newCount: newCards.length,
-    reviewCount: reviewCards.filter((c) => c.due <= now).length,
-    learningCount: learningCards.filter((c) => c.due <= now).length,
-  };
+  return { newCount, reviewCount, learningCount };
 }

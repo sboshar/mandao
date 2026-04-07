@@ -28,6 +28,7 @@ const LoadingScreen = ({ message }: { message?: string }) => (
 function App() {
   const [ready, setReady] = useState(false);
   const [hydrating, setHydrating] = useState(false);
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
   const step = useTutorialStore((s) => s.step);
   const advance = useTutorialStore((s) => s.advance);
   const { user, loading: authLoading, needsPasswordReset, initialize, signOut } = useAuthStore();
@@ -43,15 +44,21 @@ function App() {
     if (!userId || ready) return;
     let cancelled = false;
     (async () => {
-      const hydrated = await isHydrated();
-      if (!hydrated) {
-        setHydrating(true);
-        await hydrateLocalDb();
+      try {
+        const hydrated = await isHydrated();
+        if (!hydrated) {
+          setHydrating(true);
+          await hydrateLocalDb();
+          if (cancelled) return;
+          setHydrating(false);
+        }
+        await loadCedict();
+        if (!cancelled) setReady(true);
+      } catch (e: any) {
         if (cancelled) return;
         setHydrating(false);
+        setHydrationError(e.message || 'Failed to sync data');
       }
-      await loadCedict();
-      if (!cancelled) setReady(true);
     })();
     return () => { cancelled = true; };
   }, [userId, ready]);
@@ -94,6 +101,20 @@ function App() {
     );
   }
 
+  if (hydrationError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ color: 'var(--text-tertiary)' }}>
+        <p>Sync failed: {hydrationError}</p>
+        <button
+          onClick={() => { setHydrationError(null); setReady(false); }}
+          className="px-4 py-2 rounded-md text-sm"
+          style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (hydrating) return <LoadingScreen message="Syncing data..." />;
   if (!ready) return <LoadingScreen />;
 

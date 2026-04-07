@@ -158,14 +158,20 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
 
     return sentenceId;
   } catch (error) {
-    if (sentenceInserted) {
-      try {
-        // Roll back local Dexie only — no server delete op since
-        // the ingestBundle was never enqueued (we failed before that).
+    // Roll back local Dexie only — no server delete op since
+    // the ingestBundle was never enqueued (we failed before that).
+    try {
+      if (sentenceInserted) {
         await local.deleteSentenceById(sentenceId);
-      } catch (cleanupError) {
-        console.error('Failed to roll back partial sentence insert', cleanupError);
       }
+      // Clean up newly-created meanings and meaning links from the accumulator.
+      // These are only the entities created during *this* ingestion, not reused ones.
+      const newMeaningIds = acc.meanings.map((m) => m.id);
+      const newLinkIds = acc.meaningLinks.map((l) => l.id);
+      await local.deleteMeaningLinksByIds(newLinkIds);
+      await local.deleteMeaningsByIds(newMeaningIds);
+    } catch (cleanupError) {
+      console.error('Failed to roll back partial ingestion', cleanupError);
     }
     throw error;
   }

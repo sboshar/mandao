@@ -10,7 +10,11 @@
 import * as local from './localRepo';
 import { localDb, type SyncOp } from './localDb';
 import { getDeviceId, scheduleSyncSoon } from './syncEngine';
-import { getUserId as getRemoteUserId, clearCachedUserId as clearRemoteCache } from './remoteRepo';
+import {
+  getUserId as getRemoteUserId,
+  clearCachedUserId as clearRemoteCache,
+  getCachedUserIdOrThrow,
+} from './remoteRepo';
 import type {
   Meaning,
   MeaningLink,
@@ -151,8 +155,10 @@ export async function deleteSentenceById(id: string): Promise<void> {
 
 export async function deleteSentencesBySource(source: string): Promise<void> {
   const sentences = await local.getSentencesBySource(source);
+  if (sentences.length === 0) return;
+
+  await Promise.all(sentences.map((s) => local.deleteSentenceById(s.id)));
   for (const s of sentences) {
-    await local.deleteSentenceById(s.id);
     await enqueue({
       op: 'deleteEntity',
       payload: { entity_type: 'sentence', entity_id: s.id },
@@ -207,6 +213,14 @@ export async function getSrsCardsByDeckAndStates(deckId: string, states: number[
   return local.getSrsCardsByDeckAndStates(deckId, states);
 }
 
+export async function countSrsCardsByDeckAndState(deckId: string, state: number): Promise<number> {
+  return local.countSrsCardsByDeckAndState(deckId, state);
+}
+
+export async function countDueSrsCardsByDeckAndStates(deckId: string, states: number[], dueBy: number): Promise<number> {
+  return local.countDueSrsCardsByDeckAndStates(deckId, states, dueBy);
+}
+
 export async function getAllSrsCards(): Promise<SrsCard[]> {
   return local.getAllSrsCards();
 }
@@ -240,8 +254,15 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
 }
 
 export async function ensureDefaultDeck(): Promise<string> {
-  const userId = await getRemoteUserId();
-  return local.ensureDefaultDeck(userId);
+  // Prefer cached ID to avoid network call (works offline).
+  // Falls through to getUser() only if cache is cold (rare at startup).
+  try {
+    const userId = getCachedUserIdOrThrow();
+    return local.ensureDefaultDeck(userId);
+  } catch {
+    const userId = await getRemoteUserId();
+    return local.ensureDefaultDeck(userId);
+  }
 }
 
 // ============================================================
@@ -276,6 +297,11 @@ export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void
 
 export async function deleteAllUserData(): Promise<void> {
   await local.deleteAllUserData();
+  // Clear hydration + USN so the app can rehydrate from server if
+  // the delete op doesn't push (e.g. user is offline or closes the tab).
+  await localDb.syncMeta.delete('lastHydratedAt');
+  await localDb.syncMeta.delete('lastUsn');
+  await localDb.syncMeta.delete('schemaVersion');
   await enqueue({ op: 'deleteAllData', payload: {} });
 }
 

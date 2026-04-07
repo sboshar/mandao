@@ -48,6 +48,11 @@ export async function insertMeaning(meaning: Meaning): Promise<void> {
   await localDb.meanings.put(meaning);
 }
 
+export async function deleteMeaningsByIds(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await localDb.meanings.bulkDelete(ids);
+}
+
 // ============================================================
 // MeaningLinks
 // ============================================================
@@ -79,6 +84,11 @@ export async function getAllMeaningLinks(): Promise<MeaningLink[]> {
 
 export async function insertMeaningLink(link: MeaningLink): Promise<void> {
   await localDb.meaningLinks.put(link);
+}
+
+export async function deleteMeaningLinksByIds(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await localDb.meaningLinks.bulkDelete(ids);
 }
 
 // ============================================================
@@ -204,6 +214,30 @@ export async function getSrsCardsByDeckAndState(deckId: string, state: number): 
     .where('[deckId+state]')
     .equals([deckId, state])
     .sortBy('due');
+}
+
+export async function countSrsCardsByDeckAndState(deckId: string, state: number): Promise<number> {
+  return localDb.srsCards
+    .where('[deckId+state]')
+    .equals([deckId, state])
+    .count();
+}
+
+export async function countDueSrsCardsByDeckAndStates(
+  deckId: string,
+  states: number[],
+  dueBy: number,
+): Promise<number> {
+  const counts = await Promise.all(
+    states.map((state) =>
+      localDb.srsCards
+        .where('[deckId+state]')
+        .equals([deckId, state])
+        .and((c) => c.due <= dueBy)
+        .count()
+    ),
+  );
+  return counts.reduce((sum, c) => sum + c, 0);
 }
 
 export async function getSrsCardsByDeckAndStates(deckId: string, states: number[]): Promise<SrsCard[]> {

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useSyncStore, type SyncStatus } from '../stores/syncStore';
 import { runSync } from '../db/syncEngine';
 
@@ -21,6 +22,13 @@ export function SyncIndicator() {
   const lastSyncedAt = useSyncStore((s) => s.lastSyncedAt);
   const errorMessage = useSyncStore((s) => s.errorMessage);
   const config = statusConfig[status];
+
+  // Force re-render every 30s so the "Xm ago" tooltip stays fresh
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const tooltip = errorMessage
     ? `Error: ${errorMessage}`

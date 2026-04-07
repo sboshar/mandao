@@ -1,12 +1,15 @@
 /**
  * Hydration: pulls all user data from Supabase into local Dexie.
  * Called once after login / on app startup when Dexie is empty.
+ * Also re-hydrates if the local schema version changes.
  */
 import * as remote from './remoteRepo';
 import { localDb } from './localDb';
+import { maxUsnFromRows } from './mappers';
+
+const LOCAL_SCHEMA_VERSION = 1;
 
 export async function hydrateLocalDb(): Promise<void> {
-  // Ensure at least a default deck exists before pulling
   await remote.ensureDefaultDeck();
 
   const [
@@ -26,6 +29,18 @@ export async function hydrateLocalDb(): Promise<void> {
     remote.getAllSrsCards(),
     remote.getAllReviewLogs(),
   ]);
+
+  // Derive max USN from the data we already fetched (no extra network calls).
+  const maxUsn = Math.max(
+    0,
+    maxUsnFromRows(meanings),
+    maxUsnFromRows(meaningLinks),
+    maxUsnFromRows(sentences),
+    maxUsnFromRows(sentenceTokens),
+    maxUsnFromRows(decks),
+    maxUsnFromRows(srsCards),
+    maxUsnFromRows(reviewLogs),
+  );
 
   await localDb.transaction(
     'rw',
@@ -60,15 +75,17 @@ export async function hydrateLocalDb(): Promise<void> {
         reviewLogs.length > 0 ? localDb.reviewLogs.bulkPut(reviewLogs) : undefined,
       ]);
 
-      await localDb.syncMeta.put({
-        key: 'lastHydratedAt',
-        value: Date.now(),
-      });
+      await localDb.syncMeta.put({ key: 'lastUsn', value: maxUsn });
+      await localDb.syncMeta.put({ key: 'lastHydratedAt', value: Date.now() });
+      await localDb.syncMeta.put({ key: 'schemaVersion', value: LOCAL_SCHEMA_VERSION });
     }
   );
 }
 
 export async function isHydrated(): Promise<boolean> {
   const meta = await localDb.syncMeta.get('lastHydratedAt');
-  return meta !== undefined;
+  if (meta === undefined) return false;
+  const version = await localDb.syncMeta.get('schemaVersion');
+  if (!version || (version.value as number) < LOCAL_SCHEMA_VERSION) return false;
+  return true;
 }
