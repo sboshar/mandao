@@ -44,7 +44,7 @@ export function ReviewPage() {
 
   if (!started) {
     return (
-      <div className="p-6 max-w-md mx-auto">
+      <div className="p-4 sm:p-6 max-w-md mx-auto">
         <div className="flex items-center justify-between mb-8">
           <button
             onClick={() => navigate('/')}
@@ -115,7 +115,7 @@ export function ReviewPage() {
             <button
               key={opt.key}
               onClick={() => { setMode(opt.key); startReview(opt.key); }}
-              className="w-full p-4 rounded-lg text-left transition-colors"
+              className="w-full p-3 sm:p-4 rounded-lg text-left transition-colors"
               style={{
                 background: mode === opt.key ? 'var(--bg-inset)' : 'var(--bg-surface)',
                 border: `2px solid ${mode === opt.key ? MODE_COLORS[opt.key] : 'var(--border)'}`,
@@ -131,7 +131,7 @@ export function ReviewPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="flex items-center justify-between mb-6 max-w-2xl mx-auto">
         <button
           onClick={() => { reset(); setStarted(false); }}

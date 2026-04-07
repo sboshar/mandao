@@ -416,7 +416,7 @@ export function SpeakPage() {
           ) : (
             <>
               {/* Per-character comparison grid */}
-              <div className="flex justify-center gap-1 mb-4">
+              <div className="flex flex-wrap justify-center gap-1 mb-4">
                 {comparison.map((r, i) => {
                   const color = r.status === 'match' ? 'var(--success)' : 'var(--danger)';
                   const isMismatch = r.status === 'mismatch';

@@ -71,8 +71,8 @@ function MeaningContent() {
 
   return (
     <>
-      <div className="p-6 text-center">
-        <div className="text-5xl mb-2">
+      <div className="p-4 sm:p-6 text-center">
+        <div className="text-4xl sm:text-5xl mb-2">
           {headwordChars.map((char, i) => (
             <ClickableChar
               key={i}
@@ -325,7 +325,7 @@ export function MeaningCard() {
       onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
     >
       <div
-        className="surface rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto"
+        className="surface rounded-lg shadow-xl max-w-lg w-full mx-3 sm:mx-4 max-h-[90vh] sm:max-h-[80vh] overflow-y-auto"
       >
         {/* Header */}
         <div

@@ -239,7 +239,7 @@ export function AddSentencePage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
+    <div className="max-w-2xl mx-auto p-4 sm:p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Add Sentence</h1>
         <button
@@ -481,7 +481,7 @@ export function AddSentencePage() {
                   <summary className="cursor-pointer" style={{ color: 'var(--text-tertiary)' }}>
                     Edit fields
                   </summary>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Pinyin (tone numbers)</label>
                       <input
@@ -605,8 +605,8 @@ export function AddSentencePage() {
                   className="flex items-center gap-3 text-sm py-1"
                   style={{ borderBottom: '1px solid var(--border-light)' }}
                 >
-                  <span className="text-lg w-16 text-right">{t.surfaceForm}</span>
-                  <span className="w-24" style={{ color: 'var(--text-secondary)' }}>
+                  <span className="text-lg w-12 sm:w-16 text-right">{t.surfaceForm}</span>
+                  <span className="w-20 sm:w-24" style={{ color: 'var(--text-secondary)' }}>
                     {t.pinyinSandhi || numericStringToDiacritic(t.pinyinNumeric)}
                   </span>
                   <span className="flex-1">{t.english}</span>

@@ -72,10 +72,10 @@ function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
-        <div className="fixed top-3 right-4 z-40 flex items-center gap-2">
+        <div className="fixed top-3 right-3 sm:right-4 z-40 flex items-center gap-1.5 sm:gap-2">
           <button
             onClick={signOut}
-            className="px-2.5 py-1 rounded-md text-xs transition-colors"
+            className="px-2 sm:px-2.5 py-1 rounded-md text-xs transition-colors"
             style={{ color: 'var(--text-tertiary)' }}
           >
             Sign out

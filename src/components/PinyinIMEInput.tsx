@@ -67,7 +67,8 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
   return (
     <div className="relative">
       <div className="flex items-center w-full px-3 py-2 border rounded-lg focus-within:ring-2
-        focus-within:ring-blue-500 focus-within:border-blue-500 bg-white">
+        focus-within:ring-blue-500 focus-within:border-blue-500"
+        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)' }}>
         {value && <span className="text-lg mr-1" lang="zh">{value}</span>}
         <input
           ref={inputRef}
@@ -84,14 +85,18 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
       </div>
 
       {candidates.length > 0 && (
-        <div className="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg
-          max-h-64 overflow-y-auto">
+        <div className="absolute z-50 mt-1 w-full border rounded-lg shadow-lg
+          max-h-48 sm:max-h-64 overflow-y-auto"
+          style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)' }}>
           {candidates.map((entry, i) => (
             <button
               key={`${entry.simplified}-${i}`}
               onClick={() => selectCandidate(entry)}
-              className={`w-full text-left px-3 py-2 flex items-center gap-3 text-sm
-                hover:bg-blue-50 ${i === selectedIndex ? 'bg-blue-50' : ''}`}
+              className={`w-full text-left px-3 py-2 min-h-[44px] flex items-center gap-3 text-sm
+                transition-colors`}
+              style={{
+                background: i === selectedIndex ? 'var(--bg-inset)' : 'transparent',
+              }}
             >
               <span className="text-xl" lang="zh">{entry.simplified}</span>
               <span className="text-gray-400 text-xs">{entry.pinyin}</span>

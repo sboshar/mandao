@@ -71,7 +71,7 @@ export function ReviewCard() {
       </div>
 
       {/* Card */}
-      <div className="surface rounded-xl shadow-lg p-8 min-h-[300px] flex flex-col">
+      <div className="surface rounded-xl shadow-lg p-4 sm:p-8 min-h-[250px] sm:min-h-[300px] flex flex-col">
         {/* Front */}
         <div className="flex-1 flex flex-col items-center justify-center">
           {isEnToZh ? (
@@ -186,7 +186,7 @@ export function ReviewCard() {
             </div>
 
             {/* Rating buttons */}
-            <div className="mt-6 grid grid-cols-4 gap-2">
+            <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
               {([
                 { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
                 { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
@@ -196,7 +196,7 @@ export function ReviewCard() {
                 <button
                   key={btn.rating}
                   onClick={() => handleRate(btn.rating)}
-                  className="py-3 rounded-lg font-medium transition-colors"
+                  className="py-3 min-h-[44px] rounded-lg font-medium transition-colors"
                   style={{
                     background: `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
                     color: btn.color,
