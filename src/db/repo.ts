@@ -1,12 +1,20 @@
 /**
- * Supabase data access layer.
- * Replaces all Dexie (IndexedDB) calls with Supabase Postgres queries.
- * Every function adds user_id from the current auth session.
+ * Repo facade — the single import point for all data access.
  *
- * camelCase ↔ snake_case conversion happens at this boundary so consumers
- * continue using the same TypeScript types from schema.ts.
+ * Reads: always from Dexie (instant, works offline).
+ * Writes: Dexie first (instant), then enqueue a sync op in the outbox.
+ * The sync engine pushes the outbox to Supabase when online.
+ *
+ * The public API is unchanged — every consumer imports from this file.
  */
-import { supabase } from '../lib/supabase';
+import * as local from './localRepo';
+import { localDb, type SyncOp } from './localDb';
+import { getDeviceId, scheduleSyncSoon } from './syncEngine';
+import {
+  getUserId as getRemoteUserId,
+  clearCachedUserId as clearRemoteCache,
+  getCachedUserIdOrThrow,
+} from './remoteRepo';
 import type {
   Meaning,
   MeaningLink,
@@ -16,674 +24,289 @@ import type {
   Deck,
   ReviewLog,
 } from './schema';
+import { v4 as uuid } from 'uuid';
 
-// ============================================================
-// Helpers
-// ============================================================
+export { clearRemoteCache as clearCachedUserId };
+export { getRemoteUserId as getUserId };
 
-let cachedUserId: string | null = null;
-
-// Clear cached userId whenever auth state changes (sign-out, token refresh,
-// session expiry, etc.) so we never write data under a stale user ID.
-supabase.auth.onAuthStateChange((_event, session) => {
-  cachedUserId = session?.user?.id ?? null;
-});
-
-export function clearCachedUserId() {
-  cachedUserId = null;
-}
-
-export async function getUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  cachedUserId = user.id;
-  return user.id;
-}
-
-function throwOnError<T>(result: { data: T | null; error: any }): T {
-  if (result.error) throw new Error(result.error.message);
-  return result.data as T;
-}
-
-const PAGE_SIZE = 1000;
-const IN_FILTER_BATCH_SIZE = 500;
-type AwaitableResult<T> = PromiseLike<{ data: T[] | null; error: any }>;
-
-async function fetchAllPages<T>(
-  fetchPage: (from: number, to: number) => AwaitableResult<T>
-): Promise<T[]> {
-  const rows: T[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const batch = throwOnError(await fetchPage(from, from + PAGE_SIZE - 1));
-    rows.push(...batch);
-    if (batch.length < PAGE_SIZE) return rows;
-  }
-}
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
-
-async function fetchByIdBatches<T>(
-  ids: string[],
-  fetchBatch: (batchIds: string[]) => AwaitableResult<T>
-): Promise<T[]> {
-  if (ids.length === 0) return [];
-
-  const rows: T[] = [];
-  const uniqueIds = [...new Set(ids)];
-  for (const batchIds of chunkArray(uniqueIds, IN_FILTER_BATCH_SIZE)) {
-    rows.push(...throwOnError(await fetchBatch(batchIds)));
-  }
-  return rows;
-}
-
-// --- snake_case → camelCase mappers ---
-
-function meaningFromRow(r: any): Meaning {
-  return {
-    id: r.id,
-    headword: r.headword,
-    pinyin: r.pinyin,
-    pinyinNumeric: r.pinyin_numeric,
-    partOfSpeech: r.part_of_speech,
-    englishShort: r.english_short,
-    englishFull: r.english_full,
-    type: r.type,
-    level: r.level,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
-
-function meaningToRow(m: Meaning, userId: string) {
-  return {
-    id: m.id,
-    user_id: userId,
-    headword: m.headword,
-    pinyin: m.pinyin,
-    pinyin_numeric: m.pinyinNumeric,
-    part_of_speech: m.partOfSpeech,
-    english_short: m.englishShort,
-    english_full: m.englishFull,
-    type: m.type,
-    level: m.level,
-    created_at: m.createdAt,
-    updated_at: m.updatedAt,
-  };
-}
-
-function meaningLinkFromRow(r: any): MeaningLink {
-  return {
-    id: r.id,
-    parentMeaningId: r.parent_meaning_id,
-    childMeaningId: r.child_meaning_id,
-    position: r.position,
-    role: r.role,
-  };
-}
-
-function meaningLinkToRow(l: MeaningLink, userId: string) {
-  return {
-    id: l.id,
-    user_id: userId,
-    parent_meaning_id: l.parentMeaningId,
-    child_meaning_id: l.childMeaningId,
-    position: l.position,
-    role: l.role,
-  };
-}
-
-function sentenceFromRow(r: any): Sentence {
-  return {
-    id: r.id,
-    chinese: r.chinese,
-    english: r.english,
-    pinyin: r.pinyin,
-    pinyinSandhi: r.pinyin_sandhi,
-    audioUrl: r.audio_url,
-    source: r.source,
-    tags: r.tags || [],
-    createdAt: r.created_at,
-  };
-}
-
-function sentenceToRow(s: Sentence, userId: string) {
-  return {
-    id: s.id,
-    user_id: userId,
-    chinese: s.chinese,
-    english: s.english,
-    pinyin: s.pinyin,
-    pinyin_sandhi: s.pinyinSandhi,
-    audio_url: s.audioUrl,
-    source: s.source,
-    tags: s.tags,
-    created_at: s.createdAt,
-  };
-}
-
-function tokenFromRow(r: any): SentenceToken {
-  return {
-    id: r.id,
-    sentenceId: r.sentence_id,
-    meaningId: r.meaning_id,
-    position: r.position,
-    surfaceForm: r.surface_form,
-    pinyinSandhi: r.pinyin_sandhi,
-  };
-}
-
-function tokenToRow(t: SentenceToken, userId: string) {
-  return {
-    id: t.id,
-    user_id: userId,
-    sentence_id: t.sentenceId,
-    meaning_id: t.meaningId,
-    position: t.position,
-    surface_form: t.surfaceForm,
-    pinyin_sandhi: t.pinyinSandhi,
-  };
-}
-
-function srsCardFromRow(r: any): SrsCard {
-  return {
-    id: r.id,
-    sentenceId: r.sentence_id,
-    deckId: r.deck_id,
-    reviewMode: r.review_mode,
-    due: r.due,
-    stability: r.stability,
-    difficulty: r.difficulty,
-    elapsedDays: r.elapsed_days,
-    scheduledDays: r.scheduled_days,
-    reps: r.reps,
-    lapses: r.lapses,
-    state: r.state,
-    lastReview: r.last_review,
-    createdAt: r.created_at,
-  };
-}
-
-function srsCardToRow(c: SrsCard, userId: string) {
-  return {
-    id: c.id,
-    user_id: userId,
-    sentence_id: c.sentenceId,
-    deck_id: c.deckId,
-    review_mode: c.reviewMode,
-    due: c.due,
-    stability: c.stability,
-    difficulty: c.difficulty,
-    elapsed_days: c.elapsedDays,
-    scheduled_days: c.scheduledDays,
-    reps: c.reps,
-    lapses: c.lapses,
-    state: c.state,
-    last_review: c.lastReview,
-    created_at: c.createdAt,
-  };
-}
-
-function deckFromRow(r: any): Deck {
-  return {
-    id: r.id,
-    name: r.name,
-    description: r.description,
-    newCardsPerDay: r.new_cards_per_day,
-    reviewsPerDay: r.reviews_per_day,
-    createdAt: r.created_at,
-  };
-}
-
-function reviewLogFromRow(r: any): ReviewLog {
-  return {
-    id: r.id,
-    cardId: r.card_id,
-    rating: r.rating,
-    state: r.state,
-    due: r.due,
-    stability: r.stability,
-    difficulty: r.difficulty,
-    elapsedDays: r.elapsed_days,
-    scheduledDays: r.scheduled_days,
-    reviewedAt: r.reviewed_at,
-  };
-}
-
-function reviewLogToRow(l: ReviewLog, userId: string) {
-  return {
-    id: l.id,
-    user_id: userId,
-    card_id: l.cardId,
-    rating: l.rating,
-    state: l.state,
-    due: l.due,
-    stability: l.stability,
-    difficulty: l.difficulty,
-    elapsed_days: l.elapsedDays,
-    scheduled_days: l.scheduledDays,
-    reviewed_at: l.reviewedAt,
-  };
+async function enqueue(op: Pick<SyncOp, 'op' | 'payload'>): Promise<void> {
+  await localDb.outbox.add({
+    ...op,
+    status: 'pending',
+    attempts: 0,
+    createdAt: Date.now(),
+    deviceId: getDeviceId(),
+    opId: uuid(),
+  });
+  scheduleSyncSoon();
 }
 
 // ============================================================
-// Meanings
+// Meanings — reads from local, writes local + outbox
 // ============================================================
 
 export async function getMeaning(id: string): Promise<Meaning | undefined> {
-  const { data, error } = await supabase.from('meanings').select().eq('id', id).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? meaningFromRow(data) : undefined;
+  return local.getMeaning(id);
 }
 
 export async function getMeaningsByHeadword(headword: string): Promise<Meaning[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase.from('meanings').select().eq('headword', headword).order('id').range(from, to)
-  );
-  return data.map(meaningFromRow);
+  return local.getMeaningsByHeadword(headword);
 }
 
 export async function getMeaningsByPinyinNumeric(pinyinNumeric: string): Promise<Meaning[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase.from('meanings').select().eq('pinyin_numeric', pinyinNumeric).order('id').range(from, to)
-  );
-  return data.map(meaningFromRow);
+  return local.getMeaningsByPinyinNumeric(pinyinNumeric);
 }
 
 export async function getAllMeanings(): Promise<Meaning[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase.from('meanings').select().order('id').range(from, to)
-  );
-  return data.map(meaningFromRow);
+  return local.getAllMeanings();
 }
 
 export async function getMeaningsByIds(ids: string[]): Promise<Meaning[]> {
-  const data = await fetchByIdBatches(ids, (batchIds) =>
-    supabase.from('meanings').select().in('id', batchIds)
-  );
-  return data.map(meaningFromRow);
+  return local.getMeaningsByIds(ids);
 }
 
 export async function getMeaningsCount(): Promise<number> {
-  const { count } = await supabase.from('meanings').select('*', { count: 'exact', head: true });
-  return count ?? 0;
+  return local.getMeaningsCount();
 }
 
 export async function insertMeaning(meaning: Meaning): Promise<void> {
-  const userId = await getUserId();
-  throwOnError(await supabase.from('meanings').insert(meaningToRow(meaning, userId)));
+  await local.insertMeaning(meaning);
+  // Meanings are enqueued as part of ingestBundle — no standalone outbox op needed.
 }
 
 // ============================================================
-// MeaningLinks
+// MeaningLinks — reads from local, writes local + outbox
 // ============================================================
 
 export async function getMeaningLinksByParent(parentMeaningId: string): Promise<MeaningLink[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('meaning_links')
-      .select()
-      .eq('parent_meaning_id', parentMeaningId)
-      .order('position')
-      .range(from, to)
-  );
-  return data.map(meaningLinkFromRow);
+  return local.getMeaningLinksByParent(parentMeaningId);
 }
 
 export async function getMeaningLinksByChild(childMeaningId: string): Promise<MeaningLink[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('meaning_links')
-      .select()
-      .eq('child_meaning_id', childMeaningId)
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(meaningLinkFromRow);
+  return local.getMeaningLinksByChild(childMeaningId);
 }
 
 export async function getMeaningLinkCountByParent(parentMeaningId: string): Promise<number> {
-  const { count } = await supabase
-    .from('meaning_links')
-    .select('*', { count: 'exact', head: true })
-    .eq('parent_meaning_id', parentMeaningId);
-  return count ?? 0;
+  return local.getMeaningLinkCountByParent(parentMeaningId);
 }
 
 export async function getAllMeaningLinks(): Promise<MeaningLink[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase.from('meaning_links').select().order('id').range(from, to)
-  );
-  return data.map(meaningLinkFromRow);
+  return local.getAllMeaningLinks();
 }
 
 export async function insertMeaningLink(link: MeaningLink): Promise<void> {
-  const userId = await getUserId();
-  throwOnError(await supabase.from('meaning_links').insert(meaningLinkToRow(link, userId)));
+  await local.insertMeaningLink(link);
+  // MeaningLinks are enqueued as part of ingestBundle.
 }
 
 // ============================================================
-// Sentences
+// Sentences — reads from local, writes local + outbox
 // ============================================================
 
 export async function getSentence(id: string): Promise<Sentence | undefined> {
-  const { data, error } = await supabase.from('sentences').select().eq('id', id).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? sentenceFromRow(data) : undefined;
+  return local.getSentence(id);
 }
 
 export async function getSentenceByChinese(chinese: string): Promise<Sentence | undefined> {
-  const { data, error } = await supabase.from('sentences').select().eq('chinese', chinese).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? sentenceFromRow(data) : undefined;
+  return local.getSentenceByChinese(chinese);
 }
 
 export async function getSentencesBySource(source: string): Promise<Sentence[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('sentences')
-      .select()
-      .eq('source', source)
-      .order('created_at', { ascending: false })
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(sentenceFromRow);
+  return local.getSentencesBySource(source);
 }
 
 export async function getSentencesByTags(tags: string[]): Promise<Sentence[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('sentences')
-      .select()
-      .overlaps('tags', tags)
-      .order('created_at', { ascending: false })
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(sentenceFromRow);
+  return local.getSentencesByTags(tags);
 }
 
 export async function getSentencesOrderByCreatedDesc(): Promise<Sentence[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('sentences')
-      .select()
-      .order('created_at', { ascending: false })
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(sentenceFromRow);
+  return local.getSentencesOrderByCreatedDesc();
 }
 
 export async function getAllSentences(): Promise<Sentence[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('sentences')
-      .select()
-      .order('created_at', { ascending: false })
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(sentenceFromRow);
+  return local.getAllSentences();
 }
 
 export async function getSentencesCount(): Promise<number> {
-  const { count } = await supabase.from('sentences').select('*', { count: 'exact', head: true });
-  return count ?? 0;
+  return local.getSentencesCount();
 }
 
 export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {
-  const data = await fetchByIdBatches(ids, (batchIds) =>
-    supabase.from('sentences').select().in('id', batchIds)
-  );
-  return data.map(sentenceFromRow);
+  return local.getSentencesByIds(ids);
 }
 
 export async function insertSentence(sentence: Sentence): Promise<void> {
-  const userId = await getUserId();
-  throwOnError(await supabase.from('sentences').insert(sentenceToRow(sentence, userId)));
+  await local.insertSentence(sentence);
+  // Enqueued as part of ingestBundle by the ingestion service.
 }
 
 export async function updateSentenceTags(id: string, tags: string[]): Promise<void> {
-  throwOnError(await supabase.from('sentences').update({ tags }).eq('id', id));
+  await local.updateSentenceTags(id, tags);
+  await enqueue({ op: 'updateTags', payload: { id, tags } });
 }
 
 export async function deleteSentenceById(id: string): Promise<void> {
-  throwOnError(await supabase.from('sentences').delete().eq('id', id));
+  await local.deleteSentenceById(id);
+  await enqueue({
+    op: 'deleteEntity',
+    payload: { entity_type: 'sentence', entity_id: id },
+  });
 }
 
 export async function deleteSentencesBySource(source: string): Promise<void> {
-  throwOnError(await supabase.from('sentences').delete().eq('source', source));
+  const sentences = await local.getSentencesBySource(source);
+  if (sentences.length === 0) return;
+
+  await Promise.all(sentences.map((s) => local.deleteSentenceById(s.id)));
+  for (const s of sentences) {
+    await enqueue({
+      op: 'deleteEntity',
+      payload: { entity_type: 'sentence', entity_id: s.id },
+    });
+  }
 }
 
 // ============================================================
-// SentenceTokens
+// SentenceTokens — reads from local, writes local + outbox
 // ============================================================
 
 export async function getTokensBySentence(sentenceId: string): Promise<SentenceToken[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('sentence_tokens')
-      .select()
-      .eq('sentence_id', sentenceId)
-      .order('position')
-      .range(from, to)
-  );
-  return data.map(tokenFromRow);
+  return local.getTokensBySentence(sentenceId);
 }
 
 export async function getTokensByMeaning(meaningId: string): Promise<SentenceToken[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('sentence_tokens')
-      .select()
-      .eq('meaning_id', meaningId)
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(tokenFromRow);
+  return local.getTokensByMeaning(meaningId);
 }
 
 export async function getAllSentenceTokens(): Promise<SentenceToken[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase.from('sentence_tokens').select().order('id').range(from, to)
-  );
-  return data.map(tokenFromRow);
+  return local.getAllSentenceTokens();
 }
 
 export async function insertSentenceTokens(tokens: SentenceToken[]): Promise<void> {
   if (tokens.length === 0) return;
-  const userId = await getUserId();
-  throwOnError(
-    await supabase.from('sentence_tokens').insert(tokens.map((t) => tokenToRow(t, userId)))
-  );
+  await local.insertSentenceTokens(tokens);
+  // Enqueued as part of ingestBundle.
 }
 
 export async function deleteTokensBySentence(sentenceId: string): Promise<void> {
-  throwOnError(await supabase.from('sentence_tokens').delete().eq('sentence_id', sentenceId));
+  await local.deleteTokensBySentence(sentenceId);
+  // Cascaded via sentence delete outbox op.
 }
 
 // ============================================================
-// SrsCards
+// SrsCards — reads from local, writes local + outbox
 // ============================================================
 
 export async function getSrsCard(id: string): Promise<SrsCard | undefined> {
-  const { data, error } = await supabase.from('srs_cards').select().eq('id', id).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? srsCardFromRow(data) : undefined;
+  return local.getSrsCard(id);
 }
 
 export async function getSrsCardsBySentence(sentenceId: string): Promise<SrsCard[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('srs_cards')
-      .select()
-      .eq('sentence_id', sentenceId)
-      .order('review_mode')
-      .range(from, to)
-  );
-  return data.map(srsCardFromRow);
+  return local.getSrsCardsBySentence(sentenceId);
 }
 
 export async function getSrsCardsByDeckAndState(deckId: string, state: number): Promise<SrsCard[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('srs_cards')
-      .select()
-      .eq('deck_id', deckId)
-      .eq('state', state)
-      .order('due')
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(srsCardFromRow);
+  return local.getSrsCardsByDeckAndState(deckId, state);
 }
 
 export async function getSrsCardsByDeckAndStates(deckId: string, states: number[]): Promise<SrsCard[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('srs_cards')
-      .select()
-      .eq('deck_id', deckId)
-      .in('state', states)
-      .order('due')
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(srsCardFromRow);
+  return local.getSrsCardsByDeckAndStates(deckId, states);
+}
+
+export async function countSrsCardsByDeckAndState(deckId: string, state: number): Promise<number> {
+  return local.countSrsCardsByDeckAndState(deckId, state);
+}
+
+export async function countDueSrsCardsByDeckAndStates(deckId: string, states: number[], dueBy: number): Promise<number> {
+  return local.countDueSrsCardsByDeckAndStates(deckId, states, dueBy);
 }
 
 export async function getAllSrsCards(): Promise<SrsCard[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase.from('srs_cards').select().order('due').order('id').range(from, to)
-  );
-  return data.map(srsCardFromRow);
+  return local.getAllSrsCards();
 }
 
 export async function getSrsCardsByIds(ids: string[]): Promise<SrsCard[]> {
-  const data = await fetchByIdBatches(ids, (batchIds) =>
-    supabase.from('srs_cards').select().in('id', batchIds)
-  );
-  return data.map(srsCardFromRow);
+  return local.getSrsCardsByIds(ids);
 }
 
 export async function insertSrsCards(cards: SrsCard[]): Promise<void> {
   if (cards.length === 0) return;
-  const userId = await getUserId();
-  throwOnError(
-    await supabase.from('srs_cards').insert(cards.map((c) => srsCardToRow(c, userId)))
-  );
+  await local.insertSrsCards(cards);
+  // Enqueued as part of ingestBundle.
 }
 
 export async function updateSrsCard(id: string, updates: Partial<SrsCard>): Promise<void> {
-  const row: Record<string, any> = {};
-  if (updates.due !== undefined) row.due = updates.due;
-  if (updates.stability !== undefined) row.stability = updates.stability;
-  if (updates.difficulty !== undefined) row.difficulty = updates.difficulty;
-  if (updates.elapsedDays !== undefined) row.elapsed_days = updates.elapsedDays;
-  if (updates.scheduledDays !== undefined) row.scheduled_days = updates.scheduledDays;
-  if (updates.reps !== undefined) row.reps = updates.reps;
-  if (updates.lapses !== undefined) row.lapses = updates.lapses;
-  if (updates.state !== undefined) row.state = updates.state;
-  if (updates.lastReview !== undefined) row.last_review = updates.lastReview;
-  throwOnError(await supabase.from('srs_cards').update(row).eq('id', id));
+  await local.updateSrsCard(id, updates);
+  // Card updates from reviews are enqueued via reviewCard op in srs.ts.
 }
 
 export async function deleteSrsCardsBySentence(sentenceId: string): Promise<void> {
-  throwOnError(await supabase.from('srs_cards').delete().eq('sentence_id', sentenceId));
+  await local.deleteSrsCardsBySentence(sentenceId);
+  // Cascaded via sentence delete outbox op.
 }
 
 // ============================================================
-// Decks
+// Decks — reads from local, writes local
 // ============================================================
 
 export async function getDeck(id: string): Promise<Deck | undefined> {
-  const { data, error } = await supabase.from('decks').select().eq('id', id).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? deckFromRow(data) : undefined;
+  return local.getDeck(id);
 }
 
-/**
- * Ensure the user's default deck exists (idempotent upsert).
- * Covers users who signed up before the Postgres trigger was added,
- * or cases where the trigger failed silently.
- */
 export async function ensureDefaultDeck(): Promise<string> {
-  const userId = await getUserId();
-  const deckId = 'default-' + userId;
-  throwOnError(
-    await supabase.from('decks').upsert(
-      {
-        id: deckId,
-        user_id: userId,
-        name: 'Default',
-        description: 'Default deck',
-        new_cards_per_day: 20,
-        reviews_per_day: 200,
-        created_at: Date.now(),
-      },
-      { onConflict: 'id', ignoreDuplicates: true }
-    )
-  );
-  return deckId;
+  // Prefer cached ID to avoid network call (works offline).
+  // Falls through to getUser() only if cache is cold (rare at startup).
+  try {
+    const userId = getCachedUserIdOrThrow();
+    return local.ensureDefaultDeck(userId);
+  } catch {
+    const userId = await getRemoteUserId();
+    return local.ensureDefaultDeck(userId);
+  }
 }
 
 // ============================================================
-// ReviewLogs
+// ReviewLogs — reads from local, writes local + outbox
 // ============================================================
 
 export async function getReviewLogsByCardIds(cardIds: string[]): Promise<ReviewLog[]> {
-  const data = await fetchByIdBatches(cardIds, (batchIds) =>
-    supabase.from('review_logs').select().in('card_id', batchIds)
-  );
-  return data.map(reviewLogFromRow);
+  return local.getReviewLogsByCardIds(cardIds);
 }
 
 export async function getReviewLogsSince(timestamp: number): Promise<ReviewLog[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase
-      .from('review_logs')
-      .select()
-      .gte('reviewed_at', timestamp)
-      .order('reviewed_at')
-      .order('id')
-      .range(from, to)
-  );
-  return data.map(reviewLogFromRow);
+  return local.getReviewLogsSince(timestamp);
 }
 
 export async function getAllReviewLogs(): Promise<ReviewLog[]> {
-  const data = await fetchAllPages((from, to) =>
-    supabase.from('review_logs').select().order('reviewed_at').order('id').range(from, to)
-  );
-  return data.map(reviewLogFromRow);
+  return local.getAllReviewLogs();
 }
 
 export async function insertReviewLog(log: ReviewLog): Promise<void> {
-  const userId = await getUserId();
-  throwOnError(await supabase.from('review_logs').insert(reviewLogToRow(log, userId)));
+  await local.insertReviewLog(log);
+  // Review logs are enqueued via reviewCard op in srs.ts.
 }
 
 export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void> {
-  if (cardIds.length === 0) return;
-  throwOnError(await supabase.from('review_logs').delete().in('card_id', cardIds));
+  await local.deleteReviewLogsByCardIds(cardIds);
+  // Cascaded via card/sentence delete.
 }
 
 // ============================================================
-// Bulk delete
+// Bulk delete — local + outbox per entity
 // ============================================================
 
 export async function deleteAllUserData(): Promise<void> {
-  // Use FK cascades to reduce the number of independent delete steps.
-  // RLS ensures this only deletes the current user's data.
-  throwOnError(await supabase.from('sentences').delete().neq('id', ''));
-  throwOnError(await supabase.from('meanings').delete().neq('id', ''));
-  throwOnError(await supabase.from('decks').delete().neq('id', ''));
+  await local.deleteAllUserData();
+  // Clear hydration + USN so the app can rehydrate from server if
+  // the delete op doesn't push (e.g. user is offline or closes the tab).
+  await localDb.syncMeta.delete('lastHydratedAt');
+  await localDb.syncMeta.delete('lastUsn');
+  await localDb.syncMeta.delete('schemaVersion');
+  await enqueue({ op: 'deleteAllData', payload: {} });
 }
+
+// ============================================================
+// Sync op helpers (called by services, not by this facade)
+// ============================================================
+
+export { enqueue as enqueueSync };

@@ -1,0 +1,91 @@
+/**
+ * Hydration: pulls all user data from Supabase into local Dexie.
+ * Called once after login / on app startup when Dexie is empty.
+ * Also re-hydrates if the local schema version changes.
+ */
+import * as remote from './remoteRepo';
+import { localDb } from './localDb';
+import { maxUsnFromRows } from './mappers';
+
+const LOCAL_SCHEMA_VERSION = 1;
+
+export async function hydrateLocalDb(): Promise<void> {
+  await remote.ensureDefaultDeck();
+
+  const [
+    meanings,
+    meaningLinks,
+    sentences,
+    sentenceTokens,
+    decks,
+    srsCards,
+    reviewLogs,
+  ] = await Promise.all([
+    remote.getAllMeanings(),
+    remote.getAllMeaningLinks(),
+    remote.getAllSentences(),
+    remote.getAllSentenceTokens(),
+    remote.getAllDecks(),
+    remote.getAllSrsCards(),
+    remote.getAllReviewLogs(),
+  ]);
+
+  // Derive max USN from the data we already fetched (no extra network calls).
+  const maxUsn = Math.max(
+    0,
+    maxUsnFromRows(meanings),
+    maxUsnFromRows(meaningLinks),
+    maxUsnFromRows(sentences),
+    maxUsnFromRows(sentenceTokens),
+    maxUsnFromRows(decks),
+    maxUsnFromRows(srsCards),
+    maxUsnFromRows(reviewLogs),
+  );
+
+  await localDb.transaction(
+    'rw',
+    [
+      localDb.meanings,
+      localDb.meaningLinks,
+      localDb.sentences,
+      localDb.sentenceTokens,
+      localDb.srsCards,
+      localDb.decks,
+      localDb.reviewLogs,
+      localDb.syncMeta,
+    ],
+    async () => {
+      await Promise.all([
+        localDb.meanings.clear(),
+        localDb.meaningLinks.clear(),
+        localDb.sentences.clear(),
+        localDb.sentenceTokens.clear(),
+        localDb.srsCards.clear(),
+        localDb.decks.clear(),
+        localDb.reviewLogs.clear(),
+      ]);
+
+      await Promise.all([
+        meanings.length > 0 ? localDb.meanings.bulkPut(meanings) : undefined,
+        meaningLinks.length > 0 ? localDb.meaningLinks.bulkPut(meaningLinks) : undefined,
+        sentences.length > 0 ? localDb.sentences.bulkPut(sentences) : undefined,
+        sentenceTokens.length > 0 ? localDb.sentenceTokens.bulkPut(sentenceTokens) : undefined,
+        decks.length > 0 ? localDb.decks.bulkPut(decks) : undefined,
+        srsCards.length > 0 ? localDb.srsCards.bulkPut(srsCards) : undefined,
+        reviewLogs.length > 0 ? localDb.reviewLogs.bulkPut(reviewLogs) : undefined,
+      ]);
+
+      await localDb.syncMeta.put({ key: 'lastUsn', value: maxUsn });
+      await localDb.syncMeta.put({ key: 'lastHydratedAt', value: Date.now() });
+      await localDb.syncMeta.put({ key: 'schemaVersion', value: LOCAL_SCHEMA_VERSION });
+    }
+  );
+}
+
+export async function isHydrated(): Promise<boolean> {
+  const meta = await localDb.syncMeta.get('lastHydratedAt');
+  if (meta === undefined) return false;
+  const version = await localDb.syncMeta.get('schemaVersion');
+  if (!version || (version.value as number) < LOCAL_SCHEMA_VERSION) return false;
+  return true;
+}

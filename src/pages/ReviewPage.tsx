@@ -126,14 +126,18 @@ export function ReviewPage() {
             { key: 'both' as ModeOption, label: 'All (mixed)', desc: 'Interleave all directions' },
           ]).map((opt) => {
             const isSelected = loadingMode === opt.key;
+            const baseBgClass =
+              isSelected ? '' : mode === opt.key ? 'bg-[var(--bg-inset)]' : 'bg-[var(--bg-surface)]';
             return (
               <button
                 key={opt.key}
                 onClick={() => { setMode(opt.key); startReview(opt.key); }}
                 disabled={loading}
-                className="w-full p-3 sm:p-4 rounded-lg text-left transition-all active:scale-[0.98]"
+                className={`w-full p-3 sm:p-4 rounded-lg text-left transition-colors active:scale-[0.98] active:transition-transform ${baseBgClass} ${loading ? '' : 'surface-hover'}`}
                 style={{
-                  background: isSelected ? `color-mix(in srgb, ${MODE_COLORS[opt.key]} 15%, var(--bg-inset))` : mode === opt.key ? 'var(--bg-inset)' : 'var(--bg-surface)',
+                  ...(isSelected
+                    ? { background: `color-mix(in srgb, ${MODE_COLORS[opt.key]} 15%, var(--bg-inset))` }
+                    : {}),
                   border: `2px solid ${isSelected ? MODE_COLORS[opt.key] : mode === opt.key ? MODE_COLORS[opt.key] : 'var(--border)'}`,
                   opacity: loading && !isSelected ? 0.5 : 1,
                 }}

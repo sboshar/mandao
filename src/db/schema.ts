@@ -21,6 +21,7 @@ export interface Meaning {
   level: number;
   createdAt: number;
   updatedAt: number;
+  usn?: number;
 }
 
 /** Recursive link: connects a meaning to its constituent meanings. */
@@ -33,6 +34,8 @@ export interface MeaningLink {
   /** 0-indexed position in parent */
   position: number;
   role: 'character' | 'component' | 'radical';
+  updatedAt?: number;
+  usn?: number;
 }
 
 export interface Sentence {
@@ -51,6 +54,8 @@ export interface Sentence {
   /** User-defined tags, e.g. "restaurant", "travel" */
   tags: string[];
   createdAt: number;
+  updatedAt?: number;
+  usn?: number;
 }
 
 /** Junction table: links sentences to meanings, preserving token order. */
@@ -64,6 +69,8 @@ export interface SentenceToken {
   surfaceForm: string;
   /** Tone-sandhi pinyin for this token in context */
   pinyinSandhi: string;
+  updatedAt?: number;
+  usn?: number;
 }
 
 // ============================================================
@@ -101,7 +108,10 @@ export interface SrsCard {
   /** 0=new, 1=learning, 2=review, 3=relearning */
   state: number;
   lastReview: number | null;
+  lastAnsweredAt?: number | null;
   createdAt: number;
+  updatedAt?: number;
+  usn?: number;
 }
 
 export interface Deck {
@@ -111,6 +121,8 @@ export interface Deck {
   newCardsPerDay: number;
   reviewsPerDay: number;
   createdAt: number;
+  updatedAt?: number;
+  usn?: number;
 }
 
 export interface ReviewLog {
@@ -126,6 +138,10 @@ export interface ReviewLog {
   elapsedDays: number;
   scheduledDays: number;
   reviewedAt: number;
+  opId?: string;
+  deviceId?: string;
+  updatedAt?: number;
+  usn?: number;
 }
 
 // ============================================================
