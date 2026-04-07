@@ -27,7 +27,7 @@ export function clearCachedUserId() {
   cachedUserId = null;
 }
 
-async function getUserId(): Promise<string> {
+export async function getUserId(): Promise<string> {
   if (cachedUserId) return cachedUserId;
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
@@ -234,7 +234,8 @@ function reviewLogToRow(l: ReviewLog, userId: string) {
 // ============================================================
 
 export async function getMeaning(id: string): Promise<Meaning | undefined> {
-  const { data } = await supabase.from('meanings').select().eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('meanings').select().eq('id', id).maybeSingle();
+  if (error) throw new Error(error.message);
   return data ? meaningFromRow(data) : undefined;
 }
 
@@ -253,7 +254,7 @@ export async function getMeaningsByPinyinNumeric(pinyinNumeric: string): Promise
 }
 
 export async function getAllMeanings(): Promise<Meaning[]> {
-  const data = throwOnError(await supabase.from('meanings').select());
+  const data = throwOnError(await supabase.from('meanings').select().range(0, 9999));
   return data.map(meaningFromRow);
 }
 
@@ -294,7 +295,7 @@ export async function getMeaningLinkCountByParent(parentMeaningId: string): Prom
 }
 
 export async function getAllMeaningLinks(): Promise<MeaningLink[]> {
-  const data = throwOnError(await supabase.from('meaning_links').select());
+  const data = throwOnError(await supabase.from('meaning_links').select().range(0, 9999));
   return data.map(meaningLinkFromRow);
 }
 
@@ -308,12 +309,14 @@ export async function insertMeaningLink(link: MeaningLink): Promise<void> {
 // ============================================================
 
 export async function getSentence(id: string): Promise<Sentence | undefined> {
-  const { data } = await supabase.from('sentences').select().eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('sentences').select().eq('id', id).maybeSingle();
+  if (error) throw new Error(error.message);
   return data ? sentenceFromRow(data) : undefined;
 }
 
 export async function getSentenceByChinese(chinese: string): Promise<Sentence | undefined> {
-  const { data } = await supabase.from('sentences').select().eq('chinese', chinese).maybeSingle();
+  const { data, error } = await supabase.from('sentences').select().eq('chinese', chinese).maybeSingle();
+  if (error) throw new Error(error.message);
   return data ? sentenceFromRow(data) : undefined;
 }
 
@@ -339,7 +342,7 @@ export async function getSentencesOrderByCreatedDesc(): Promise<Sentence[]> {
 }
 
 export async function getAllSentences(): Promise<Sentence[]> {
-  const data = throwOnError(await supabase.from('sentences').select());
+  const data = throwOnError(await supabase.from('sentences').select().range(0, 9999));
   return data.map(sentenceFromRow);
 }
 
@@ -392,7 +395,7 @@ export async function getTokensByMeaning(meaningId: string): Promise<SentenceTok
 }
 
 export async function getAllSentenceTokens(): Promise<SentenceToken[]> {
-  const data = throwOnError(await supabase.from('sentence_tokens').select());
+  const data = throwOnError(await supabase.from('sentence_tokens').select().range(0, 9999));
   return data.map(tokenFromRow);
 }
 
@@ -413,7 +416,8 @@ export async function deleteTokensBySentence(sentenceId: string): Promise<void> 
 // ============================================================
 
 export async function getSrsCard(id: string): Promise<SrsCard | undefined> {
-  const { data } = await supabase.from('srs_cards').select().eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('srs_cards').select().eq('id', id).maybeSingle();
+  if (error) throw new Error(error.message);
   return data ? srsCardFromRow(data) : undefined;
 }
 
@@ -439,7 +443,7 @@ export async function getSrsCardsByDeckAndStates(deckId: string, states: number[
 }
 
 export async function getAllSrsCards(): Promise<SrsCard[]> {
-  const data = throwOnError(await supabase.from('srs_cards').select());
+  const data = throwOnError(await supabase.from('srs_cards').select().range(0, 9999));
   return data.map(srsCardFromRow);
 }
 
@@ -474,7 +478,8 @@ export async function deleteSrsCardsBySentence(sentenceId: string): Promise<void
 // ============================================================
 
 export async function getDeck(id: string): Promise<Deck | undefined> {
-  const { data } = await supabase.from('decks').select().eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('decks').select().eq('id', id).maybeSingle();
+  if (error) throw new Error(error.message);
   return data ? deckFromRow(data) : undefined;
 }
 
@@ -498,7 +503,7 @@ export async function getReviewLogsSince(timestamp: number): Promise<ReviewLog[]
 }
 
 export async function getAllReviewLogs(): Promise<ReviewLog[]> {
-  const data = throwOnError(await supabase.from('review_logs').select());
+  const data = throwOnError(await supabase.from('review_logs').select().range(0, 9999));
   return data.map(reviewLogFromRow);
 }
 
@@ -518,10 +523,11 @@ export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void
 
 export async function deleteAllUserData(): Promise<void> {
   // Order matters due to foreign keys: logs → cards → tokens → sentences, links → meanings
-  await supabase.from('review_logs').delete().neq('id', '');
-  await supabase.from('srs_cards').delete().neq('id', '');
-  await supabase.from('sentence_tokens').delete().neq('id', '');
-  await supabase.from('sentences').delete().neq('id', '');
-  await supabase.from('meaning_links').delete().neq('id', '');
-  await supabase.from('meanings').delete().neq('id', '');
+  // RLS ensures this only deletes the current user's data
+  throwOnError(await supabase.from('review_logs').delete().neq('id', ''));
+  throwOnError(await supabase.from('srs_cards').delete().neq('id', ''));
+  throwOnError(await supabase.from('sentence_tokens').delete().neq('id', ''));
+  throwOnError(await supabase.from('sentences').delete().neq('id', ''));
+  throwOnError(await supabase.from('meaning_links').delete().neq('id', ''));
+  throwOnError(await supabase.from('meanings').delete().neq('id', ''));
 }

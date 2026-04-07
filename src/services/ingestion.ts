@@ -18,7 +18,6 @@ import type {
 } from '../db/schema';
 import { getDefaultDeckId } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
-import { supabase } from '../lib/supabase';
 
 // ============================================================
 // Types for the ingestion input
@@ -46,16 +45,6 @@ export interface SentenceInput {
   tokens: TokenInput[];
   source?: string;
   tags?: string[];
-}
-
-// ============================================================
-// Helper: get current user ID
-// ============================================================
-
-async function currentUserId(): Promise<string> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  return user.id;
 }
 
 // ============================================================
@@ -136,7 +125,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
   await repo.insertSentenceTokens(tokenRecords);
 
   // Create SRS cards (one per review mode)
-  const userId = await currentUserId();
+  const userId = await repo.getUserId();
   const deckId = getDefaultDeckId(userId);
   const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
   const cards: SrsCard[] = modes.map((mode) => ({
