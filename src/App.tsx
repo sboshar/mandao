@@ -37,33 +37,37 @@ function App() {
   }, []);
 
   const userId = user?.id;
+
+  // Hydration effect: runs once when userId appears and ready is false
   useEffect(() => {
-    if (userId && !ready) {
-      let cancelled = false;
-      (async () => {
-        const hydrated = await isHydrated();
-        if (!hydrated) {
-          setHydrating(true);
-          await hydrateLocalDb();
-          if (cancelled) return;
-          setHydrating(false);
-        }
-        await loadCedict();
-        if (!cancelled) {
-          setReady(true);
-          startSyncListeners();
-          runSync();
-        }
-      })();
-      return () => {
-        cancelled = true;
-        stopSyncListeners();
-      };
-    }
-    if (!userId && ready) {
-      stopSyncListeners();
-      setReady(false);
-    }
+    if (!userId || ready) return;
+    let cancelled = false;
+    (async () => {
+      const hydrated = await isHydrated();
+      if (!hydrated) {
+        setHydrating(true);
+        await hydrateLocalDb();
+        if (cancelled) return;
+        setHydrating(false);
+      }
+      await loadCedict();
+      if (!cancelled) setReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, [userId, ready]);
+
+  // Sync listeners: active whenever the app is ready and user is logged in.
+  // Separate effect so it is not torn down by the hydration effect's cleanup.
+  useEffect(() => {
+    if (!userId || !ready) return;
+    startSyncListeners();
+    runSync();
+    return () => stopSyncListeners();
+  }, [userId, ready]);
+
+  // Sign-out: clear ready so hydration re-runs on next login
+  useEffect(() => {
+    if (!userId && ready) setReady(false);
   }, [userId, ready]);
 
   if (authLoading) return <LoadingScreen />;

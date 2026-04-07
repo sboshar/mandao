@@ -94,6 +94,7 @@ create table if not exists sync_graves (
 );
 
 create index if not exists idx_sync_graves_user_usn on sync_graves(user_id, usn);
+create unique index if not exists idx_sync_graves_dedup on sync_graves(user_id, entity_type, entity_id);
 
 alter table sync_graves enable row level security;
 

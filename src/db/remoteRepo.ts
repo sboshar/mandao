@@ -318,6 +318,13 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
   return data ? deckFromRow(data) : undefined;
 }
 
+export async function getAllDecks(): Promise<Deck[]> {
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('decks').select().order('id').range(from, to)
+  );
+  return data.map(deckFromRow);
+}
+
 export async function ensureDefaultDeck(): Promise<string> {
   const userId = await getUserId();
   const deckId = 'default-' + userId;

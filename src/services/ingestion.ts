@@ -9,6 +9,7 @@
 import { v4 as uuid } from 'uuid';
 import * as repo from '../db/repo';
 import { enqueueSync } from '../db/repo';
+import * as local from '../db/localRepo';
 import type {
   Meaning,
   MeaningLink,
@@ -159,7 +160,9 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
   } catch (error) {
     if (sentenceInserted) {
       try {
-        await repo.deleteSentenceById(sentenceId);
+        // Roll back local Dexie only — no server delete op since
+        // the ingestBundle was never enqueued (we failed before that).
+        await local.deleteSentenceById(sentenceId);
       } catch (cleanupError) {
         console.error('Failed to roll back partial sentence insert', cleanupError);
       }

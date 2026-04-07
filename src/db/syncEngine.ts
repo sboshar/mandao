@@ -1,11 +1,14 @@
 /**
- * Sync engine: push local outbox to Supabase RPCs, pull remote changes.
+ * Sync engine: push local outbox to Supabase RPCs, pull remote changes by USN.
  *
- * Push: drains the outbox by grouping ops by type and calling the
- * corresponding server-side RPC in batch.
+ * Push: groups pending outbox ops by type and calls the corresponding
+ * server-side RPC. Inflight recovery on startup handles crash/tab-kill.
  *
- * Pull: calls pull_changes(lastUsn) and upserts results into Dexie,
- * applying merge rules for conflicts.
+ * Pull: loops pull_changes(lastUsn) until caught up, applying merge rules:
+ *   - review_logs: append-only (skip duplicates)
+ *   - srs_cards: last-answered-wins by lastReview timestamp
+ *   - everything else: server wins (simple upsert)
+ *   - graves: delete from local Dexie
  */
 import { supabase } from '../lib/supabase';
 import { localDb, type SyncOp } from './localDb';
@@ -106,6 +109,17 @@ export function getDeviceId(): string {
 
 const MAX_ATTEMPTS = 5;
 
+/**
+ * Recover any rows stuck as 'inflight' from a previous crash or tab kill.
+ * Must be called once at startup before the first pushOutbox.
+ */
+async function recoverInflightOps(): Promise<void> {
+  await localDb.outbox
+    .where('status')
+    .equals('inflight')
+    .modify({ status: 'pending' });
+}
+
 async function pushOutbox(): Promise<void> {
   const pending = await localDb.outbox
     .where('status')
@@ -114,11 +128,9 @@ async function pushOutbox(): Promise<void> {
 
   if (pending.length === 0) return;
 
-  // Mark as inflight
   const ids = pending.map((o) => o.id!);
   await localDb.outbox.where('id').anyOf(ids).modify({ status: 'inflight' });
 
-  // Group by op type
   const groups = new Map<string, SyncOp[]>();
   for (const op of pending) {
     const arr = groups.get(op.op) || [];
@@ -129,40 +141,56 @@ async function pushOutbox(): Promise<void> {
   const succeeded: number[] = [];
   const failed: number[] = [];
 
-  for (const [opType, ops] of groups) {
-    try {
-      switch (opType) {
-        case 'reviewCard':
-          await pushReviewOps(ops);
-          break;
-        case 'ingestBundle':
-          for (const op of ops) await pushIngestBundle(op);
-          break;
+  try {
+    for (const [opType, ops] of groups) {
+      try {
+        switch (opType) {
+          case 'reviewCard':
+            await pushReviewOps(ops);
+            break;
+          case 'ingestBundle':
+            for (const op of ops) await pushIngestBundle(op);
+            break;
         case 'deleteEntity':
           await pushDeleteOps(ops);
+          break;
+        case 'deleteAllData':
+          await pushDeleteAllData();
           break;
         case 'updateTags':
           for (const op of ops) await pushUpdateTags(op);
           break;
+        }
+        succeeded.push(...ops.map((o) => o.id!));
+      } catch (e) {
+        console.error(`Sync push failed for ${opType}:`, e);
+        failed.push(...ops.map((o) => o.id!));
       }
-      succeeded.push(...ops.map((o) => o.id!));
-    } catch (e) {
-      console.error(`Sync push failed for ${opType}:`, e);
-      failed.push(...ops.map((o) => o.id!));
     }
-  }
-
-  if (succeeded.length > 0) {
-    await localDb.outbox.bulkDelete(succeeded);
-  }
-  if (failed.length > 0) {
-    await localDb.outbox
-      .where('id')
-      .anyOf(failed)
-      .modify((op: SyncOp) => {
-        op.status = op.attempts + 1 >= MAX_ATTEMPTS ? 'failed' : 'pending';
-        op.attempts += 1;
-      });
+  } finally {
+    // Always reset state — even if bookkeeping itself throws,
+    // the remaining inflight rows are caught by recoverInflightOps on next startup.
+    if (succeeded.length > 0) {
+      await localDb.outbox.bulkDelete(succeeded);
+    }
+    if (failed.length > 0) {
+      await localDb.outbox
+        .where('id')
+        .anyOf(failed)
+        .modify((op: SyncOp) => {
+          op.status = op.attempts + 1 >= MAX_ATTEMPTS ? 'failed' : 'pending';
+          op.attempts += 1;
+        });
+    }
+    // Safety net: any ids not in succeeded or failed are still inflight
+    // (shouldn't happen, but guard against it)
+    const unaccounted = ids.filter((id) => !succeeded.includes(id) && !failed.includes(id));
+    if (unaccounted.length > 0) {
+      await localDb.outbox
+        .where('id')
+        .anyOf(unaccounted)
+        .modify({ status: 'pending' });
+    }
   }
 }
 
@@ -183,8 +211,20 @@ async function pushDeleteOps(ops: SyncOp[]): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+async function pushDeleteAllData(): Promise<void> {
+  // Server-side bulk delete via FK cascades + RLS
+  const { error: e1 } = await supabase.from('sentences').delete().neq('id', '');
+  if (e1) throw new Error(e1.message);
+  const { error: e2 } = await supabase.from('meanings').delete().neq('id', '');
+  if (e2) throw new Error(e2.message);
+  const { error: e3 } = await supabase.from('decks').delete().neq('id', '');
+  if (e3) throw new Error(e3.message);
+}
+
 async function pushUpdateTags(op: SyncOp): Promise<void> {
   const { id, tags } = op.payload;
+  // Uses RLS-protected direct update. The bump_sync_meta trigger
+  // auto-sets usn + updated_at on the server side.
   const { error } = await supabase
     .from('sentences')
     .update({ tags })
@@ -196,16 +236,29 @@ async function pushUpdateTags(op: SyncOp): Promise<void> {
 // Pull: fetch changes from server since lastUsn
 // ============================================================
 
+const PULL_PAGE_SIZE = 1000;
+const MAX_PULL_PAGES = 50;
+
 async function pullChanges(): Promise<void> {
+  for (let page = 0; page < MAX_PULL_PAGES; page++) {
+    const advanced = await pullOnePage();
+    if (!advanced) break;
+  }
+}
+
+/**
+ * Pull one page of changes. Returns true if maxUsn advanced (more pages may exist).
+ */
+async function pullOnePage(): Promise<boolean> {
   const meta = await localDb.syncMeta.get('lastUsn');
   const lastUsn = (meta?.value as number) ?? 0;
 
   const { data, error } = await supabase.rpc('pull_changes', {
     last_usn: lastUsn,
-    max_rows: 1000,
+    max_rows: PULL_PAGE_SIZE,
   });
   if (error) throw new Error(error.message);
-  if (!data) return;
+  if (!data) return false;
 
   const changes = data as {
     meanings: any[];
@@ -219,6 +272,7 @@ async function pullChanges(): Promise<void> {
   };
 
   let maxUsn = lastUsn;
+  let totalRows = 0;
 
   await localDb.transaction(
     'rw',
@@ -233,55 +287,53 @@ async function pullChanges(): Promise<void> {
       localDb.syncMeta,
     ],
     async () => {
-      // Upsert meanings
       for (const r of changes.meanings) {
         await localDb.meanings.put(meaningFromRow(r));
         if (r.usn > maxUsn) maxUsn = r.usn;
       }
+      totalRows += changes.meanings.length;
 
-      // Upsert meaning links
       for (const r of changes.meaning_links) {
         await localDb.meaningLinks.put(meaningLinkFromRow(r));
         if (r.usn > maxUsn) maxUsn = r.usn;
       }
+      totalRows += changes.meaning_links.length;
 
-      // Upsert sentences
       for (const r of changes.sentences) {
         await localDb.sentences.put(sentenceFromRow(r));
         if (r.usn > maxUsn) maxUsn = r.usn;
       }
+      totalRows += changes.sentences.length;
 
-      // Upsert sentence tokens
       for (const r of changes.sentence_tokens) {
         await localDb.sentenceTokens.put(tokenFromRow(r));
         if (r.usn > maxUsn) maxUsn = r.usn;
       }
+      totalRows += changes.sentence_tokens.length;
 
-      // Upsert decks
       for (const r of changes.decks) {
         await localDb.decks.put(deckFromRow(r));
         if (r.usn > maxUsn) maxUsn = r.usn;
       }
+      totalRows += changes.decks.length;
 
-      // Upsert SRS cards (last-answered-wins conflict resolution)
       for (const r of changes.srs_cards) {
         const remote = srsCardFromRow(r);
-        const local = await localDb.srsCards.get(remote.id);
+        const existing = await localDb.srsCards.get(remote.id);
 
-        if (!local) {
+        if (!existing) {
           await localDb.srsCards.put(remote);
         } else {
-          // Last-answered-wins: take whichever has the more recent lastReview
           const remoteLastReview = remote.lastReview ?? 0;
-          const localLastReview = local.lastReview ?? 0;
+          const localLastReview = existing.lastReview ?? 0;
           if (remoteLastReview >= localLastReview) {
             await localDb.srsCards.put(remote);
           }
         }
         if (r.usn > maxUsn) maxUsn = r.usn;
       }
+      totalRows += changes.srs_cards.length;
 
-      // Upsert review logs (append-only, skip duplicates)
       for (const r of changes.review_logs) {
         const existing = await localDb.reviewLogs.get(r.id);
         if (!existing) {
@@ -289,8 +341,8 @@ async function pullChanges(): Promise<void> {
         }
         if (r.usn > maxUsn) maxUsn = r.usn;
       }
+      totalRows += changes.review_logs.length;
 
-      // Apply graves (tombstones)
       for (const g of changes.graves) {
         const { entity_type, entity_id, usn } = g;
         switch (entity_type) {
@@ -319,12 +371,15 @@ async function pullChanges(): Promise<void> {
         }
         if (usn > maxUsn) maxUsn = usn;
       }
+      totalRows += changes.graves.length;
 
       if (maxUsn > lastUsn) {
         await localDb.syncMeta.put({ key: 'lastUsn', value: maxUsn });
       }
     }
   );
+
+  return maxUsn > lastUsn && totalRows >= PULL_PAGE_SIZE;
 }
 
 // ============================================================
@@ -345,6 +400,7 @@ export async function runSync(): Promise<void> {
   store.setStatus('syncing');
 
   try {
+    await recoverInflightOps();
     await pushOutbox();
     await pullChanges();
 

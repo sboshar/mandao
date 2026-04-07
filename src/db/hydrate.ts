@@ -6,11 +6,15 @@ import * as remote from './remoteRepo';
 import { localDb } from './localDb';
 
 export async function hydrateLocalDb(): Promise<void> {
+  // Ensure at least a default deck exists before pulling
+  await remote.ensureDefaultDeck();
+
   const [
     meanings,
     meaningLinks,
     sentences,
     sentenceTokens,
+    decks,
     srsCards,
     reviewLogs,
   ] = await Promise.all([
@@ -18,12 +22,10 @@ export async function hydrateLocalDb(): Promise<void> {
     remote.getAllMeaningLinks(),
     remote.getAllSentences(),
     remote.getAllSentenceTokens(),
+    remote.getAllDecks(),
     remote.getAllSrsCards(),
     remote.getAllReviewLogs(),
   ]);
-
-  const deckId = await remote.ensureDefaultDeck();
-  const deck = await remote.getDeck(deckId);
 
   await localDb.transaction(
     'rw',
@@ -53,8 +55,8 @@ export async function hydrateLocalDb(): Promise<void> {
         meaningLinks.length > 0 ? localDb.meaningLinks.bulkPut(meaningLinks) : undefined,
         sentences.length > 0 ? localDb.sentences.bulkPut(sentences) : undefined,
         sentenceTokens.length > 0 ? localDb.sentenceTokens.bulkPut(sentenceTokens) : undefined,
+        decks.length > 0 ? localDb.decks.bulkPut(decks) : undefined,
         srsCards.length > 0 ? localDb.srsCards.bulkPut(srsCards) : undefined,
-        deck ? localDb.decks.put(deck) : undefined,
         reviewLogs.length > 0 ? localDb.reviewLogs.bulkPut(reviewLogs) : undefined,
       ]);
 

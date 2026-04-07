@@ -18,6 +18,7 @@ export type SyncOpType =
   | 'reviewCard'
   | 'ingestBundle'
   | 'deleteEntity'
+  | 'deleteAllData'
   | 'updateTags';
 
 export interface SyncOp {

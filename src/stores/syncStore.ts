@@ -25,5 +25,12 @@ export const useSyncStore = create<SyncState>((set) => ({
   setLastSyncedAt: (ts) => set({ lastSyncedAt: ts }),
   setPendingCount: (count) => set({ pendingCount: count }),
   setError: (msg) => set({ errorMessage: msg, status: msg ? 'error' : 'synced' }),
-  setOnline: (online) => set({ online, status: online ? 'synced' : 'offline' }),
+  // When going online, don't claim 'synced' — let runSync update status.
+  // When going offline, set status immediately.
+  setOnline: (online) => set((state) => ({
+    online,
+    status: online
+      ? (state.status === 'offline' ? (state.lastSyncedAt ? 'synced' : 'syncing') : state.status)
+      : 'offline',
+  })),
 }));

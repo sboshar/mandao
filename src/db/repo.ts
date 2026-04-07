@@ -275,30 +275,8 @@ export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void
 // ============================================================
 
 export async function deleteAllUserData(): Promise<void> {
-  const sentences = await local.getAllSentences();
-  const meanings = await local.getAllMeanings();
-  const decks = await localDb.decks.toArray();
-
   await local.deleteAllUserData();
-
-  for (const s of sentences) {
-    await enqueue({
-      op: 'deleteEntity',
-      payload: { entity_type: 'sentence', entity_id: s.id },
-    });
-  }
-  for (const m of meanings) {
-    await enqueue({
-      op: 'deleteEntity',
-      payload: { entity_type: 'meaning', entity_id: m.id },
-    });
-  }
-  for (const d of decks) {
-    await enqueue({
-      op: 'deleteEntity',
-      payload: { entity_type: 'deck', entity_id: d.id },
-    });
-  }
+  await enqueue({ op: 'deleteAllData', payload: {} });
 }
 
 // ============================================================

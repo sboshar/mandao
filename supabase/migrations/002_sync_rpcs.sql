@@ -247,10 +247,13 @@ begin
         raise exception 'Unknown entity_type: %', etype;
     end case;
 
-    -- Insert tombstone
+    -- Insert or update tombstone (dedup by user + entity_type + entity_id)
     insert into sync_graves (user_id, entity_type, entity_id)
     values (uid, etype, eid)
-    on conflict (id) do nothing;
+    on conflict (user_id, entity_type, entity_id)
+    do update set
+      usn = nextval('sync_usn_seq'),
+      deleted_at = extract(epoch from now()) * 1000;
   end loop;
 end;
 $$;
