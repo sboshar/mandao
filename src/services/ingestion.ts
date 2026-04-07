@@ -392,6 +392,30 @@ export async function updateSentenceTags(sentenceId: string, tags: string[]): Pr
   await db.sentences.update(sentenceId, { tags });
 }
 
+/** Delete all tutorial sentences and their associated tokens and SRS cards */
+export async function deleteTutorialSentences(): Promise<void> {
+  const tutorialSentences = await db.sentences
+    .where('source')
+    .equals('tutorial')
+    .toArray();
+
+  if (tutorialSentences.length === 0) return;
+
+  const sentenceIds = tutorialSentences.map((s) => s.id);
+
+  await db.transaction(
+    'rw',
+    [db.sentences, db.sentenceTokens, db.srsCards],
+    async () => {
+      for (const id of sentenceIds) {
+        await db.sentenceTokens.where('sentenceId').equals(id).delete();
+        await db.srsCards.where('sentenceId').equals(id).delete();
+      }
+      await db.sentences.where('source').equals('tutorial').delete();
+    }
+  );
+}
+
 /** Get all meanings that share the same pinyin (for pinyin card) */
 export async function getMeaningsByPinyin(
   pinyinNumeric: string
