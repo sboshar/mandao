@@ -3,18 +3,15 @@
  * Loads the dictionary file via fetch and builds a trie for fast lookup.
  */
 import { Trie, type DictEntry } from './trie';
-import { wordFrequencyScore } from './charFrequency';
 export type { DictEntry };
 
 let simplifiedTrie: Trie | null = null;
 let traditionalTrie: Trie | null = null;
+let pinyinTrie: Trie | null = null;
 let allEntries: DictEntry[] = [];
-/** Map from tone-stripped pinyin (no spaces) → entries, built at load time */
-let pinyinIndex: Map<string, DictEntry[]> | null = null;
 let loaded = false;
 let loading: Promise<void> | null = null;
 
-/** Strip tone numbers and spaces from pinyin: "ni3 hao3" → "nihao" */
 function stripTones(pinyin: string): string {
   return pinyin.replace(/[0-9\s]/g, '').toLowerCase();
 }
@@ -42,6 +39,7 @@ export async function loadCedict(): Promise<void> {
 
     simplifiedTrie = new Trie();
     traditionalTrie = new Trie();
+    pinyinTrie = new Trie();
 
     const lines = text.split('\n');
     const entries: DictEntry[] = [];
@@ -52,18 +50,10 @@ export async function loadCedict(): Promise<void> {
       entries.push(entry);
       simplifiedTrie.push(entry.simplified, entry);
       traditionalTrie.push(entry.traditional, entry);
+      const pyKey = stripTones(entry.pinyin);
+      if (pyKey) pinyinTrie.push(pyKey, entry);
     }
     allEntries = entries;
-
-    // Build pinyin index
-    pinyinIndex = new Map();
-    for (const entry of entries) {
-      const key = stripTones(entry.pinyin);
-      if (!key) continue;
-      const list = pinyinIndex.get(key);
-      if (list) list.push(entry);
-      else pinyinIndex.set(key, [entry]);
-    }
 
     loaded = true;
   })();
@@ -109,22 +99,13 @@ export function lookupPrefix(prefix: string): DictEntry[] {
   return [...simplified, ...traditional];
 }
 
-/**
- * Extract tone numbers from raw input like "wo3men2" → ["3","2"]
- * Returns empty array if no tones provided.
- */
 function extractTones(input: string): string[] {
   return Array.from(input.matchAll(/[1-5]/g), (m) => m[0]);
 }
 
-/**
- * Check if a CEDICT entry's pinyin matches the tone pattern the user typed.
- * e.g. user "wo3" → entry "wo3" matches, "wo4" does not.
- */
 function matchesTonePattern(entryPinyin: string, inputTones: string[]): boolean {
-  if (inputTones.length === 0) return true; // no tones specified, everything matches
+  if (inputTones.length === 0) return true;
   const entryTones = extractTones(entryPinyin);
-  // Compare tone-by-tone up to the length the user specified
   for (let i = 0; i < inputTones.length && i < entryTones.length; i++) {
     if (inputTones[i] !== entryTones[i]) return false;
   }
@@ -132,44 +113,52 @@ function matchesTonePattern(entryPinyin: string, inputTones: string[]): boolean 
 }
 
 /**
- * Look up CEDICT entries by pinyin.
- * Strips tone numbers for matching, but uses them to rank results.
- * Input like "wo3" matches "wo" entries, with tone 3 results first.
- * Input like "nihao" matches entries with pinyin "ni3 hao3".
+ * Look up CEDICT entries by pinyin. Strips tone numbers for trie lookup,
+ * then uses them to rank results (tone match first, then shorter words,
+ * then definition count as a frequency proxy). Deduplicates by simplified form.
  */
 export function lookupByPinyin(input: string, limit = 30): DictEntry[] {
-  if (!pinyinIndex) return [];
+  if (!pinyinTrie) return [];
   const query = stripTones(input);
   if (!query) return [];
 
   const inputTones = extractTones(input);
+  const exact = pinyinTrie.get(query);
+  const allPrefix = pinyinTrie.getPrefix(query);
+  // getPrefix includes exact matches, so filter them out for separate sorting
+  const exactSet = new Set(exact);
+  const prefix = allPrefix.filter((e) => !exactSet.has(e));
 
-  const exact: DictEntry[] = [];
-  const prefix: DictEntry[] = [];
-
-  for (const [key, entries] of pinyinIndex) {
-    if (key === query) {
-      exact.push(...entries);
-    } else if (key.startsWith(query)) {
-      prefix.push(...entries);
+  // Cache defCount per entry to avoid repeated string splits during sort
+  const defCounts = new Map<DictEntry, number>();
+  const defCount = (e: DictEntry) => {
+    let c = defCounts.get(e);
+    if (c === undefined) {
+      c = e.english.split('/').filter(Boolean).length;
+      defCounts.set(e, c);
     }
-  }
+    return c;
+  };
 
-  // Sort: tone match first, then shorter words, then frequency, then definition count
-  const defCount = (e: DictEntry) => e.english.split('/').filter(Boolean).length;
   const sortFn = (a: DictEntry, b: DictEntry) => {
     const aTone = matchesTonePattern(a.pinyin, inputTones) ? 0 : 1;
     const bTone = matchesTonePattern(b.pinyin, inputTones) ? 0 : 1;
     if (aTone !== bTone) return aTone - bTone;
     const lenDiff = a.simplified.length - b.simplified.length;
     if (lenDiff !== 0) return lenDiff;
-    const freqA = wordFrequencyScore(a.simplified);
-    const freqB = wordFrequencyScore(b.simplified);
-    if (freqA !== freqB) return freqA - freqB;
-    return defCount(b) - defCount(a); // more definitions = more common
+    return defCount(b) - defCount(a);
   };
   exact.sort(sortFn);
   prefix.sort(sortFn);
 
-  return [...exact, ...prefix].slice(0, limit);
+  // Deduplicate by simplified form, preserving sort order
+  const seen = new Set<string>();
+  const results: DictEntry[] = [];
+  for (const entry of [...exact, ...prefix]) {
+    if (seen.has(entry.simplified)) continue;
+    seen.add(entry.simplified);
+    results.push(entry);
+    if (results.length >= limit) break;
+  }
+  return results;
 }

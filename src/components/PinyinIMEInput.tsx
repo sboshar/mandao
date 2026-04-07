@@ -13,24 +13,14 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
   const [candidates, setCandidates] = useState<DictEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Update candidates when pinyin buffer changes
   useEffect(() => {
     if (!pinyinBuf.trim()) {
       setCandidates([]);
       setSelectedIndex(0);
       return;
     }
-    const results = lookupByPinyin(pinyinBuf.trim());
-    // Deduplicate by simplified form
-    const seen = new Set<string>();
-    const deduped = results.filter((e) => {
-      if (seen.has(e.simplified)) return false;
-      seen.add(e.simplified);
-      return true;
-    });
-    setCandidates(deduped);
+    setCandidates(lookupByPinyin(pinyinBuf.trim()));
     setSelectedIndex(0);
   }, [pinyinBuf]);
 
@@ -72,12 +62,10 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
       setPinyinBuf('');
       setCandidates([]);
     }
-    // Tone digits (1-5) and all other keys pass through to the input buffer naturally
   };
 
   return (
-    <div ref={containerRef} className="relative">
-      {/* Display composed Chinese + active pinyin buffer */}
+    <div className="relative">
       <div className="flex items-center w-full px-3 py-2 border rounded-lg focus-within:ring-2
         focus-within:ring-blue-500 focus-within:border-blue-500 bg-white">
         {value && <span className="text-lg mr-1" lang="zh">{value}</span>}
@@ -95,7 +83,6 @@ export function PinyinIMEInput({ value, onChange, placeholder, readOnly }: Pinyi
         />
       </div>
 
-      {/* Candidate list */}
       {candidates.length > 0 && (
         <div className="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg
           max-h-64 overflow-y-auto">
