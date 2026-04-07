@@ -16,7 +16,7 @@ import {
   Line,
 } from 'recharts';
 import { db } from '../db/db';
-import type { ReviewLog, Sentence } from '../db/schema';
+import type { ReviewLog } from '../db/schema';
 
 interface DayBucket {
   date: string;
