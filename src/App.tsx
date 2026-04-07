@@ -8,6 +8,7 @@ import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
 import { StatsPage } from './pages/StatsPage';
+import { SpeakPage } from './pages/SpeakPage';
 import { IntroModal } from './components/IntroModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { useTutorialStore } from './stores/tutorialStore';
@@ -50,6 +51,7 @@ function App() {
           <Route path="/browse" element={<BrowsePage />} />
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/stats" element={<StatsPage />} />
+          <Route path="/speak" element={<SpeakPage />} />
         </Routes>
       </div>
     </BrowserRouter>

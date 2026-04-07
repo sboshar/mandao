@@ -34,7 +34,7 @@ export function DashboardPage() {
 
   return (
     <div className="max-w-xl mx-auto px-6 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight mb-10">Mandarin</h1>
+      <h1 className="text-2xl font-semibold tracking-tight mb-10">ManDao</h1>
 
       <TutorialBanner visibleAt={2}>
         Your 3 example sentences are in the deck. Click <strong>Browse</strong> below
@@ -116,6 +116,28 @@ export function DashboardPage() {
             {btn.label}
           </button>
         ))}
+        <div className="relative flex-1">
+          <button
+            onClick={() => navigate('/speak')}
+            className="w-full py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-strong)',
+            }}
+          >
+            Speak
+          </button>
+          <span className="absolute -top-3 -right-3 cursor-default group/beta" style={{ fontSize: '1.5rem', lineHeight: 1 }}>
+            ✦
+            <span
+              className="hidden group-hover/beta:block absolute bottom-full right-0 mb-1 px-2 py-1 rounded text-xs whitespace-nowrap z-10"
+              style={{ background: 'var(--text-primary)', color: 'var(--bg-surface)' }}
+            >
+              This feature is in beta
+            </span>
+          </span>
+        </div>
       </div>
     </div>
   );
