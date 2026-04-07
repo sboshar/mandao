@@ -170,6 +170,10 @@ body {
   background: var(--bg-inset);
 }
 
+button:disabled {
+  cursor: default;
+}
+
 button:active:not(:disabled) {
   filter: brightness(0.92);
 }

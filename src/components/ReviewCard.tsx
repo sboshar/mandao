@@ -8,7 +8,7 @@ import { AudioButton } from './AudioButton';
 import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
-import { reviewCard, Rating } from '../services/srs';
+import { reviewCard, type Grade } from '../services/srs';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
@@ -18,6 +18,7 @@ export function ReviewCard() {
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
   const [editingTags, setEditingTags] = useState(false);
   const [pendingRating, setPendingRating] = useState<number | null>(null);
+  const [rateError, setRateError] = useState<string | null>(null);
 
   const card = currentCard();
 
@@ -34,6 +35,7 @@ export function ReviewCard() {
     }
 
     setEditingTags(false);
+    setRateError(null);
     load();
     return () => { cancelled = true; };
   }, [card?.id]);
@@ -56,11 +58,17 @@ export function ReviewCard() {
     setSentence((prev) => prev ? { ...prev, tags: newTags } : prev);
   };
 
-  const handleRate = async (rating: 1 | 2 | 3 | 4) => {
+  const handleRate = async (rating: Grade) => {
+    setRateError(null);
     setPendingRating(rating);
-    await reviewCard(card.id, rating as unknown as typeof Rating.Again);
-    setPendingRating(null);
-    next();
+    try {
+      await reviewCard(card.id, rating);
+      next();
+    } catch {
+      setRateError('Could not save this review. Check your connection and try again.');
+    } finally {
+      setPendingRating(null);
+    }
   };
 
   return (
@@ -187,6 +195,12 @@ export function ReviewCard() {
                 </div>
               )}
             </div>
+
+            {rateError && (
+              <p className="mt-4 text-sm text-center" style={{ color: 'var(--danger)' }} role="alert">
+                {rateError}
+              </p>
+            )}
 
             {/* Rating buttons */}
             <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">

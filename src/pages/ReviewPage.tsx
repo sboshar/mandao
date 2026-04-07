@@ -33,12 +33,6 @@ export function ReviewPage() {
     getAllTags().then(setAllTags);
   }, []);
 
-  useEffect(() => {
-    if (!deckId) {
-      void ensureDefaultDeck();
-    }
-  }, [deckId]);
-
   const startReview = async (selectedMode: ModeOption) => {
     setLoading(true);
     setLoadingMode(selectedMode);

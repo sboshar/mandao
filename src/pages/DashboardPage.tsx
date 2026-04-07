@@ -80,7 +80,7 @@ export function DashboardPage() {
         <button
           onClick={() => navigate('/review')}
           disabled={totalDue === 0}
-          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
           style={{ background: 'var(--accent)', color: '#fff' }}
         >
           {totalDue > 0 ? `Study (${totalDue} cards)` : 'No cards due'}
