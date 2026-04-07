@@ -7,7 +7,6 @@ import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
 import type { ReviewMode } from '../db/schema';
 import { ensureDefaultDeck } from '../db/repo';
-import { useAuthStore } from '../stores/authStore';
 
 type ModeOption = ReviewMode | 'both';
 
@@ -22,28 +21,40 @@ export function ReviewPage() {
   const { deckId } = useParams();
   const navigate = useNavigate();
   const { setQueue, remaining, reset } = useReviewStore();
-  const user = useAuthStore((s) => s.user);
-  const [resolvedDeckId, setResolvedDeckId] = useState<string | null>(deckId ?? null);
   const [mode, setMode] = useState<ModeOption>('en-to-zh');
   const [started, setStarted] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [showFilter, setShowFilter] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<ModeOption | null>(null);
 
   useEffect(() => {
     getAllTags().then(setAllTags);
-    if (!deckId) {
-      ensureDefaultDeck().then(setResolvedDeckId);
-    }
   }, []);
+
+  useEffect(() => {
+    if (!deckId) {
+      void ensureDefaultDeck();
+    }
+  }, [deckId]);
 
   const startReview = async (selectedMode: ModeOption) => {
     setLoading(true);
-    const effectiveDeckId = resolvedDeckId ?? 'default';
-    const queue = await getReviewQueue(effectiveDeckId, selectedMode, filterTags.length > 0 ? filterTags : null);
-    setQueue(queue);
-    setStarted(true);
+    setLoadingMode(selectedMode);
+    try {
+      const effectiveDeckId = deckId ?? (await ensureDefaultDeck());
+      const queue = await getReviewQueue(
+        effectiveDeckId,
+        selectedMode,
+        filterTags.length > 0 ? filterTags : null
+      );
+      setQueue(queue);
+      setStarted(true);
+    } finally {
+      setLoading(false);
+      setLoadingMode(null);
+    }
   };
 
   useEffect(() => {
@@ -120,7 +131,7 @@ export function ReviewPage() {
             { key: 'py-to-en-zh' as ModeOption, label: 'Pinyin \u2192 English + Chinese', desc: 'See pinyin (tone sandhi), produce meaning + characters' },
             { key: 'both' as ModeOption, label: 'All (mixed)', desc: 'Interleave all directions' },
           ]).map((opt) => {
-            const isSelected = loading && mode === opt.key;
+            const isSelected = loadingMode === opt.key;
             return (
               <button
                 key={opt.key}
@@ -147,7 +158,12 @@ export function ReviewPage() {
     <div className="p-4 sm:p-6">
       <div className="flex items-center justify-between mb-6 max-w-2xl mx-auto">
         <button
-          onClick={() => { reset(); setStarted(false); }}
+          onClick={() => {
+            reset();
+            setStarted(false);
+            setLoading(false);
+            setLoadingMode(null);
+          }}
           className="px-3 py-1 rounded text-sm transition-colors"
           style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
         >
