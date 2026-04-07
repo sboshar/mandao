@@ -8,6 +8,7 @@
  */
 import { v4 as uuid } from 'uuid';
 import * as repo from '../db/repo';
+import { enqueueSync } from '../db/repo';
 import type {
   Meaning,
   MeaningLink,
@@ -17,6 +18,15 @@ import type {
   ReviewMode,
 } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
+
+/**
+ * Accumulator for tracking newly created entities during ingestion,
+ * so we can bundle them into one sync op.
+ */
+interface IngestAccumulator {
+  meanings: Meaning[];
+  meaningLinks: MeaningLink[];
+}
 
 // ============================================================
 // Types for the ingestion input
@@ -53,28 +63,23 @@ export interface SentenceInput {
 export async function ingestSentence(input: SentenceInput): Promise<string> {
   const sentenceId = uuid();
 
-  // Check for duplicate sentence
   const existing = await repo.getSentenceByChinese(input.chinese.trim());
   if (existing) {
     throw new Error(`This sentence already exists in the app.`);
   }
 
+  const acc: IngestAccumulator = { meanings: [], meaningLinks: [] };
   const tokenRecords: SentenceToken[] = [];
   const allPinyinNumeric: string[] = [];
 
   for (let i = 0; i < input.tokens.length; i++) {
     const token = input.tokens[i];
-
-    // Find or create the meaning for this token
-    const meaning = await findOrCreateMeaning(token);
-
-    // Collect pinyin syllables for tone sandhi
+    const meaning = await findOrCreateMeaning(token, acc);
     const syllables = token.pinyinNumeric.split(/\s+/);
     allPinyinNumeric.push(...syllables);
 
-    // If multi-character word, decompose into character meanings
     if (token.surfaceForm.length > 1 && meaning.type === 'word') {
-      await decomposeWord(meaning, token);
+      await decomposeWord(meaning, token, acc);
     }
 
     tokenRecords.push({
@@ -83,16 +88,14 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
       meaningId: meaning.id,
       position: i,
       surfaceForm: token.surfaceForm,
-      pinyinSandhi: '', // filled in below
+      pinyinSandhi: '',
     });
   }
 
-  // Compute tone sandhi for the full sentence
   const sandhiSyllables = applyToneSandhi(allPinyinNumeric);
   const basePinyin = numericStringToDiacritic(allPinyinNumeric.join(' '));
   const sandhiPinyin = numericStringToDiacritic(sandhiSyllables.join(' '));
 
-  // Assign sandhi pinyin per token
   let syllableIdx = 0;
   for (const tokenRec of tokenRecords) {
     const token = input.tokens[tokenRecords.indexOf(tokenRec)];
@@ -107,7 +110,6 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     syllableIdx += count;
   }
 
-  // Create the sentence
   const sentence: Sentence = {
     id: sentenceId,
     chinese: input.chinese,
@@ -126,7 +128,6 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     sentenceInserted = true;
     await repo.insertSentenceTokens(tokenRecords);
 
-    // Create SRS cards (one per review mode)
     const deckId = await repo.ensureDefaultDeck();
     const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh'];
     const cards: SrsCard[] = modes.map((mode) => ({
@@ -141,17 +142,23 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
       scheduledDays: 0,
       reps: 0,
       lapses: 0,
-      state: 0, // new
+      state: 0,
       lastReview: null,
       createdAt: Date.now(),
     }));
 
     await repo.insertSrsCards(cards);
+
+    // Enqueue a single ingestBundle sync op for atomic server-side write
+    await enqueueSync({
+      op: 'ingestBundle',
+      payload: buildIngestPayload(acc, sentence, tokenRecords, cards),
+    });
+
     return sentenceId;
   } catch (error) {
     if (sentenceInserted) {
       try {
-        // Cascades remove tokens, cards, and review logs if any were created.
         await repo.deleteSentenceById(sentenceId);
       } catch (cleanupError) {
         console.error('Failed to roll back partial sentence insert', cleanupError);
@@ -159,6 +166,46 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     }
     throw error;
   }
+}
+
+function buildIngestPayload(
+  acc: IngestAccumulator,
+  sentence: Sentence,
+  tokens: SentenceToken[],
+  cards: SrsCard[],
+) {
+  return {
+    meanings: acc.meanings.map((m) => ({
+      id: m.id, headword: m.headword, pinyin: m.pinyin,
+      pinyin_numeric: m.pinyinNumeric, part_of_speech: m.partOfSpeech,
+      english_short: m.englishShort, english_full: m.englishFull,
+      type: m.type, level: m.level,
+      created_at: m.createdAt, updated_at: m.updatedAt,
+    })),
+    meaning_links: acc.meaningLinks.map((l) => ({
+      id: l.id, parent_meaning_id: l.parentMeaningId,
+      child_meaning_id: l.childMeaningId, position: l.position, role: l.role,
+    })),
+    sentence: {
+      id: sentence.id, chinese: sentence.chinese, english: sentence.english,
+      pinyin: sentence.pinyin, pinyin_sandhi: sentence.pinyinSandhi,
+      audio_url: sentence.audioUrl, source: sentence.source,
+      tags: sentence.tags, created_at: sentence.createdAt,
+    },
+    tokens: tokens.map((t) => ({
+      id: t.id, sentence_id: t.sentenceId, meaning_id: t.meaningId,
+      position: t.position, surface_form: t.surfaceForm,
+      pinyin_sandhi: t.pinyinSandhi,
+    })),
+    cards: cards.map((c) => ({
+      id: c.id, sentence_id: c.sentenceId, deck_id: c.deckId,
+      review_mode: c.reviewMode, due: c.due,
+      stability: c.stability, difficulty: c.difficulty,
+      elapsed_days: c.elapsedDays, scheduled_days: c.scheduledDays,
+      reps: c.reps, lapses: c.lapses, state: c.state,
+      last_review: c.lastReview, created_at: c.createdAt,
+    })),
+  };
 }
 
 // ============================================================
@@ -171,7 +218,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
  * - Same char, same pronunciation, same meaning → reuse
  * - Same char, different pronunciation or meaning → new node
  */
-async function findOrCreateMeaning(token: TokenInput): Promise<Meaning> {
+async function findOrCreateMeaning(token: TokenInput, acc: IngestAccumulator): Promise<Meaning> {
   const candidates = await repo.getMeaningsByHeadword(token.surfaceForm);
   const existing = candidates.find(
     (m) =>
@@ -197,6 +244,7 @@ async function findOrCreateMeaning(token: TokenInput): Promise<Meaning> {
   };
 
   await repo.insertMeaning(meaning);
+  acc.meanings.push(meaning);
   return meaning;
 }
 
@@ -207,7 +255,8 @@ async function findOrCreateMeaning(token: TokenInput): Promise<Meaning> {
 async function findOrCreateCharacterMeaning(
   char: string,
   pinyinNumeric: string,
-  english: string
+  english: string,
+  acc: IngestAccumulator,
 ): Promise<Meaning> {
   const candidates = await repo.getMeaningsByHeadword(char);
   const exact = candidates.find(
@@ -219,7 +268,6 @@ async function findOrCreateCharacterMeaning(
 
   if (exact) return exact;
 
-  // No match — create new character meaning
   const meaning: Meaning = {
     id: uuid(),
     headword: char,
@@ -235,6 +283,7 @@ async function findOrCreateCharacterMeaning(
   };
 
   await repo.insertMeaning(meaning);
+  acc.meanings.push(meaning);
   return meaning;
 }
 
@@ -244,9 +293,9 @@ async function findOrCreateCharacterMeaning(
  */
 async function decomposeWord(
   wordMeaning: Meaning,
-  token: TokenInput
+  token: TokenInput,
+  acc: IngestAccumulator,
 ): Promise<void> {
-  // Check if already decomposed
   const existingCount = await repo.getMeaningLinkCountByParent(wordMeaning.id);
   if (existingCount > 0) return;
 
@@ -255,10 +304,8 @@ async function decomposeWord(
 
   for (let i = 0; i < chars.length; i++) {
     const char = chars[i];
-
-    // Use LLM character data if available
     const llmChar = token.characters?.find((c) => c.char === char)
-      || token.characters?.[i]; // fallback to positional match
+      || token.characters?.[i];
 
     const charPinyinNumeric = llmChar?.pinyinNumeric || syllables[i] || '';
     const charEnglish = llmChar?.english || `(component of ${wordMeaning.headword})`;
@@ -266,7 +313,8 @@ async function decomposeWord(
     const charMeaning = await findOrCreateCharacterMeaning(
       char,
       charPinyinNumeric,
-      charEnglish
+      charEnglish,
+      acc,
     );
 
     const link: MeaningLink = {
@@ -277,6 +325,7 @@ async function decomposeWord(
       role: 'character',
     };
     await repo.insertMeaningLink(link);
+    acc.meaningLinks.push(link);
   }
 }
 

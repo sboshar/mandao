@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { loadCedict } from './lib/cedict';
+import { hydrateLocalDb, isHydrated } from './db/hydrate';
+import { runSync, startSyncListeners, stopSyncListeners } from './db/syncEngine';
 import { DashboardPage } from './pages/DashboardPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { AddSentencePage } from './pages/AddSentencePage';
@@ -12,18 +14,20 @@ import { LoginPage } from './pages/LoginPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { IntroModal } from './components/IntroModal';
 import { ThemeToggle } from './components/ThemeToggle';
+import { SyncIndicator } from './components/SyncIndicator';
 import { useTutorialStore } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
 import './stores/themeStore';
 
-const LoadingScreen = () => (
+const LoadingScreen = ({ message }: { message?: string }) => (
   <div className="min-h-screen flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}>
-    Loading...
+    {message || 'Loading...'}
   </div>
 );
 
 function App() {
   const [ready, setReady] = useState(false);
+  const [hydrating, setHydrating] = useState(false);
   const step = useTutorialStore((s) => s.step);
   const advance = useTutorialStore((s) => s.advance);
   const { user, loading: authLoading, needsPasswordReset, initialize, signOut } = useAuthStore();
@@ -35,9 +39,29 @@ function App() {
   const userId = user?.id;
   useEffect(() => {
     if (userId && !ready) {
-      loadCedict().then(() => setReady(true));
+      let cancelled = false;
+      (async () => {
+        const hydrated = await isHydrated();
+        if (!hydrated) {
+          setHydrating(true);
+          await hydrateLocalDb();
+          if (cancelled) return;
+          setHydrating(false);
+        }
+        await loadCedict();
+        if (!cancelled) {
+          setReady(true);
+          startSyncListeners();
+          runSync();
+        }
+      })();
+      return () => {
+        cancelled = true;
+        stopSyncListeners();
+      };
     }
     if (!userId && ready) {
+      stopSyncListeners();
       setReady(false);
     }
   }, [userId, ready]);
@@ -66,12 +90,14 @@ function App() {
     );
   }
 
+  if (hydrating) return <LoadingScreen message="Syncing data..." />;
   if (!ready) return <LoadingScreen />;
 
   return (
     <BrowserRouter>
       <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
         <div className="fixed top-3 right-3 sm:right-4 z-40 flex items-center gap-1.5 sm:gap-2">
+          <SyncIndicator />
           <button
             onClick={signOut}
             className="px-2 sm:px-2.5 py-1 rounded-md text-xs transition-colors"

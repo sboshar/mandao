@@ -9,8 +9,10 @@ import {
   Rating,
 } from 'ts-fsrs';
 import * as repo from '../db/repo';
+import { enqueueSync } from '../db/repo';
 import type { SrsCard, ReviewLog, ReviewMode } from '../db/schema';
 import { v4 as uuid } from 'uuid';
+import { getDeviceId } from '../db/syncEngine';
 
 const params = generatorParameters();
 const scheduler = fsrs(params);
@@ -46,8 +48,7 @@ export async function reviewCard(
   const result = scheduler.repeat(fsrsCard, now);
   const next = result[rating].card;
 
-  // Update card
-  await repo.updateSrsCard(cardId, {
+  const newCardState = {
     due: next.due.getTime(),
     stability: next.stability,
     difficulty: next.difficulty,
@@ -57,11 +58,14 @@ export async function reviewCard(
     lapses: next.lapses,
     state: next.state,
     lastReview: now.getTime(),
-  });
+  };
 
-  // Log the review
+  await repo.updateSrsCard(cardId, newCardState);
+
+  const logId = uuid();
+  const opId = uuid();
   const log: ReviewLog = {
-    id: uuid(),
+    id: logId,
     cardId,
     rating: rating as 1 | 2 | 3 | 4,
     state: card.state,
@@ -73,6 +77,32 @@ export async function reviewCard(
     reviewedAt: now.getTime(),
   };
   await repo.insertReviewLog(log);
+
+  await enqueueSync({
+    op: 'reviewCard',
+    payload: {
+      id: logId,
+      card_id: cardId,
+      rating: rating as number,
+      state: card.state,
+      due: card.due,
+      stability: card.stability,
+      difficulty: card.difficulty,
+      elapsed_days: card.elapsedDays,
+      scheduled_days: card.scheduledDays,
+      reviewed_at: now.getTime(),
+      op_id: opId,
+      device_id: getDeviceId(),
+      new_due: newCardState.due,
+      new_stability: newCardState.stability,
+      new_difficulty: newCardState.difficulty,
+      new_elapsed_days: newCardState.elapsedDays,
+      new_scheduled_days: newCardState.scheduledDays,
+      new_reps: newCardState.reps,
+      new_lapses: newCardState.lapses,
+      new_state: newCardState.state,
+    },
+  });
 }
 
 /** Get review queue for a deck, optionally filtered by review mode and/or tags */

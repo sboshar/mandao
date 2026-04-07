@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { clearCachedUserId } from '../db/repo';
+import { clearLocalDb } from '../db/localDb';
 import type { User } from '@supabase/supabase-js';
 
 const GENERIC_AUTH_ERROR = 'Something went wrong. Please try again.';
@@ -111,6 +112,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     authSubscription = null;
     initialized = false;
     await supabase.auth.signOut();
+    await clearLocalDb();
     await deleteLegacyIndexedDb();
     clearCachedUserId();
     set({ user: null });
