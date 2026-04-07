@@ -91,9 +91,9 @@ export function BrowsePage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Browse Sentences</h1>
+    <div className="max-w-2xl mx-auto p-4 sm:p-6">
+      <div className="flex items-center justify-between gap-2 mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold">Browse Sentences</h1>
         <div className="flex gap-2">
           {sentences.length > 0 && (
             <button

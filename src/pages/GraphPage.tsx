@@ -326,7 +326,7 @@ export function GraphPage() {
   return (
     <div className="h-screen flex flex-col bg-slate-950">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 bg-slate-900/80 backdrop-blur border-b border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 bg-slate-900/80 backdrop-blur border-b border-slate-800">
         <button
           onClick={() => navigate('/')}
           className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300
@@ -334,10 +334,10 @@ export function GraphPage() {
         >
           &larr; Back
         </button>
-        <h1 className="text-lg font-medium text-slate-200">
+        <h1 className="text-lg font-medium text-slate-200 hidden sm:block">
           MànDào Graph
         </h1>
-        <div className="flex items-center gap-4 text-xs text-slate-500">
+        <div className="flex items-center gap-2 sm:gap-4 text-xs text-slate-500">
           <span className="flex items-center gap-1.5">
             <span
               className="inline-block w-2.5 h-2.5 rounded-full"

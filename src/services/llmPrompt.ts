@@ -135,6 +135,10 @@ export function parseLLMResponse(raw: string): LLMResponse {
   cleaned = cleaned.replace(/\s*```$/i, '');
   cleaned = cleaned.trim();
 
+  // Normalize curly/smart quotes to straight quotes (LLMs sometimes produce these)
+  cleaned = cleaned.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"');
+  cleaned = cleaned.replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'");
+
   try {
     const parsed = JSON.parse(cleaned);
 

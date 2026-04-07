@@ -33,7 +33,7 @@ export function DashboardPage() {
   const totalDue = counts.newCount + counts.reviewCount + counts.learningCount;
 
   return (
-    <div className="max-w-xl mx-auto px-6 py-10">
+    <div className="max-w-xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
       <h1 className="text-2xl font-semibold tracking-tight mb-10">ManDao</h1>
 
       <TutorialBanner visibleAt={2}>
@@ -51,7 +51,7 @@ export function DashboardPage() {
       </TutorialBanner>
 
       {/* Stats — subtle inline row */}
-      <div className="flex gap-8 mb-10">
+      <div className="flex gap-4 sm:gap-8 mb-10">
         {[
           { value: totalSentences, label: 'Sentences' },
           { value: totalMeanings, label: 'Meanings' },
@@ -85,7 +85,7 @@ export function DashboardPage() {
       </div>
 
       {/* Quick actions — ghost buttons */}
-      <div className="flex gap-2">
+      <div className="grid grid-cols-3 sm:flex gap-2">
         {[
           { label: '+ Add', path: '/add', onClick: () => navigate('/add') },
           {
@@ -103,7 +103,7 @@ export function DashboardPage() {
           <button
             key={btn.label}
             onClick={btn.onClick}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
               btn.highlight ? 'ring-1' : ''
             }`}
             style={{
@@ -116,10 +116,10 @@ export function DashboardPage() {
             {btn.label}
           </button>
         ))}
-        <div className="relative flex-1">
+        <div className="relative">
           <button
             onClick={() => navigate('/speak')}
-            className="w-full py-2 rounded-lg text-sm font-medium transition-colors"
+            className="w-full py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors"
             style={{
               background: 'transparent',
               color: 'var(--text-secondary)',

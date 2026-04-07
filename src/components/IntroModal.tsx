@@ -56,9 +56,9 @@ export function IntroModal({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="rounded-2xl shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto surface">
+      <div className="rounded-2xl shadow-xl max-w-lg w-full mx-3 sm:mx-4 max-h-[90vh] overflow-y-auto surface">
         {page === 0 && (
-          <div className="p-8">
+          <div className="p-5 sm:p-8">
             <h2 className="text-2xl font-bold mb-4">Welcome to Mandao</h2>
             <p className="mb-4" style={{ color: 'var(--text-secondary)' }}>
               Mandao is built around one idea: <strong>learn Mandarin through whole sentences,
@@ -109,7 +109,7 @@ export function IntroModal({ onDone }: { onDone: () => void }) {
         )}
 
         {page === 1 && (
-          <div className="p-8">
+          <div className="p-5 sm:p-8">
             <h2 className="text-2xl font-bold mb-2">How Sentences Look</h2>
             <p className="text-sm mb-3" style={{ color: 'var(--text-tertiary)' }}>
               Each sentence displays three layers of information:
@@ -156,7 +156,7 @@ export function IntroModal({ onDone }: { onDone: () => void }) {
         )}
 
         {page === 2 && (
-          <div className="p-8">
+          <div className="p-5 sm:p-8">
             <h2 className="text-2xl font-bold mb-4">Let's Add Your First Sentence</h2>
             <p className="mb-4" style={{ color: 'var(--text-secondary)' }}>
               We'll walk you through adding the first example sentence step by step.
@@ -174,7 +174,7 @@ export function IntroModal({ onDone }: { onDone: () => void }) {
         )}
 
         {/* Navigation */}
-        <div className="px-8 pb-6 flex items-center justify-between">
+        <div className="px-5 sm:px-8 pb-6 flex items-center justify-between">
           <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
             {page + 1} / {totalPages}
           </div>
