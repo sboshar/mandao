@@ -129,16 +129,7 @@ export function lookupByPinyin(input: string, limit = 30): DictEntry[] {
   const exactSet = new Set(exact);
   const prefix = allPrefix.filter((e) => !exactSet.has(e));
 
-  // Cache defCount per entry to avoid repeated string splits during sort
-  const defCounts = new Map<DictEntry, number>();
-  const defCount = (e: DictEntry) => {
-    let c = defCounts.get(e);
-    if (c === undefined) {
-      c = e.english.split('/').filter(Boolean).length;
-      defCounts.set(e, c);
-    }
-    return c;
-  };
+  const defCount = (e: DictEntry) => e.english.split('/').filter(Boolean).length;
 
   const sortFn = (a: DictEntry, b: DictEntry) => {
     const aTone = matchesTonePattern(a.pinyin, inputTones) ? 0 : 1;
