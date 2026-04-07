@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Sentence, SentenceToken, Meaning } from '../db/schema';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import { getTokensForSentence, updateSentenceTags } from '../services/ingestion';
 import { TokenSpan } from './TokenSpan';
 import { PinyinDisplay } from './PinyinDisplay';
@@ -25,7 +25,7 @@ export function ReviewCard() {
     let cancelled = false;
 
     async function load() {
-      const s = await db.sentences.get(card!.sentenceId);
+      const s = await repo.getSentence(card!.sentenceId);
       if (cancelled || !s) return;
       setSentence(s);
       const t = await getTokensForSentence(s.id);

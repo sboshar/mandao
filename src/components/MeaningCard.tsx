@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigationStore } from '../stores/navigationStore';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import type { Meaning, Sentence, SrsCard } from '../db/schema';
 import {
   getSentencesForMeaning,
@@ -43,7 +43,7 @@ function MeaningContent() {
     let cancelled = false;
 
     async function load() {
-      const m = await db.meanings.get(entry!.id);
+      const m = await repo.getMeaning(entry!.id);
       if (cancelled || !m) return;
       setMeaning(m);
 
@@ -209,13 +209,13 @@ function SentenceContent() {
 
     let cancelled = false;
     async function load() {
-      const s = await db.sentences.get(entry!.id);
+      const s = await repo.getSentence(entry!.id);
       if (cancelled || !s) return;
       setSentence(s);
 
       const [toks, cards] = await Promise.all([
         getTokensForSentence(s.id),
-        db.srsCards.where('sentenceId').equals(s.id).toArray(),
+        repo.getSrsCardsBySentence(s.id),
       ]);
       if (!cancelled) {
         setTokens(toks);

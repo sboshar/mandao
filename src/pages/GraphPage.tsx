@@ -1,10 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import { useNavigationStore } from '../stores/navigationStore';
 import { MeaningCard } from '../components/MeaningCard';
-import type { MeaningLink } from '../db/schema';
 
 // ============================================================
 // Graph data types
@@ -58,10 +57,12 @@ function getNodeColor(type: GraphNode['type']): string {
 // ============================================================
 
 async function buildGraphData(): Promise<GraphData> {
-  const meanings = await db.meanings.toArray();
-  const links: MeaningLink[] = await db.meaningLinks.toArray();
-  const sentenceTokens = await db.sentenceTokens.toArray();
-  const sentences = await db.sentences.toArray();
+  const [meanings, links, sentenceTokens, sentences] = await Promise.all([
+    repo.getAllMeanings(),
+    repo.getAllMeaningLinks(),
+    repo.getAllSentenceTokens(),
+    repo.getAllSentences(),
+  ]);
 
   const nodes: GraphNode[] = [];
   const graphLinks: GraphLink[] = [];

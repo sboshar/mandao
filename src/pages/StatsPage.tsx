@@ -15,7 +15,7 @@ import {
   LineChart,
   Line,
 } from 'recharts';
-import { db } from '../db/db';
+import * as repo from '../db/repo';
 import type { ReviewLog } from '../db/schema';
 
 interface DayBucket {
@@ -132,7 +132,7 @@ export function StatsPage() {
 
   useEffect(() => {
     async function load() {
-      const allLogs = await db.reviewLogs.toArray();
+      const allLogs = await repo.getAllReviewLogs();
       setLogs(allLogs);
       setTotalReviews(allLogs.length);
 
@@ -156,14 +156,14 @@ export function StatsPage() {
       }
       setStreak(s);
 
-      const cards = await db.srsCards.toArray();
+      const cards = await repo.getAllSrsCards();
       const stateNames = ['New', 'Learning', 'Review', 'Relearning'];
       const counts = [0, 0, 0, 0];
       for (const c of cards) counts[c.state]++;
       setCardStates(stateNames.map((name, i) => ({ name, value: counts[i] })));
 
       // Tag distribution + reviews by tag
-      const sentences = await db.sentences.toArray();
+      const sentences = await repo.getAllSentences();
       const sentenceTagMap = new Map<string, string[]>();
       for (const s of sentences) {
         sentenceTagMap.set(s.id, s.tags || []);

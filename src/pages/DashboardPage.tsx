@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { getDueCounts } from '../services/srs';
-import { DEFAULT_DECK_ID } from '../db/schema';
-import { db } from '../db/db';
+import { getDefaultDeckId } from '../db/schema';
+import * as repo from '../db/repo';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { useTutorialStore } from '../stores/tutorialStore';
+import { useAuthStore } from '../stores/authStore';
 
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
   const [counts, setCounts] = useState({
     newCount: 0,
     reviewCount: 0,
@@ -21,14 +23,16 @@ export function DashboardPage() {
   const advanceTutorial = useTutorialStore((s) => s.advance);
 
   useEffect(() => {
+    if (!user) return;
     async function load() {
-      const c = await getDueCounts(DEFAULT_DECK_ID);
+      const deckId = getDefaultDeckId(user!.id);
+      const c = await getDueCounts(deckId);
       setCounts(c);
-      setTotalSentences(await db.sentences.count());
-      setTotalMeanings(await db.meanings.count());
+      setTotalSentences(await repo.getSentencesCount());
+      setTotalMeanings(await repo.getMeaningsCount());
     }
     load();
-  }, []);
+  }, [user]);
 
   const totalDue = counts.newCount + counts.reviewCount + counts.learningCount;
 
