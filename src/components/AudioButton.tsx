@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { speakChinese } from '../services/audio';
+import { speakChinese, stopSpeaking } from '../services/audio';
 
 interface AudioButtonProps {
   text: string;
@@ -10,6 +10,12 @@ export function AudioButton({ text, className = '' }: AudioButtonProps) {
   const [playing, setPlaying] = useState(false);
 
   const handleClick = async () => {
+    if (playing) {
+      stopSpeaking();
+      setPlaying(false);
+      return;
+    }
+
     setPlaying(true);
     try {
       await speakChinese(text);
@@ -22,13 +28,12 @@ export function AudioButton({ text, className = '' }: AudioButtonProps) {
   return (
     <button
       onClick={handleClick}
-      disabled={playing}
       className={`inline-flex items-center gap-1 px-2 py-1 rounded text-sm
-        disabled:opacity-50 transition-colors surface-hover ${className}`}
+        transition-colors surface-hover ${className}`}
       style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-      title="Play audio"
+      title={playing ? 'Stop audio' : 'Play audio'}
     >
-      {playing ? '...' : '\uD83D\uDD0A'}
+      {playing ? '\u25A0' : '\uD83D\uDD0A'}
     </button>
   );
 }
