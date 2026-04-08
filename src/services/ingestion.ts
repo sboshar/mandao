@@ -27,6 +27,8 @@ import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 interface IngestAccumulator {
   meanings: Meaning[];
   meaningLinks: MeaningLink[];
+  /** All meanings referenced by this ingestion (new + reused), for the sync bundle */
+  allMeanings: Map<string, Meaning>;
 }
 
 // ============================================================
@@ -69,7 +71,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     throw new Error(`This sentence already exists in the app.`);
   }
 
-  const acc: IngestAccumulator = { meanings: [], meaningLinks: [] };
+  const acc: IngestAccumulator = { meanings: [], meaningLinks: [], allMeanings: new Map() };
   const tokenRecords: SentenceToken[] = [];
   const allPinyinNumeric: string[] = [];
 
@@ -184,7 +186,7 @@ function buildIngestPayload(
   cards: SrsCard[],
 ) {
   return {
-    meanings: acc.meanings.map((m) => ({
+    meanings: Array.from(acc.allMeanings.values()).map((m) => ({
       id: m.id, headword: m.headword, pinyin: m.pinyin,
       pinyin_numeric: m.pinyinNumeric, part_of_speech: m.partOfSpeech,
       english_short: m.englishShort, english_full: m.englishFull,
@@ -235,7 +237,10 @@ async function findOrCreateMeaning(token: TokenInput, acc: IngestAccumulator): P
       m.englishShort === token.english
   );
 
-  if (existing) return existing;
+  if (existing) {
+    acc.allMeanings.set(existing.id, existing);
+    return existing;
+  }
 
   const isCharacter = token.surfaceForm.length === 1;
   const meaning: Meaning = {
@@ -254,6 +259,7 @@ async function findOrCreateMeaning(token: TokenInput, acc: IngestAccumulator): P
 
   await repo.insertMeaning(meaning);
   acc.meanings.push(meaning);
+  acc.allMeanings.set(meaning.id, meaning);
   return meaning;
 }
 
@@ -275,7 +281,10 @@ async function findOrCreateCharacterMeaning(
       m.englishShort === english
   );
 
-  if (exact) return exact;
+  if (exact) {
+    acc.allMeanings.set(exact.id, exact);
+    return exact;
+  }
 
   const meaning: Meaning = {
     id: uuid(),
@@ -293,6 +302,7 @@ async function findOrCreateCharacterMeaning(
 
   await repo.insertMeaning(meaning);
   acc.meanings.push(meaning);
+  acc.allMeanings.set(meaning.id, meaning);
   return meaning;
 }
 
