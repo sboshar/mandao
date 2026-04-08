@@ -170,9 +170,7 @@ export function ReviewPage() {
         <button
           onClick={() => {
             reset();
-            setStarted(false);
-            setLoading(false);
-            setLoadingMode(null);
+            navigate('/');
           }}
           className="px-3 py-1 rounded text-sm transition-colors"
           style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
