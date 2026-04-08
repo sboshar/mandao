@@ -132,6 +132,7 @@ function App() {
           </button>
           <ThemeToggle />
         </div>
+        <div className="h-10" />
         {step === 0 && <IntroModal onDone={advance} />}
         <Routes>
           <Route
