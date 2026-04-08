@@ -174,3 +174,41 @@ export async function getDueCounts(
 
   return { newCount, reviewCount, learningCount };
 }
+
+export type ModeCounts = Record<ReviewMode, number>;
+
+export interface DueBreakdown {
+  byMode: ModeCounts;
+  /** Per-state counts keyed by mode ('all' includes every mode) */
+  byModeAndState: Record<ReviewMode | 'all', { newCount: number; learningCount: number; reviewCount: number }>;
+}
+
+/** Get due card counts broken down by review mode and card state */
+export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
+  const now = Date.now();
+
+  const [newCards, learningCards, reviewCards] = await Promise.all([
+    repo.getSrsCardsByDeckAndState(deckId, 0),
+    repo.getSrsCardsByDeckAndStates(deckId, [1, 3]),
+    repo.getSrsCardsByDeckAndState(deckId, 2),
+  ]);
+
+  const dueNew = newCards;
+  const dueLearning = learningCards.filter((c) => c.due <= now);
+  const dueReview = reviewCards.filter((c) => c.due <= now);
+
+  const modes: (ReviewMode | 'all')[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh'];
+  const byMode: ModeCounts = { 'en-to-zh': 0, 'zh-to-en': 0, 'py-to-en-zh': 0 };
+  const byModeAndState = {} as DueBreakdown['byModeAndState'];
+
+  for (const m of modes) {
+    const modeOk = (c: SrsCard) => m === 'all' || c.reviewMode === m;
+    const nc = dueNew.filter(modeOk).length;
+    const lc = dueLearning.filter(modeOk).length;
+    const rc = dueReview.filter(modeOk).length;
+    byModeAndState[m] = { newCount: nc, learningCount: lc, reviewCount: rc };
+    if (m !== 'all') byMode[m] = nc + lc + rc;
+  }
+
+  return { byMode, byModeAndState };
+}
