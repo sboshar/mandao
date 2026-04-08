@@ -81,27 +81,27 @@ export function DashboardPage() {
 
       {/* Default Deck */}
       <div className="mb-10">
-        <div className="flex items-baseline justify-between mb-3">
+        <div className="flex items-baseline justify-between mb-2">
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
             <span style={{ color: 'var(--state-new)' }}>{states.newCount} new</span>
             <span style={{ color: 'var(--state-learning)' }}>{states.learningCount} learning</span>
             <span style={{ color: 'var(--state-review)' }}>{states.reviewCount} review</span>
           </div>
-          <div className="flex gap-1">
-            {MODE_CYCLE.map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
-                style={{
-                  background: mode === m ? 'var(--accent)' : 'transparent',
-                  color: mode === m ? '#fff' : 'var(--text-tertiary)',
-                }}
-              >
-                {MODE_LABEL[m]}
-              </button>
-            ))}
-          </div>
+        </div>
+        <div className="flex gap-1 mb-3">
+          {MODE_CYCLE.map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+              style={{
+                background: mode === m ? 'var(--accent)' : 'var(--bg-inset)',
+                color: mode === m ? '#fff' : 'var(--text-tertiary)',
+              }}
+            >
+              {MODE_LABEL[m]}
+            </button>
+          ))}
         </div>
         <button
           onClick={() => navigate(`/review?mode=${reviewParam}`)}
