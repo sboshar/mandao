@@ -248,7 +248,10 @@ begin
     bundle->'sentence'->>'chinese', bundle->'sentence'->>'english',
     bundle->'sentence'->>'pinyin', bundle->'sentence'->>'pinyin_sandhi',
     bundle->'sentence'->>'audio_url', bundle->'sentence'->>'source',
-    (select array_agg(t.value::text) from jsonb_array_elements_text(bundle->'sentence'->'tags') t),
+    coalesce(
+      (select array_agg(t.value::text) from jsonb_array_elements_text(bundle->'sentence'->'tags') t),
+      '{}'::text[]
+    ),
     v_created_at
   )
   on conflict (id) do nothing;
