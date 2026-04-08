@@ -178,6 +178,15 @@ declare
   v_created_at bigint;
   v_updated_at bigint;
   v_position int;
+  v_due bigint;
+  v_stability float;
+  v_difficulty float;
+  v_elapsed_days float;
+  v_scheduled_days float;
+  v_reps int;
+  v_lapses int;
+  v_state int;
+  v_last_review bigint;
 begin
   set local statement_timeout = '10s';
 
@@ -291,16 +300,6 @@ begin
       raise exception 'Unauthorized operation';
     end if;
 
-    declare
-      v_due bigint;
-      v_stability float;
-      v_difficulty float;
-      v_elapsed_days float;
-      v_scheduled_days float;
-      v_reps int;
-      v_lapses int;
-      v_state int;
-      v_last_review bigint;
     begin
       v_due := (c->>'due')::bigint;
       v_stability := (c->>'stability')::float;
