@@ -121,7 +121,10 @@ function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
-        <div className="fixed top-3 right-3 sm:right-4 z-40 flex items-center gap-1.5 sm:gap-2">
+        <div
+          className="fixed top-0 left-0 right-0 z-40 flex items-center justify-end gap-1.5 sm:gap-2 px-3 sm:px-4 py-0.5"
+          style={{ background: 'var(--bg-base)' }}
+        >
           <SyncIndicator />
           <button
             onClick={signOut}
