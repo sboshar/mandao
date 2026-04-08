@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigationStore } from '../stores/navigationStore';
 import * as repo from '../db/repo';
-import { lookupByEnglish, type DictEntry } from '../lib/cedict';
 import type { Meaning } from '../db/schema';
 
 function getStemmedForms(word: string): Set<string> {
@@ -31,13 +30,11 @@ function getStemmedForms(word: string): Set<string> {
 export function EnglishCard() {
   const { current, push } = useNavigationStore();
   const [meanings, setMeanings] = useState<Meaning[]>([]);
-  const [dictEntries, setDictEntries] = useState<DictEntry[]>([]);
   const entry = current();
 
   useEffect(() => {
     if (!entry || entry.type !== 'english') {
       setMeanings([]);
-      setDictEntries([]);
       return;
     }
 
@@ -59,22 +56,7 @@ export function EnglishCard() {
         return a.headword.length - b.headword.length;
       });
 
-      if (cancelled) return;
-      setMeanings(results);
-
-      if (results.length === 0) {
-        const headwordsInDb = new Set(all.map((m) => m.headword));
-        const dictResults = lookupByEnglish([...forms]);
-        const seen = new Set<string>();
-        const unique = dictResults.filter((d) => {
-          if (seen.has(d.simplified) || headwordsInDb.has(d.simplified)) return false;
-          seen.add(d.simplified);
-          return true;
-        });
-        if (!cancelled) setDictEntries(unique);
-      } else {
-        if (!cancelled) setDictEntries([]);
-      }
+      if (!cancelled) setMeanings(results);
     }
 
     load();
@@ -84,22 +66,20 @@ export function EnglishCard() {
   if (!entry || entry.type !== 'english') return null;
 
   const word = entry.id;
-  const totalCount = meanings.length + dictEntries.length;
 
   return (
     <>
       <div className="p-6 text-center">
         <div className="text-3xl font-medium">{word}</div>
         <div className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
-          {totalCount} Chinese meaning{totalCount !== 1 ? 's' : ''}
+          {meanings.length > 0
+            ? `${meanings.length} Chinese meaning${meanings.length !== 1 ? 's' : ''}`
+            : 'Not in your vocabulary yet'}
         </div>
       </div>
 
       {meanings.length > 0 && (
         <div className="px-6 pb-4">
-          <h3 className="text-sm font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
-            Your Vocabulary
-          </h3>
           <div className="space-y-2">
             {meanings.map((m) => (
               <button
@@ -129,34 +109,9 @@ export function EnglishCard() {
         </div>
       )}
 
-      {dictEntries.length > 0 && (
-        <div className="px-6 pb-6">
-          <h3 className="text-sm font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
-            Dictionary (CEDICT)
-          </h3>
-          <div className="space-y-2">
-            {dictEntries.map((d, i) => (
-              <div
-                key={i}
-                className="w-full text-left p-3 rounded-lg flex items-center gap-3"
-                style={{ border: '1px dashed var(--border)' }}
-              >
-                <span className="text-3xl">{d.simplified}</span>
-                <div className="flex-1">
-                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{d.pinyin}</div>
-                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    {d.english.replace(/\//g, ' / ')}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {totalCount === 0 && (
-        <div className="px-6 pb-6 text-center" style={{ color: 'var(--text-tertiary)' }}>
-          No Chinese meanings found for "{word}"
+      {meanings.length === 0 && (
+        <div className="px-6 pb-6 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
+          No matching vocabulary found
         </div>
       )}
     </>
