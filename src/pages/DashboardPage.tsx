@@ -1,20 +1,27 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { getDueCounts } from '../services/srs';
+import { getDueBreakdown, type DueBreakdown } from '../services/srs';
 import * as repo from '../db/repo';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { useAuthStore } from '../stores/authStore';
+import type { ReviewMode } from '../db/schema';
 
+type ModeOption = ReviewMode | 'all';
+
+const MODE_CYCLE: ModeOption[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh'];
+const MODE_LABEL: Record<ModeOption, string> = {
+  'all': 'All',
+  'en-to-zh': 'EN→ZH',
+  'zh-to-en': 'ZH→EN',
+  'py-to-en-zh': 'PY→',
+};
 
 export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const [counts, setCounts] = useState({
-    newCount: 0,
-    reviewCount: 0,
-    learningCount: 0,
-  });
+  const [breakdown, setBreakdown] = useState<DueBreakdown | null>(null);
+  const [mode, setMode] = useState<ModeOption>('all');
   const [totalSentences, setTotalSentences] = useState(0);
   const [totalMeanings, setTotalMeanings] = useState(0);
 
@@ -25,15 +32,20 @@ export function DashboardPage() {
     if (!user) return;
     async function load() {
       const deckId = await repo.ensureDefaultDeck();
-      const c = await getDueCounts(deckId);
-      setCounts(c);
+      setBreakdown(await getDueBreakdown(deckId));
       setTotalSentences(await repo.getSentencesCount());
       setTotalMeanings(await repo.getMeaningsCount());
     }
     load();
   }, [user]);
 
-  const totalDue = counts.newCount + counts.reviewCount + counts.learningCount;
+  const states = breakdown?.byModeAndState[mode] ?? { newCount: 0, learningCount: 0, reviewCount: 0 };
+  const dueForMode = states.newCount + states.learningCount + states.reviewCount;
+  const totalAll = breakdown
+    ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh']
+    : 0;
+
+  const reviewParam = mode === 'all' ? 'both' : mode;
 
   return (
     <div className="max-w-xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
@@ -58,7 +70,7 @@ export function DashboardPage() {
         {[
           { value: totalSentences, label: 'Sentences' },
           { value: totalMeanings, label: 'Meanings' },
-          { value: totalDue, label: 'Due today' },
+          { value: totalAll, label: 'Due today' },
         ].map((s) => (
           <div key={s.label}>
             <div className="text-2xl font-semibold">{s.value}</div>
@@ -70,20 +82,34 @@ export function DashboardPage() {
       {/* Default Deck */}
       <div className="mb-10">
         <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Default Deck</h2>
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-            <span style={{ color: 'var(--state-new)' }}>{counts.newCount} new</span>
-            <span style={{ color: 'var(--state-learning)' }}>{counts.learningCount} learning</span>
-            <span style={{ color: 'var(--state-review)' }}>{counts.reviewCount} review</span>
+            <span style={{ color: 'var(--state-new)' }}>{states.newCount} new</span>
+            <span style={{ color: 'var(--state-learning)' }}>{states.learningCount} learning</span>
+            <span style={{ color: 'var(--state-review)' }}>{states.reviewCount} review</span>
+          </div>
+          <div className="flex gap-1">
+            {MODE_CYCLE.map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
+                style={{
+                  background: mode === m ? 'var(--accent)' : 'transparent',
+                  color: mode === m ? '#fff' : 'var(--text-tertiary)',
+                }}
+              >
+                {MODE_LABEL[m]}
+              </button>
+            ))}
           </div>
         </div>
         <button
-          onClick={() => navigate('/review')}
-          disabled={totalDue === 0}
+          onClick={() => navigate(`/review?mode=${reviewParam}`)}
+          disabled={dueForMode === 0}
           className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
           style={{ background: 'var(--accent)', color: '#fff' }}
         >
-          {totalDue > 0 ? `Study (${totalDue} cards)` : 'No cards due'}
+          {dueForMode > 0 ? `Study (${dueForMode} cards)` : 'No cards due'}
         </button>
       </div>
 

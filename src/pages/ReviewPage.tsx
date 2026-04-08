@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useEffect, useState, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { useReviewStore } from '../stores/reviewStore';
 import { getReviewQueue } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
@@ -19,6 +19,7 @@ const MODE_COLORS: Record<ModeOption, string> = {
 
 export function ReviewPage() {
   const { deckId } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { setQueue, remaining, reset } = useReviewStore();
   const [mode, setMode] = useState<ModeOption>('en-to-zh');
@@ -28,6 +29,7 @@ export function ReviewPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<ModeOption | null>(null);
+  const autoStarted = useRef(false);
 
   useEffect(() => {
     getAllTags().then(setAllTags);
@@ -50,6 +52,16 @@ export function ReviewPage() {
       setLoadingMode(null);
     }
   };
+
+  // Auto-start if mode passed via query param from dashboard
+  useEffect(() => {
+    const modeParam = searchParams.get('mode') as ModeOption | null;
+    if (modeParam && !autoStarted.current) {
+      autoStarted.current = true;
+      setMode(modeParam);
+      startReview(modeParam);
+    }
+  }, []);
 
   useEffect(() => {
     return () => reset();
