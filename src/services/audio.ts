@@ -44,7 +44,14 @@ async function getChineseVoice(): Promise<SpeechSynthesisVoice | null> {
 export async function speakChinese(text: string): Promise<void> {
   const voice = await getChineseVoice();
 
-  console.log('[TTS] Using voice:', voice?.name, voice?.lang, '| all zh voices:', voices.filter(v => v.lang.startsWith('zh')).map(v => v.name));
+  // Debug: run localStorage.setItem('tts_debug','1') in console or visit ?tts_debug
+  if (new URLSearchParams(window.location.search).has('tts_debug')) {
+    localStorage.setItem('tts_debug', '1');
+  }
+  if (localStorage.getItem('tts_debug')) {
+    const zhNames = voices.filter(v => v.lang.startsWith('zh')).map(v => v.name).join(', ');
+    alert(`Voice: ${voice?.name ?? 'none'}\nAll zh: ${zhNames}`);
+  }
   return new Promise((resolve, reject) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
