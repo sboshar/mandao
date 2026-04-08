@@ -40,6 +40,11 @@ async function getChineseVoice(): Promise<SpeechSynthesisVoice | null> {
   );
 }
 
+/** Stop any in-progress speech */
+export function stopSpeaking(): void {
+  speechSynthesis.cancel();
+}
+
 /** Speak Chinese text using Web Speech API */
 export async function speakChinese(text: string): Promise<void> {
   const voice = await getChineseVoice();
