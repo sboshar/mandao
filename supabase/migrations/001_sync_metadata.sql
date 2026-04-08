@@ -5,6 +5,7 @@
 
 -- Global monotonic sequence for sync ordering (Anki-style USN)
 create sequence if not exists sync_usn_seq;
+grant usage, select on sequence sync_usn_seq to authenticated;
 
 -- ============================================================
 -- Add usn + updated_at to all mutable tables
