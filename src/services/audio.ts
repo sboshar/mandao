@@ -28,9 +28,12 @@ async function getChineseVoice(): Promise<SpeechSynthesisVoice | null> {
     (v) => v.lang === 'zh-CN' || v.lang === 'zh_CN' || v.lang.startsWith('zh')
   );
 
-  // Priority: Google voice > any other zh-CN voice
+  // Priority: Google voice > Apple premium > any zh-CN voice
   return (
     zhVoices.find((v) => v.name.toLowerCase().includes('google')) ||
+    zhVoices.find((v) => v.name.toLowerCase().includes('tingting')) ||
+    zhVoices.find((v) => v.name.toLowerCase().includes('lili')) ||
+    zhVoices.find((v) => v.name.toLowerCase().includes('meijia')) ||
     zhVoices.find((v) => v.lang === 'zh-CN') ||
     zhVoices[0] ||
     null
@@ -41,6 +44,10 @@ async function getChineseVoice(): Promise<SpeechSynthesisVoice | null> {
 export async function speakChinese(text: string): Promise<void> {
   const voice = await getChineseVoice();
 
+  if (new URLSearchParams(window.location.search).has('tts_debug')) {
+    const zhNames = voices.filter(v => v.lang.startsWith('zh')).map(v => v.name).join(', ');
+    alert(`Voice: ${voice?.name ?? 'none'}\nAll zh: ${zhNames}`);
+  }
   return new Promise((resolve, reject) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
