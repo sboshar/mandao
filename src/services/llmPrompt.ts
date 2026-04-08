@@ -89,7 +89,7 @@ Return this exact JSON structure:
 
 Rules:
 - Use EXACTLY the pre-segmented tokens provided above. Do NOT re-segment or merge/split them. Output one token object per segment, in order.
-- For pinyinNumeric: use tone numbers 1-5 (5 = neutral), separate syllables within a word by spaces (e.g. "cha4 bu4 duo1")
+- For pinyinNumeric: use tone numbers 1-5 (5 = neutral), separate syllables within a word by spaces (e.g. "cha4 bu4 duo1"). When a character has multiple accepted pronunciations, prefer the most common colloquial spoken form
 - For pinyinSandhi: apply all tone sandhi rules (3rd tone sandhi, 不 sandhi, 一 sandhi) and write with diacritics
 - For english: give the CONTEXTUAL meaning only, not all possible meanings
 - For particles like 了 or 的, give their grammatical function as the english (e.g. "completion particle", "possessive particle")
