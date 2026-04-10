@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import type { Sentence, SentenceToken, Meaning } from '../db/schema';
 import * as repo from '../db/repo';
 import { getTokensForSentence, updateSentenceTags } from '../services/ingestion';
@@ -9,8 +9,18 @@ import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
 import { reviewCard, undoReview, type Grade } from '../services/srs';
+import { comparePinyin, type SyllableResult } from '../lib/pinyinCompare';
+import { numericStringToDiacritic } from '../services/toneSandhi';
+import { speakChinese, stopSpeaking } from '../services/audio';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
+
+const SPEED_OPTIONS = [
+  { label: '0.5x', value: 0.5 },
+  { label: '0.75x', value: 0.75 },
+  { label: '1x', value: 0.9 },
+  { label: '1.25x', value: 1.25 },
+] as const;
 
 export function ReviewCard() {
   const { currentCard, isFlipped, flip, next, prev, remaining, undoInfo, clearUndo } = useReviewStore();
@@ -20,6 +30,12 @@ export function ReviewCard() {
   const [pendingRating, setPendingRating] = useState<number | null>(null);
   const [rateError, setRateError] = useState<string | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const [pinyinInput, setPinyinInput] = useState('');
+  const [pinyinResults, setPinyinResults] = useState<SyllableResult[] | null>(null);
+  const pinyinInputRef = useRef<HTMLInputElement>(null);
+  const autoPlayed = useRef<string | null>(null);
+  const [speedIndex, setSpeedIndex] = useState(2);
+  const speechRate = SPEED_OPTIONS[speedIndex].value;
 
   const card = currentCard();
 
@@ -37,9 +53,24 @@ export function ReviewCard() {
 
     setEditingTags(false);
     setRateError(null);
+    setPinyinInput('');
+    setPinyinResults(null);
     load();
     return () => { cancelled = true; };
   }, [card?.id]);
+
+  const isListenType = card?.reviewMode === 'listen-type';
+  useEffect(() => {
+    if (!isListenType || !sentence) return;
+    if (autoPlayed.current !== card?.id) {
+      autoPlayed.current = card!.id;
+      speakChinese(sentence.chinese, speechRate).catch(() => {});
+    }
+    if (pinyinInputRef.current) {
+      pinyinInputRef.current.focus();
+    }
+    return () => { stopSpeaking(); };
+  }, [isListenType, sentence, card?.id]);
 
   const handleUndo = async () => {
     if (!undoInfo || undoing || pendingRating !== null) return;
@@ -85,6 +116,15 @@ export function ReviewCard() {
     flip();
   };
 
+  const handlePinyinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinyinInput.trim() || pinyinResults) return;
+    clearUndo();
+    const comparison = comparePinyin(pinyinInput, sentence.pinyinSandhi);
+    setPinyinResults(comparison);
+    flip(); // flip to show the answer side with the diff
+  };
+
   const handleTagsChange = async (newTags: string[]) => {
     await updateSentenceTags(sentence!.id, newTags);
     setSentence((prev) => prev ? { ...prev, tags: newTags } : prev);
@@ -109,7 +149,7 @@ export function ReviewCard() {
       <div className="text-sm text-center mb-4" style={{ color: 'var(--text-tertiary)' }}>
         {remaining()} cards remaining
         <span className="ml-2 text-xs">
-          ({card.reviewMode === 'en-to-zh' ? 'EN \u2192 ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY \u2192 EN+ZH' : 'ZH \u2192 EN'})
+          ({card.reviewMode === 'en-to-zh' ? 'EN \u2192 ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY \u2192 EN+ZH' : card.reviewMode === 'listen-type' ? 'Listen & Type' : 'ZH \u2192 EN'})
         </span>
       </div>
 
@@ -117,7 +157,24 @@ export function ReviewCard() {
       <div className="surface rounded-xl shadow-lg p-4 sm:p-8 min-h-[250px] sm:min-h-[300px] flex flex-col">
         {/* Front */}
         <div className="flex-1 flex flex-col items-center justify-center">
-          {isEnToZh ? (
+          {isListenType ? (
+            <div className="flex flex-col items-center gap-4">
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                Listen and type the pinyin:
+              </p>
+              <div className="flex items-center gap-3">
+                <AudioButton text={sentence.chinese} className="text-2xl" rate={speechRate} />
+                <button
+                  onClick={() => setSpeedIndex((i) => (i + 1) % SPEED_OPTIONS.length)}
+                  className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+                  style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }}
+                  title="Change playback speed"
+                >
+                  {SPEED_OPTIONS[speedIndex].label}
+                </button>
+              </div>
+            </div>
+          ) : isEnToZh ? (
             <div className="text-xl text-center">
               <ClickableEnglish text={sentence.english} />
             </div>
@@ -134,6 +191,53 @@ export function ReviewCard() {
 
         {/* Flip / Answer */}
         {!isFlipped ? (
+          isListenType ? (
+            <form onSubmit={handlePinyinSubmit} className="mt-6 space-y-3">
+              {pinyinInput.trim() && (
+                <div className="text-center text-lg tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+                  {numericStringToDiacritic(pinyinInput)}
+                </div>
+              )}
+              <input
+                ref={pinyinInputRef}
+                type="text"
+                value={pinyinInput}
+                onChange={(e) => setPinyinInput(e.target.value)}
+                placeholder="Type pinyin here (e.g. ni3 hao3)"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                className="w-full px-4 py-3 rounded-lg text-center text-lg outline-none transition-colors"
+                style={{
+                  background: 'var(--bg-inset)',
+                  border: '2px solid var(--border)',
+                  color: 'var(--text-primary)',
+                }}
+                onFocus={(e) => { e.target.style.borderColor = 'var(--accent)'; }}
+                onBlur={(e) => { e.target.style.borderColor = 'var(--border)'; }}
+              />
+              <button
+                type="submit"
+                disabled={!pinyinInput.trim()}
+                className="w-full py-3 rounded-lg font-medium transition-all active:scale-[0.98] active:brightness-90 disabled:opacity-40"
+                style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+              >
+                Check
+              </button>
+              {undoInfo && (
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={undoing || pendingRating !== null}
+                  className="w-full py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                  style={{ color: 'var(--text-tertiary)' }}
+                >
+                  {undoing ? 'Undoing...' : 'Undo last card'}
+                </button>
+              )}
+            </form>
+          ) : (
           <div className="mt-6 space-y-2">
             <button
               onClick={handleFlip}
@@ -153,9 +257,58 @@ export function ReviewCard() {
               </button>
             )}
           </div>
+          )
         ) : (
           <>
             <div className="mt-6 pt-6 space-y-4" style={{ borderTop: '1px solid var(--border)' }}>
+              {isListenType && pinyinResults && (
+                <div className="space-y-2">
+                  <div className="text-center">
+                    {pinyinResults.every((r) => r.correct) ? (
+                      <span className="text-lg font-semibold" style={{ color: 'var(--success)' }}>Perfect!</span>
+                    ) : (
+                      <span className="text-lg font-semibold" style={{ color: 'var(--danger)' }}>Not quite</span>
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <span className="text-xs block mb-1" style={{ color: 'var(--text-tertiary)' }}>Your answer</span>
+                    <div className="flex flex-wrap justify-center gap-1">
+                      {pinyinResults.map((r, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-1 rounded text-lg font-mono"
+                          style={{
+                            background: r.correct
+                              ? 'color-mix(in srgb, var(--success) 15%, var(--bg-surface))'
+                              : r.baseMatch
+                              ? 'color-mix(in srgb, var(--warning) 15%, var(--bg-surface))'
+                              : 'color-mix(in srgb, var(--danger) 15%, var(--bg-surface))',
+                            color: r.correct ? 'var(--success)' : r.baseMatch ? 'var(--warning)' : 'var(--danger)',
+                          }}
+                          title={r.correct ? 'Correct' : r.baseMatch ? 'Right syllable, wrong tone' : 'Incorrect'}
+                        >
+                          {r.typed || '\u00A0?\u00A0'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-xs block mb-1" style={{ color: 'var(--text-tertiary)' }}>Correct</span>
+                    <div className="flex flex-wrap justify-center gap-1">
+                      {pinyinResults.map((r, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-1 rounded text-lg font-mono"
+                          style={{ background: 'var(--bg-inset)', color: 'var(--text-primary)' }}
+                        >
+                          {r.expected || '\u00A0?\u00A0'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {(isEnToZh || isPyToEnZh) && (
                 <div className="flex flex-wrap justify-center gap-1">
                   {tokens.map((t) => (

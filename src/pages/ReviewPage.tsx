@@ -14,6 +14,7 @@ const MODE_COLORS: Record<ModeOption, string> = {
   'en-to-zh': 'var(--accent)',
   'zh-to-en': 'var(--success)',
   'py-to-en-zh': 'var(--warning)',
+  'listen-type': '#ec4899',
   'both': '#8b5cf6',
 };
 
@@ -140,6 +141,7 @@ export function ReviewPage() {
             { key: 'en-to-zh' as ModeOption, label: 'English \u2192 Chinese', desc: 'See English, produce characters + pinyin' },
             { key: 'zh-to-en' as ModeOption, label: 'Chinese \u2192 English', desc: 'See characters, produce English meaning' },
             { key: 'py-to-en-zh' as ModeOption, label: 'Pinyin \u2192 English + Chinese', desc: 'See pinyin (tone sandhi), produce meaning + characters' },
+            { key: 'listen-type' as ModeOption, label: 'Listen & Type', desc: 'Hear audio, type the pinyin — see a colored diff' },
             { key: 'both' as ModeOption, label: 'All (mixed)', desc: 'Interleave all directions' },
           ]).map((opt) => {
             const isSelected = loadingMode === opt.key;
