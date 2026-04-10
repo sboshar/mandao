@@ -24,8 +24,8 @@ export interface UndoInfo {
   cardId: string;
   logId: string;
   oldCardState: Partial<SrsCard>;
-  /** Deferred sync payload — only enqueued when the undo window closes. */
-  syncPayload: Record<string, unknown>;
+  /** The opId of the sync op in the outbox — used to delete it on undo. */
+  syncOpId: string;
 }
 
 /** Convert our SrsCard to an FSRS Card for scheduling */
@@ -98,42 +98,47 @@ export async function reviewCard(
   };
   await repo.insertReviewLog(log);
 
-  // Sync is deferred — only enqueued when the undo window closes (via commitReview).
-  const syncPayload: Record<string, unknown> = {
-    id: logId,
-    card_id: cardId,
-    rating: rating as number,
-    state: card.state,
-    due: card.due,
-    stability: card.stability,
-    difficulty: card.difficulty,
-    elapsed_days: card.elapsedDays,
-    scheduled_days: card.scheduledDays,
-    reviewed_at: now.getTime(),
-    op_id: opId,
-    device_id: getDeviceId(),
-    new_due: newCardState.due,
-    new_stability: newCardState.stability,
-    new_difficulty: newCardState.difficulty,
-    new_elapsed_days: newCardState.elapsedDays,
-    new_scheduled_days: newCardState.scheduledDays,
-    new_reps: newCardState.reps,
-    new_lapses: newCardState.lapses,
-    new_state: newCardState.state,
-  };
+  // Enqueue sync immediately so it persists even if the tab closes.
+  // If the user undoes, we delete the outbox entry (compensating transaction).
+  await enqueueSync({
+    op: 'reviewCard',
+    payload: {
+      id: logId,
+      card_id: cardId,
+      rating: rating as number,
+      state: card.state,
+      due: card.due,
+      stability: card.stability,
+      difficulty: card.difficulty,
+      elapsed_days: card.elapsedDays,
+      scheduled_days: card.scheduledDays,
+      reviewed_at: now.getTime(),
+      op_id: opId,
+      device_id: getDeviceId(),
+      new_due: newCardState.due,
+      new_stability: newCardState.stability,
+      new_difficulty: newCardState.difficulty,
+      new_elapsed_days: newCardState.elapsedDays,
+      new_scheduled_days: newCardState.scheduledDays,
+      new_reps: newCardState.reps,
+      new_lapses: newCardState.lapses,
+      new_state: newCardState.state,
+    },
+  });
 
-  return { cardId, logId, oldCardState, syncPayload };
+  return { cardId, logId, oldCardState, syncOpId: opId };
 }
 
-/** Commit a deferred review to sync (called when the undo window closes). */
-export async function commitReview(undo: UndoInfo): Promise<void> {
-  await enqueueSync({ op: 'reviewCard', payload: undo.syncPayload });
+/** Commit a review — now a no-op since sync is enqueued immediately in reviewCard. */
+export async function commitReview(_undo: UndoInfo): Promise<void> {
+  // Sync op was already enqueued in reviewCard. Nothing to do.
 }
 
-/** Undo the most recent review — local only since sync hasn't been enqueued yet. */
+/** Undo the most recent review — reverts local state and removes the pending sync op. */
 export async function undoReview(undo: UndoInfo): Promise<void> {
   await repo.updateSrsCard(undo.cardId, undo.oldCardState);
   await repo.deleteReviewLog(undo.logId);
+  await repo.deletePendingSyncOp(undo.syncOpId);
 }
 
 /** Get review queue for a deck, optionally filtered by review mode and/or tags */

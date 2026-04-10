@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams, Link } from 'react-router';
 import { ingestSentence, type TokenInput, type CharacterInput } from '../services/ingestion';
 import {
   generateAnalysisPrompt,
@@ -7,6 +7,7 @@ import {
   getExistingMeanings,
 } from '../services/llmPrompt';
 import { numericStringToDiacritic } from '../services/toneSandhi';
+import { generateCompletion, isAIConfigured } from '../services/aiProvider';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { TagInput } from '../components/TagInput';
@@ -40,6 +41,8 @@ export function AddSentencePage() {
   const [promptCopied, setPromptCopied] = useState(false);
   const [usePinyinIME, setUsePinyinIME] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const aiEnabled = isAIConfigured();
 
   // Tutorial mode: pre-fill Chinese sentence
   useEffect(() => {
@@ -66,6 +69,39 @@ export function AddSentencePage() {
     await navigator.clipboard.writeText(prompt);
     setPromptCopied(true);
     setTimeout(() => setPromptCopied(false), 2000);
+  };
+
+  // Auto-analyze using configured AI provider
+  const handleAutoAnalyze = async () => {
+    setError('');
+    setAnalyzing(true);
+    try {
+      const existingMeanings = await getExistingMeanings(chinese.trim());
+      const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings);
+      const raw = await generateCompletion(prompt);
+      const parsed = parseLLMResponse(raw);
+      if (parsed.english) setEnglish(parsed.english);
+
+      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
+        surfaceForm: t.surfaceForm,
+        pinyinNumeric: t.pinyinNumeric,
+        pinyinSandhi: t.pinyinSandhi || '',
+        english: t.english,
+        partOfSpeech: t.partOfSpeech || '',
+        characters: t.characters?.map((c) => ({
+          char: c.char,
+          pinyinNumeric: c.pinyinNumeric,
+          pinyinSandhi: c.pinyinSandhi,
+          english: c.english,
+        })),
+      }));
+
+      setTokens(formTokens);
+      setStep('review');
+    } catch (e: any) {
+      setError(e.message);
+    }
+    setAnalyzing(false);
   };
 
   // Parse LLM JSON response
@@ -314,37 +350,71 @@ export function AddSentencePage() {
               Use Tutorial Data
             </button>
           ) : (
-            <div className="p-4 rounded-lg space-y-3 inset" style={{ border: '1px solid var(--border)' }}>
-              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                1. Copy the analysis prompt (the LLM will tokenize and analyze the sentence)
-              </p>
-              <button
-                onClick={handleCopyPrompt}
-                className="w-full py-2 rounded font-medium text-sm transition-colors"
-                style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
-              >
-                {promptCopied ? 'Copied!' : 'Copy Prompt to Clipboard'}
-              </button>
+            <div className="space-y-3">
+              {/* Hint: configure AI */}
+              {!aiEnabled && (
+                <div className="p-3 rounded-lg text-sm" style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}>
+                  Tip: You can automate this step.{' '}
+                  <Link to="/settings" className="underline font-medium" style={{ color: 'var(--accent)' }}>
+                    Configure an AI provider
+                  </Link>{' '}
+                  in Settings to analyze sentences with one click.
+                </div>
+              )}
 
-              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                2. Paste it into ChatGPT / Claude / any LLM, then paste the response below
-              </p>
-              <textarea
-                value={llmPasteValue}
-                onChange={(e) => setLlmPasteValue(e.target.value)}
-                placeholder="Paste the JSON response here..."
-                rows={6}
-                className="w-full px-3 py-2 rounded-lg text-sm font-mono"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-              />
-              <button
-                onClick={handleParseLLMResponse}
-                disabled={!llmPasteValue.trim()}
-                className="w-full py-2 rounded font-medium text-sm transition-colors disabled:opacity-50"
-                style={{ background: 'var(--success)', color: 'var(--text-inverted)' }}
-              >
-                Parse &amp; Fill
-              </button>
+              {/* Auto-analyze (when AI is configured) */}
+              {aiEnabled && (
+                <button
+                  onClick={handleAutoAnalyze}
+                  disabled={analyzing}
+                  className="w-full py-3 rounded-lg font-medium transition-colors disabled:opacity-70"
+                  style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+                >
+                  {analyzing ? 'Analyzing...' : 'Auto-Analyze with AI'}
+                </button>
+              )}
+
+              {/* Manual copy-paste flow */}
+              <details open={!aiEnabled}>
+                <summary
+                  className="cursor-pointer text-sm font-medium py-1"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {aiEnabled ? 'Or paste LLM response manually' : 'Copy prompt & paste LLM response'}
+                </summary>
+                <div className="mt-2 p-4 rounded-lg space-y-3 inset" style={{ border: '1px solid var(--border)' }}>
+                  <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    1. Copy the analysis prompt (the LLM will tokenize and analyze the sentence)
+                  </p>
+                  <button
+                    onClick={handleCopyPrompt}
+                    className="w-full py-2 rounded font-medium text-sm transition-colors"
+                    style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+                  >
+                    {promptCopied ? 'Copied!' : 'Copy Prompt to Clipboard'}
+                  </button>
+
+                  <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    2. Paste it into ChatGPT / Claude / any LLM, then paste the response below
+                  </p>
+                  <textarea
+                    value={llmPasteValue}
+                    onChange={(e) => setLlmPasteValue(e.target.value)}
+                    placeholder="Paste the JSON response here..."
+                    rows={6}
+                    className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  />
+                  <button
+                    onClick={handleParseLLMResponse}
+                    disabled={!llmPasteValue.trim()}
+                    className="w-full py-2 rounded font-medium text-sm transition-colors disabled:opacity-50"
+                    style={{ background: 'var(--success)', color: 'var(--text-inverted)' }}
+                  >
+                    Parse &amp; Fill
+                  </button>
+                </div>
+              </details>
             </div>
           )}
 

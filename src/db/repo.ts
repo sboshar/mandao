@@ -316,3 +316,13 @@ export async function deleteAllUserData(): Promise<void> {
 // ============================================================
 
 export { enqueue as enqueueSync };
+
+/** Delete a pending sync op by its opId (used for undo compensation). */
+export async function deletePendingSyncOp(opId: string): Promise<void> {
+  const match = await localDb.outbox
+    .filter((op) => op.opId === opId && op.status === 'pending')
+    .first();
+  if (match?.id != null) {
+    await localDb.outbox.delete(match.id);
+  }
+}

@@ -8,7 +8,7 @@ import { AudioButton } from './AudioButton';
 import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
-import { reviewCard, commitReview, undoReview, type Grade } from '../services/srs';
+import { reviewCard, undoReview, type Grade } from '../services/srs';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
@@ -81,7 +81,6 @@ export function ReviewCard() {
   const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
 
   const handleFlip = () => {
-    if (undoInfo) commitReview(undoInfo).catch(console.error);
     clearUndo();
     flip();
   };
@@ -95,10 +94,7 @@ export function ReviewCard() {
     setRateError(null);
     setPendingRating(rating);
     try {
-      const [, undo] = await Promise.all([
-        undoInfo ? commitReview(undoInfo) : undefined,
-        reviewCard(card.id, rating),
-      ]);
+      const undo = await reviewCard(card.id, rating);
       next(undo);
     } catch {
       setRateError('Could not save this review. Check your connection and try again.');
