@@ -4,11 +4,12 @@ import {
   useAISettingsStore,
   DEFAULT_MODELS,
   PROVIDER_LABELS,
+  providerNeedsKey,
   type AIProvider,
 } from '../stores/aiSettingsStore';
 import { generateCompletion } from '../services/aiProvider';
 
-const PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'gemini'];
+const PROVIDERS: AIProvider[] = ['mandao', 'openai', 'anthropic', 'gemini'];
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -19,8 +20,10 @@ export function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
+  const needsKey = providerNeedsKey(settings.provider);
+
   const handleProviderChange = (provider: AIProvider) => {
-    update({ provider, model: '', endpointUrl: '' });
+    update({ provider, model: '', endpointUrl: '', apiKey: '' });
     setTestResult(null);
   };
 
@@ -82,12 +85,12 @@ export function SettingsPage() {
             {/* Provider */}
             <div>
               <label className="block text-sm font-medium mb-2">Provider</label>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {PROVIDERS.map((p) => (
                   <button
                     key={p}
                     onClick={() => handleProviderChange(p)}
-                    className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="py-2 rounded-lg text-sm font-medium transition-colors"
                     style={{
                       background: settings.provider === p ? 'var(--accent)' : 'var(--bg-inset)',
                       color: settings.provider === p ? '#fff' : 'var(--text-secondary)',
@@ -99,79 +102,98 @@ export function SettingsPage() {
               </div>
             </div>
 
-            {/* API Key */}
-            <div>
-              <label className="block text-sm font-medium mb-1">API Key</label>
-              <div className="flex gap-2">
-                <input
-                  type={showKey ? 'text' : 'password'}
-                  value={settings.apiKey}
-                  onChange={(e) => { update({ apiKey: e.target.value }); setTestResult(null); }}
-                  placeholder={`Paste your ${PROVIDER_LABELS[settings.provider]} API key`}
-                  className="flex-1 px-3 py-2 rounded-lg text-sm"
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                />
-                <button
-                  onClick={() => setShowKey(!showKey)}
-                  className="px-3 py-2 rounded-lg text-sm transition-colors"
-                  style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-                >
-                  {showKey ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              <p className="mt-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Your key is stored in browser local storage and sent only to the {PROVIDER_LABELS[settings.provider]} API. It never touches our servers.
-              </p>
-              {settings.provider === 'gemini' && (
-                <p className="mt-1 text-xs p-2 rounded" style={{ background: 'var(--warning-subtle, var(--bg-inset))', color: 'var(--warning, var(--text-secondary))' }}>
-                  Gemini's API sends your key as a URL parameter. This means it may appear in browser history and network logs. Use a restricted key with only the Generative Language API enabled.
+            {/* ManDao built-in info */}
+            {!needsKey && (
+              <div className="p-3 rounded-lg text-sm space-y-1" style={{ background: 'var(--bg-inset)' }}>
+                <p style={{ color: 'var(--text-primary)' }}>
+                  No setup needed — works out of the box.
                 </p>
-              )}
-            </div>
+                <p style={{ color: 'var(--text-tertiary)' }}>
+                  Uses GPT-4o-mini via ManDao's server. Limited to 20 requests/day.
+                  For unlimited use, select a provider above and use your own API key.
+                </p>
+              </div>
+            )}
 
-            {/* Model */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Model</label>
-              <input
-                type="text"
-                value={settings.model}
-                onChange={(e) => update({ model: e.target.value })}
-                placeholder={DEFAULT_MODELS[settings.provider]}
-                className="w-full px-3 py-2 rounded-lg text-sm"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-              />
-              <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Leave blank for default: {DEFAULT_MODELS[settings.provider]}
-              </p>
-            </div>
-
-            {/* Custom Endpoint */}
-            <details className="text-sm">
-              <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-secondary)' }}>
-                Advanced: Custom endpoint
-              </summary>
-              <div className="mt-2 space-y-2">
-                <input
-                  type="text"
-                  value={settings.endpointUrl}
-                  onChange={(e) => update({ endpointUrl: e.target.value })}
-                  placeholder="Leave blank for default"
-                  className="w-full px-3 py-2 rounded-lg text-sm"
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                />
-                {settings.endpointUrl && (
-                  <p className="text-xs p-2 rounded" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-                    Your API key and prompts will be sent to this custom URL. Only use endpoints you trust.
+            {/* API Key (BYOK providers only) */}
+            {needsKey && (
+              <div>
+                <label className="block text-sm font-medium mb-1">API Key</label>
+                <div className="flex gap-2">
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={settings.apiKey}
+                    onChange={(e) => { update({ apiKey: e.target.value }); setTestResult(null); }}
+                    placeholder={`Paste your ${PROVIDER_LABELS[settings.provider]} API key`}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm"
+                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  />
+                  <button
+                    onClick={() => setShowKey(!showKey)}
+                    className="px-3 py-2 rounded-lg text-sm transition-colors"
+                    style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+                  >
+                    {showKey ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  Your key is stored in browser local storage and sent only to the {PROVIDER_LABELS[settings.provider]} API. It never touches our servers.
+                </p>
+                {settings.provider === 'gemini' && (
+                  <p className="mt-1 text-xs p-2 rounded" style={{ background: 'var(--warning-subtle, var(--bg-inset))', color: 'var(--warning, var(--text-secondary))' }}>
+                    Gemini's API sends your key as a URL parameter. This means it may appear in browser history and network logs. Use a restricted key with only the Generative Language API enabled.
                   </p>
                 )}
               </div>
-            </details>
+            )}
+
+            {/* Model (BYOK only — ManDao uses a fixed model) */}
+            {needsKey && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Model</label>
+                <input
+                  type="text"
+                  value={settings.model}
+                  onChange={(e) => update({ model: e.target.value })}
+                  placeholder={DEFAULT_MODELS[settings.provider]}
+                  className="w-full px-3 py-2 rounded-lg text-sm"
+                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                />
+                <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  Leave blank for default: {DEFAULT_MODELS[settings.provider]}
+                </p>
+              </div>
+            )}
+
+            {/* Custom Endpoint (BYOK only) */}
+            {needsKey && (
+              <details className="text-sm">
+                <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  Advanced: Custom endpoint
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="text"
+                    value={settings.endpointUrl}
+                    onChange={(e) => update({ endpointUrl: e.target.value })}
+                    placeholder="Leave blank for default"
+                    className="w-full px-3 py-2 rounded-lg text-sm"
+                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                  />
+                  {settings.endpointUrl && (
+                    <p className="text-xs p-2 rounded" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
+                      Your API key and prompts will be sent to this custom URL. Only use endpoints you trust.
+                    </p>
+                  )}
+                </div>
+              </details>
+            )}
 
             {/* Test Connection */}
             <div className="flex items-center gap-3">
               <button
                 onClick={handleTest}
-                disabled={testing || !settings.apiKey}
+                disabled={testing || (needsKey && !settings.apiKey)}
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                 style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
               >
@@ -189,8 +211,18 @@ export function SettingsPage() {
         {/* Security info */}
         <div className="p-3 rounded-lg text-xs space-y-1" style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}>
           <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>Security notes</p>
-          <p>Your API key is stored in browser localStorage. It is sent only to your chosen provider's API endpoint.</p>
-          <p>For best security: use API keys with spending limits, and rotate them periodically.</p>
+          {needsKey ? (
+            <>
+              <p>Your API key is stored in this browser only. It does not sync across devices — you'll need to re-enter it on each browser you use.</p>
+              <p>Your key is sent only to your chosen provider's API endpoint and never touches our servers.</p>
+              <p>For best security: use API keys with spending limits, and rotate them periodically.</p>
+            </>
+          ) : (
+            <>
+              <p>The built-in provider routes requests through ManDao's server. Your sentences are sent to our server and forwarded to the AI model.</p>
+              <p>No API key is needed — usage is rate-limited to 20 requests/day.</p>
+            </>
+          )}
         </div>
       </div>
     </div>
