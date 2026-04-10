@@ -4,7 +4,6 @@ import { useReviewStore } from '../stores/reviewStore';
 import { getReviewQueue } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
-import { ListenTypeCard } from '../components/ListenTypeCard';
 import { MeaningCard } from '../components/MeaningCard';
 import type { ReviewMode } from '../db/schema';
 import { ensureDefaultDeck } from '../db/repo';
@@ -189,7 +188,7 @@ export function ReviewPage() {
         <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{remaining()} left</div>
       </div>
 
-      {currentCard()?.reviewMode === 'listen-type' ? <ListenTypeCard /> : <ReviewCard />}
+      <ReviewCard />
       <MeaningCard />
     </div>
   );

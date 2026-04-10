@@ -46,13 +46,13 @@ export function stopSpeaking(): void {
 }
 
 /** Speak Chinese text using Web Speech API */
-export async function speakChinese(text: string): Promise<void> {
+export async function speakChinese(text: string, rate = 0.9): Promise<void> {
   const voice = await getChineseVoice();
 
   return new Promise((resolve, reject) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
-    utterance.rate = 0.9;
+    utterance.rate = rate;
     if (voice) utterance.voice = voice;
 
     utterance.onend = () => resolve();
