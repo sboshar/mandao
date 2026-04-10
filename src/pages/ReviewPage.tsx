@@ -63,8 +63,18 @@ export function ReviewPage() {
     }
   }, []);
 
+  // Commit any pending review on unmount (route change) or tab close
   useEffect(() => {
-    return () => reset();
+    const commitPending = () => {
+      const pending = useReviewStore.getState().undoInfo;
+      if (pending) commitReview(pending).catch(console.error);
+    };
+    window.addEventListener('beforeunload', commitPending);
+    return () => {
+      window.removeEventListener('beforeunload', commitPending);
+      commitPending();
+      reset();
+    };
   }, []);
 
   if (!started) {
@@ -170,7 +180,7 @@ export function ReviewPage() {
         <button
           onClick={() => {
             const pending = useReviewStore.getState().undoInfo;
-            if (pending) commitReview(pending);
+            if (pending) commitReview(pending).catch(console.error);
             reset();
             navigate('/');
           }}

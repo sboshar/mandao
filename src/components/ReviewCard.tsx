@@ -42,7 +42,7 @@ export function ReviewCard() {
   }, [card?.id]);
 
   const handleUndo = async () => {
-    if (!undoInfo || undoing) return;
+    if (!undoInfo || undoing || pendingRating !== null) return;
     setUndoing(true);
     try {
       await undoReview(undoInfo);
@@ -64,8 +64,11 @@ export function ReviewCard() {
           <button
             onClick={handleUndo}
             disabled={undoing}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
-            style={{ color: 'var(--text-tertiary)' }}
+            className="px-5 py-2.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+            style={{
+              background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+              color: 'var(--accent)',
+            }}
           >
             {undoing ? 'Undoing...' : 'Undo last rating'}
           </button>
@@ -78,7 +81,7 @@ export function ReviewCard() {
   const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
 
   const handleFlip = () => {
-    if (undoInfo) commitReview(undoInfo);
+    if (undoInfo) commitReview(undoInfo).catch(console.error);
     clearUndo();
     flip();
   };
@@ -92,9 +95,10 @@ export function ReviewCard() {
     setRateError(null);
     setPendingRating(rating);
     try {
-      // Commit the previous review's sync now that we're moving on
-      if (undoInfo) await commitReview(undoInfo);
-      const undo = await reviewCard(card.id, rating);
+      const [, undo] = await Promise.all([
+        undoInfo ? commitReview(undoInfo) : undefined,
+        reviewCard(card.id, rating),
+      ]);
       next(undo);
     } catch {
       setRateError('Could not save this review. Check your connection and try again.');
@@ -145,11 +149,11 @@ export function ReviewCard() {
             {undoInfo && (
               <button
                 onClick={handleUndo}
-                disabled={undoing}
+                disabled={undoing || pendingRating !== null}
                 className="w-full py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
                 style={{ color: 'var(--text-tertiary)' }}
               >
-                {undoing ? 'Undoing...' : 'Undo last rating'}
+                {undoing ? 'Undoing...' : 'Undo last card'}
               </button>
             )}
           </div>
@@ -255,7 +259,7 @@ export function ReviewCard() {
                 { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
               ]).map((btn) => {
                 const isSelected = pendingRating === btn.rating;
-                const isDisabled = pendingRating !== null;
+                const isDisabled = pendingRating !== null || undoing;
                 return (
                   <button
                     key={btn.rating}
