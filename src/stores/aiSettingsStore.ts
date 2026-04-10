@@ -55,6 +55,25 @@ export const PROVIDER_LABELS: Record<AIProvider, string> = {
   gemini: 'Gemini (free)',
 };
 
+/** Popular models per provider. First entry is the default. */
+export const MODEL_OPTIONS: Record<AIProvider, { id: string; label: string }[]> = {
+  gemini: [
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (fast, free)' },
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (smartest)' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (fastest)' },
+  ],
+  openai: [
+    { id: 'gpt-4o-mini', label: 'GPT-4o Mini (cheap, fast)' },
+    { id: 'gpt-4o', label: 'GPT-4o (smartest)' },
+    { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+    { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (cheapest)' },
+  ],
+  anthropic: [
+    { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (cheap, fast)' },
+    { id: 'claude-sonnet-4-6-20260320', label: 'Claude Sonnet 4.6 (smartest)' },
+  ],
+};
+
 export const useAISettingsStore = create<AISettingsState>(() => {
   const initial = load();
 

@@ -4,6 +4,7 @@ import {
   useAISettingsStore,
   DEFAULT_MODELS,
   PROVIDER_LABELS,
+  MODEL_OPTIONS,
   type AIProvider,
 } from '../stores/aiSettingsStore';
 import { generateCompletion } from '../services/aiProvider';
@@ -160,17 +161,42 @@ export function SettingsPage() {
             {/* Model */}
             <div>
               <label className="block text-sm font-medium mb-1">Model</label>
-              <input
-                type="text"
-                value={settings.model}
-                onChange={(e) => update({ model: e.target.value })}
-                placeholder={DEFAULT_MODELS[settings.provider]}
-                className="w-full px-3 py-2 rounded-lg text-sm"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-              />
-              <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Leave blank for default: {DEFAULT_MODELS[settings.provider]}
-              </p>
+              {(() => {
+                const options = MODEL_OPTIONS[settings.provider];
+                const isCustom = settings.model && !options.some((o) => o.id === settings.model);
+                const selectValue = isCustom ? '__custom__' : (settings.model || options[0].id);
+                return (
+                  <div className="space-y-2">
+                    <select
+                      value={selectValue}
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          update({ model: '' });
+                        } else {
+                          update({ model: e.target.value });
+                        }
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-sm"
+                      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                    >
+                      {options.map((o) => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                      <option value="__custom__">Custom model...</option>
+                    </select>
+                    {(isCustom || selectValue === '__custom__') && (
+                      <input
+                        type="text"
+                        value={settings.model}
+                        onChange={(e) => update({ model: e.target.value })}
+                        placeholder="Enter model ID"
+                        className="w-full px-3 py-2 rounded-lg text-sm"
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                      />
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Custom Endpoint */}
