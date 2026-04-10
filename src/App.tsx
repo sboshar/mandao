@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
+import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router';
 import { loadCedict } from './lib/cedict';
 import { hydrateLocalDb, isHydrated } from './db/hydrate';
 import { runSync, startSyncListeners, stopSyncListeners } from './db/syncEngine';
@@ -10,6 +10,7 @@ import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
 import { StatsPage } from './pages/StatsPage';
 import { SpeakPage } from './pages/SpeakPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { LoginPage } from './pages/LoginPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { IntroModal } from './components/IntroModal';
@@ -126,6 +127,14 @@ function App() {
           style={{ background: 'var(--bg-base)' }}
         >
           <SyncIndicator />
+          <Link
+            to="/settings"
+            className="px-2 sm:px-2.5 py-1 rounded-md text-xs transition-colors"
+            style={{ color: 'var(--text-tertiary)' }}
+            title="Settings"
+          >
+            Settings
+          </Link>
           <button
             onClick={signOut}
             className="px-2 sm:px-2.5 py-1 rounded-md text-xs transition-colors"
@@ -151,6 +160,7 @@ function App() {
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/speak" element={<SpeakPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/auth/callback" element={<Navigate to="/" replace />} />
           <Route path="/reset-password" element={<Navigate to="/" replace />} />
         </Routes>
