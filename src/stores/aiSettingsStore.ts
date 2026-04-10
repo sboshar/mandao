@@ -46,7 +46,7 @@ function persist(settings: AISettings) {
 export const DEFAULT_MODELS: Record<AIProvider, string> = {
   openai: 'gpt-4o-mini',
   anthropic: 'claude-haiku-4-5-20251001',
-  gemini: 'gemini-3-flash',
+  gemini: 'gemini-2.5-flash',
 };
 
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
@@ -58,8 +58,10 @@ export const PROVIDER_LABELS: Record<AIProvider, string> = {
 /** Popular models per provider. First entry is the default. */
 export const MODEL_OPTIONS: Record<AIProvider, { id: string; label: string }[]> = {
   gemini: [
-    { id: 'gemini-3-flash', label: 'Gemini 3 Flash — 5/min, 20/day (best for a few sentences)' },
-    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite — 15/min, 500/day (best for bulk)' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (stable, recommended)' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (fastest, cheapest)' },
+    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (preview)' },
+    { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite (preview)' },
   ],
   openai: [
     { id: 'gpt-4o-mini', label: 'GPT-4o Mini (cheap, fast)' },
