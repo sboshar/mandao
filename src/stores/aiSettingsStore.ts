@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AIProvider = 'mandao' | 'openai' | 'anthropic' | 'gemini';
+export type AIProvider = 'openai' | 'anthropic' | 'gemini';
 
 export interface AISettings {
   enabled: boolean;
@@ -20,7 +20,7 @@ const STORAGE_KEY = 'mandao_ai_settings';
 
 const DEFAULTS: AISettings = {
   enabled: false,
-  provider: 'mandao',
+  provider: 'gemini',
   apiKey: '',
   model: '',
   endpointUrl: '',
@@ -30,7 +30,10 @@ function load(): AISettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULTS, ...JSON.parse(raw) };
+    // Migrate: if user had 'mandao' selected, switch to gemini
+    if (parsed.provider === 'mandao') parsed.provider = 'gemini';
+    return parsed;
   } catch {
     return DEFAULTS;
   }
@@ -41,23 +44,16 @@ function persist(settings: AISettings) {
 }
 
 export const DEFAULT_MODELS: Record<AIProvider, string> = {
-  mandao: 'gpt-4o-mini',
   openai: 'gpt-4o-mini',
   anthropic: 'claude-haiku-4-5-20251001',
-  gemini: 'gemini-2.0-flash',
+  gemini: 'gemini-2.5-flash',
 };
 
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  mandao: 'ManDao (built-in)',
   openai: 'OpenAI',
   anthropic: 'Anthropic',
-  gemini: 'Google Gemini',
+  gemini: 'Gemini (free)',
 };
-
-/** Providers that require the user to supply their own API key. */
-export function providerNeedsKey(provider: AIProvider): boolean {
-  return provider !== 'mandao';
-}
 
 export const useAISettingsStore = create<AISettingsState>(() => {
   const initial = load();

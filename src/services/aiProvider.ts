@@ -1,14 +1,13 @@
 /**
- * Pluggable AI provider — calls AI APIs from the browser.
+ * Pluggable AI provider — calls AI APIs directly from the browser
+ * using the user's own API key.
  *
- * - "mandao" provider: routes through our Vercel API route (no user key needed)
- * - Other providers: direct browser calls using the user's own API key
+ * All providers use simple fetch() calls (no SDKs).
  */
-import { useAISettingsStore, DEFAULT_MODELS, providerNeedsKey, type AIProvider } from '../stores/aiSettingsStore';
-import { supabase } from '../lib/supabase';
+import { useAISettingsStore, DEFAULT_MODELS, type AIProvider } from '../stores/aiSettingsStore';
 
-/** Default API endpoints for BYOK providers */
-const DEFAULT_ENDPOINTS: Partial<Record<AIProvider, string>> = {
+/** Default API endpoints per provider */
+const DEFAULT_ENDPOINTS: Record<AIProvider, string> = {
   openai: 'https://api.openai.com/v1/chat/completions',
   anthropic: 'https://api.anthropic.com/v1/messages',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/models',
@@ -26,11 +25,9 @@ function truncateError(body: string, maxLen = 300): string {
 function getConfig() {
   const s = useAISettingsStore.getState();
   if (!s.enabled) throw new Error('AI features are not enabled. Go to Settings to configure.');
-  if (providerNeedsKey(s.provider) && !s.apiKey) {
-    throw new Error('No API key configured. Go to Settings to add one.');
-  }
+  if (!s.apiKey) throw new Error('No API key configured. Go to Settings to add one.');
   const model = s.model || DEFAULT_MODELS[s.provider];
-  const endpoint = s.endpointUrl || DEFAULT_ENDPOINTS[s.provider] || '';
+  const endpoint = s.endpointUrl || DEFAULT_ENDPOINTS[s.provider];
   if (s.endpointUrl && !/^https:\/\//i.test(s.endpointUrl)) {
     throw new Error('Custom endpoint must use https://. Refusing to send API key over an insecure connection.');
   }
@@ -53,32 +50,6 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
-}
-
-// ── ManDao built-in (Vercel AI Gateway proxy) ────────────────────────
-
-async function callMandao(prompt: string): Promise<string> {
-  const { model } = getConfig();
-
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('You must be logged in to use AI features.');
-
-  const res = await fetchWithTimeout('/api/ai', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({ prompt, model }),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(data.error || `AI proxy error ${res.status}`);
-  }
-
-  const data = await res.json();
-  return data.text;
 }
 
 // ── OpenAI-compatible ────────────────────────────────────────────────
@@ -173,7 +144,6 @@ async function callGemini(prompt: string): Promise<string> {
 // ── Public API ───────────────────────────────────────────────────────
 
 const PROVIDERS: Record<AIProvider, (prompt: string) => Promise<string>> = {
-  mandao: callMandao,
   openai: callOpenAI,
   anthropic: callAnthropic,
   gemini: callGemini,
@@ -188,7 +158,5 @@ export async function generateCompletion(prompt: string): Promise<string> {
 /** Check whether AI is configured and ready to use. */
 export function isAIConfigured(): boolean {
   const s = useAISettingsStore.getState();
-  if (!s.enabled) return false;
-  // ManDao built-in doesn't need a key; BYOK providers do
-  return s.provider === 'mandao' || !!s.apiKey;
+  return s.enabled && !!s.apiKey;
 }
