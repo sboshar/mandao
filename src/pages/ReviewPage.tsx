@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { useReviewStore } from '../stores/reviewStore';
-import { getReviewQueue } from '../services/srs';
+import { getReviewQueue, commitReview } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
@@ -169,6 +169,8 @@ export function ReviewPage() {
       <div className="flex items-center justify-between mb-6 max-w-2xl mx-auto">
         <button
           onClick={() => {
+            const pending = useReviewStore.getState().undoInfo;
+            if (pending) commitReview(pending);
             reset();
             navigate('/');
           }}

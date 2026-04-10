@@ -16,7 +16,6 @@ export interface SyncMeta {
 
 export type SyncOpType =
   | 'reviewCard'
-  | 'undoReview'
   | 'ingestBundle'
   | 'deleteEntity'
   | 'deleteAllData'

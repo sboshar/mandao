@@ -24,6 +24,8 @@ export interface UndoInfo {
   cardId: string;
   logId: string;
   oldCardState: Partial<SrsCard>;
+  /** Deferred sync payload — only enqueued when the undo window closes. */
+  syncPayload: Record<string, unknown>;
 }
 
 /** Convert our SrsCard to an FSRS Card for scheduling */
@@ -96,58 +98,42 @@ export async function reviewCard(
   };
   await repo.insertReviewLog(log);
 
-  await enqueueSync({
-    op: 'reviewCard',
-    payload: {
-      id: logId,
-      card_id: cardId,
-      rating: rating as number,
-      state: card.state,
-      due: card.due,
-      stability: card.stability,
-      difficulty: card.difficulty,
-      elapsed_days: card.elapsedDays,
-      scheduled_days: card.scheduledDays,
-      reviewed_at: now.getTime(),
-      op_id: opId,
-      device_id: getDeviceId(),
-      new_due: newCardState.due,
-      new_stability: newCardState.stability,
-      new_difficulty: newCardState.difficulty,
-      new_elapsed_days: newCardState.elapsedDays,
-      new_scheduled_days: newCardState.scheduledDays,
-      new_reps: newCardState.reps,
-      new_lapses: newCardState.lapses,
-      new_state: newCardState.state,
-    },
-  });
+  // Sync is deferred — only enqueued when the undo window closes (via commitReview).
+  const syncPayload: Record<string, unknown> = {
+    id: logId,
+    card_id: cardId,
+    rating: rating as number,
+    state: card.state,
+    due: card.due,
+    stability: card.stability,
+    difficulty: card.difficulty,
+    elapsed_days: card.elapsedDays,
+    scheduled_days: card.scheduledDays,
+    reviewed_at: now.getTime(),
+    op_id: opId,
+    device_id: getDeviceId(),
+    new_due: newCardState.due,
+    new_stability: newCardState.stability,
+    new_difficulty: newCardState.difficulty,
+    new_elapsed_days: newCardState.elapsedDays,
+    new_scheduled_days: newCardState.scheduledDays,
+    new_reps: newCardState.reps,
+    new_lapses: newCardState.lapses,
+    new_state: newCardState.state,
+  };
 
-  return { cardId, logId, oldCardState };
+  return { cardId, logId, oldCardState, syncPayload };
 }
 
-/** Undo the most recent review, restoring the card to its previous state. */
+/** Commit a deferred review to sync (called when the undo window closes). */
+export async function commitReview(undo: UndoInfo): Promise<void> {
+  await enqueueSync({ op: 'reviewCard', payload: undo.syncPayload });
+}
+
+/** Undo the most recent review — local only since sync hasn't been enqueued yet. */
 export async function undoReview(undo: UndoInfo): Promise<void> {
   await repo.updateSrsCard(undo.cardId, undo.oldCardState);
   await repo.deleteReviewLog(undo.logId);
-
-  await enqueueSync({
-    op: 'undoReview',
-    payload: {
-      card_id: undo.cardId,
-      log_id: undo.logId,
-      old_due: undo.oldCardState.due,
-      old_stability: undo.oldCardState.stability,
-      old_difficulty: undo.oldCardState.difficulty,
-      old_elapsed_days: undo.oldCardState.elapsedDays,
-      old_scheduled_days: undo.oldCardState.scheduledDays,
-      old_reps: undo.oldCardState.reps,
-      old_lapses: undo.oldCardState.lapses,
-      old_state: undo.oldCardState.state,
-      old_last_review: undo.oldCardState.lastReview,
-      device_id: getDeviceId(),
-      op_id: uuid(),
-    },
-  });
 }
 
 /** Get review queue for a deck, optionally filtered by review mode and/or tags */

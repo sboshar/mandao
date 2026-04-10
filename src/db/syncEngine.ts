@@ -127,9 +127,6 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
     case 'reviewCard':
       await pushReviewOps(ops);
       break;
-    case 'undoReview':
-      await pushUndoReviewOps(ops);
-      break;
     case 'ingestBundle':
       await pushSequential(ops, pushIngestBundle);
       break;
@@ -183,11 +180,6 @@ async function pushReviewOps(ops: SyncOp[]): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-async function pushUndoReviewOps(ops: SyncOp[]): Promise<void> {
-  const payload = ops.map((o) => o.payload);
-  const { error } = await supabase.rpc('apply_undo_review_ops', { ops: payload });
-  if (error) throw new Error(error.message);
-}
 
 async function pushIngestBundle(op: SyncOp): Promise<void> {
   const { error } = await supabase.rpc('apply_ingest_bundle', { bundle: op.payload });
