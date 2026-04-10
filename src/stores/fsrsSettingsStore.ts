@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Steps } from 'ts-fsrs';
 
 const STORAGE_KEY = 'mandao_fsrs_settings';
 
@@ -59,7 +60,7 @@ export function toFSRSParams(s: FSRSSettings) {
     maximum_interval: s.maximumInterval,
     enable_fuzz: s.enableFuzz,
     enable_short_term: s.enableShortTerm,
-    learning_steps: s.learningSteps,
-    relearning_steps: s.relearningSteps,
+    learning_steps: s.learningSteps as Steps,
+    relearning_steps: s.relearningSteps as Steps,
   };
 }
