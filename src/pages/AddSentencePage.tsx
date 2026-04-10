@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { ingestSentence, type TokenInput, type CharacterInput } from '../services/ingestion';
 import {
@@ -13,6 +13,7 @@ import { PinyinIMEInput } from '../components/PinyinIMEInput';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { TagInput } from '../components/TagInput';
 import { useTutorialStore } from '../stores/tutorialStore';
+import { useSyncStore } from '../stores/syncStore';
 import { TUTORIAL_SENTENCES } from '../data/tutorialSentences';
 
 interface TokenFormData {
@@ -188,6 +189,7 @@ export function AddSentencePage() {
   const handleSave = async () => {
     setSaving(true);
     setError('');
+    if (navigator.onLine) useSyncStore.getState().setStatus('syncing');
     try {
       const tokenInputs: TokenInput[] = tokens.map((t) => ({
         surfaceForm: t.surfaceForm,
@@ -595,24 +597,31 @@ export function AddSentencePage() {
             </TutorialBanner>
           )}
 
-          <div className="p-4 rounded-lg surface">
-            <div className="text-2xl mb-1">{chinese}</div>
-            <div className="mb-3" style={{ color: 'var(--text-secondary)' }}>{english}</div>
-            <div className="space-y-2">
-              {tokens.map((t, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-3 text-sm py-1"
-                  style={{ borderBottom: '1px solid var(--border-light)' }}
-                >
-                  <span className="text-lg w-12 sm:w-16 text-right">{t.surfaceForm}</span>
-                  <span className="w-20 sm:w-24" style={{ color: 'var(--text-secondary)' }}>
-                    {t.pinyinSandhi || numericStringToDiacritic(t.pinyinNumeric)}
-                  </span>
-                  <span className="flex-1">{t.english}</span>
-                  <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t.partOfSpeech}</span>
-                </div>
-              ))}
+          <div className="p-4 rounded-lg surface space-y-4">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--text-tertiary)' }}>Sentence</div>
+              <div className="text-2xl">{chinese}</div>
+              <div style={{ color: 'var(--text-secondary)' }}>{english}</div>
+            </div>
+
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--text-tertiary)' }}>Word Breakdown</div>
+              <div className="grid gap-2" style={{ gridTemplateColumns: 'auto auto 1fr auto' }}>
+                <div className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Word</div>
+                <div className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Pinyin</div>
+                <div className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Meaning</div>
+                <div className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Type</div>
+                {tokens.map((t, i) => (
+                  <Fragment key={i}>
+                    <span className="text-lg">{t.surfaceForm}</span>
+                    <span className="text-sm self-center" style={{ color: 'var(--text-secondary)' }}>
+                      {t.pinyinSandhi || numericStringToDiacritic(t.pinyinNumeric)}
+                    </span>
+                    <span className="text-sm self-center">{t.english}</span>
+                    <span className="text-xs self-center" style={{ color: 'var(--text-tertiary)' }}>{t.partOfSpeech}</span>
+                  </Fragment>
+                ))}
+              </div>
             </div>
           </div>
 
