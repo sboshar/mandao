@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   useAISettingsStore,
-  DEFAULT_MODELS,
   PROVIDER_LABELS,
   MODEL_OPTIONS,
   type AIProvider,
