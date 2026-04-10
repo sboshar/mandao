@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   useAISettingsStore,
@@ -10,17 +10,21 @@ import { useAuthStore } from '../stores/authStore';
 import { useThemeStore } from '../stores/themeStore';
 import { useFSRSSettingsStore } from '../stores/fsrsSettingsStore';
 import { generateCompletion } from '../services/aiProvider';
+import { isAIConfigured } from '../services/aiProvider';
+import { downloadAnkiExport } from '../services/ankiExport';
+import { importFromAnki, type ImportProgress } from '../services/ankiImport';
 import * as repo from '../db/repo';
 import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 
-type Section = 'account' | 'srs' | 'display' | 'ai' | 'data';
+type Section = 'account' | 'srs' | 'display' | 'ai' | 'anki' | 'data';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'account', label: 'Account' },
   { id: 'srs', label: 'SRS' },
   { id: 'display', label: 'Display' },
   { id: 'ai', label: 'AI' },
+  { id: 'anki', label: 'Anki' },
   { id: 'data', label: 'Data' },
 ];
 
@@ -74,6 +78,7 @@ export function SettingsPage() {
       {section === 'srs' && <SRSSection />}
       {section === 'display' && <DisplaySection />}
       {section === 'ai' && <AISection />}
+      {section === 'anki' && <AnkiSection />}
       {section === 'data' && <DataSection />}
     </div>
   );
@@ -596,6 +601,222 @@ function AISection() {
 // ────────────────────────────────────────────────────────────
 // Data Management
 // ────────────────────────────────────────────────────────────
+
+function AnkiSection() {
+  const [ankiExporting, setAnkiExporting] = useState(false);
+  const [ankiExportResult, setAnkiExportResult] = useState<string | null>(null);
+  const [ankiImporting, setAnkiImporting] = useState(false);
+  const [ankiProgress, setAnkiProgress] = useState<ImportProgress | null>(null);
+  const [ankiError, setAnkiError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const aiEnabled = isAIConfigured();
+
+  const handleAnkiExport = async () => {
+    setAnkiExporting(true);
+    setAnkiExportResult(null);
+    setAnkiError(null);
+    try {
+      const count = await downloadAnkiExport();
+      setAnkiExportResult(`Exported ${count} sentence${count !== 1 ? 's' : ''} to Anki format.`);
+    } catch (e: any) {
+      setAnkiError(e.message || 'Export failed');
+    }
+    setAnkiExporting(false);
+  };
+
+  const handleAnkiImport = async (file: File) => {
+    setAnkiImporting(true);
+    setAnkiError(null);
+    setAnkiProgress(null);
+    abortRef.current = new AbortController();
+
+    try {
+      const result = await importFromAnki(
+        file,
+        (p) => setAnkiProgress({ ...p }),
+        abortRef.current.signal,
+      );
+      setAnkiProgress(result);
+    } catch (e: any) {
+      setAnkiError(e.message || 'Import failed');
+    }
+    setAnkiImporting(false);
+    abortRef.current = null;
+  };
+
+  const handleAbort = () => {
+    abortRef.current?.abort();
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Export to Anki */}
+      <SectionCard
+        title="Export to Anki"
+        description="Download all sentences as a tab-separated text file that Anki can import."
+      >
+        <div>
+          <button
+            onClick={handleAnkiExport}
+            disabled={ankiExporting}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+          >
+            {ankiExporting ? 'Exporting...' : 'Export to Anki'}
+          </button>
+          {ankiExportResult && (
+            <p className="mt-2 text-sm" style={{ color: 'var(--success)' }}>{ankiExportResult}</p>
+          )}
+          {ankiError && !ankiImporting && (
+            <p className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>{ankiError}</p>
+          )}
+        </div>
+        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          Format: Front (Chinese) | Back (English + Pinyin) | Tags | FSRS scheduling data.
+          In Anki, use File &gt; Import to load the .txt file.
+        </p>
+      </SectionCard>
+
+      {/* Import from Anki */}
+      <SectionCard
+        title="Import from Anki"
+        description="Upload a text or CSV file exported from Anki. The AI will detect field mappings and process each sentence."
+      >
+        {!aiEnabled && (
+          <div className="p-3 rounded-lg text-sm" style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}>
+            AI must be configured to import from Anki. The AI is used to detect column mappings and
+            analyze each sentence for tokenization and pinyin.
+            Go to the <strong>AI</strong> tab to set up a provider.
+          </div>
+        )}
+
+        {aiEnabled && !ankiImporting && !ankiProgress && (
+          <div>
+            <label
+              className="inline-block px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+            >
+              Choose Anki File
+              <input
+                type="file"
+                accept=".txt,.csv,.tsv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleAnkiImport(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              Accepts .txt, .csv, or .tsv files. In Anki, use Export to create a text file.
+            </p>
+          </div>
+        )}
+
+        {/* Progress indicator */}
+        {ankiImporting && ankiProgress && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">
+                Processing {ankiProgress.processed} / {ankiProgress.total}
+              </span>
+              <button
+                onClick={handleAbort}
+                className="px-3 py-1 rounded text-xs font-medium transition-colors"
+                style={{ background: 'var(--bg-inset)', color: 'var(--danger)' }}
+              >
+                Stop
+              </button>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-inset)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{
+                  width: `${ankiProgress.total > 0 ? (ankiProgress.processed / ankiProgress.total) * 100 : 0}%`,
+                  background: 'var(--accent)',
+                }}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div>
+                <span className="font-medium" style={{ color: 'var(--success)' }}>{ankiProgress.imported}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}> imported</span>
+              </div>
+              <div>
+                <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{ankiProgress.skipped}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}> skipped</span>
+              </div>
+              <div>
+                <span className="font-medium" style={{ color: 'var(--danger)' }}>{ankiProgress.failed}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}> failed</span>
+              </div>
+            </div>
+
+            {ankiProgress.currentSentence && (
+              <p className="text-xs truncate" style={{ color: 'var(--text-tertiary)' }}>
+                {ankiProgress.currentSentence}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Summary after completion */}
+        {!ankiImporting && ankiProgress && (
+          <div className="space-y-3">
+            <div className="p-3 rounded-lg" style={{ background: 'var(--bg-inset)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                Import complete
+              </p>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-center text-sm">
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'var(--success)' }}>{ankiProgress.imported}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>imported</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'var(--text-secondary)' }}>{ankiProgress.skipped}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>skipped</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'var(--danger)' }}>{ankiProgress.failed}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>failed</div>
+                </div>
+              </div>
+
+              {ankiProgress.errors.length > 0 && (
+                <details className="mt-3">
+                  <summary className="text-xs cursor-pointer" style={{ color: 'var(--text-tertiary)' }}>
+                    Show errors ({ankiProgress.errors.length})
+                  </summary>
+                  <div className="mt-1 space-y-1 text-xs" style={{ color: 'var(--danger)' }}>
+                    {ankiProgress.errors.map((err, i) => (
+                      <p key={i}>{err}</p>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+
+            <button
+              onClick={() => { setAnkiProgress(null); setAnkiError(null); }}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+            >
+              Import Another File
+            </button>
+          </div>
+        )}
+
+        {ankiError && ankiImporting && (
+          <p className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>{ankiError}</p>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
 
 function DataSection() {
   const { signOut } = useAuthStore();
