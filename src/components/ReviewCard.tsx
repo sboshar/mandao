@@ -8,17 +8,18 @@ import { AudioButton } from './AudioButton';
 import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
-import { reviewCard, type Grade } from '../services/srs';
+import { reviewCard, commitReview, undoReview, type Grade } from '../services/srs';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
 export function ReviewCard() {
-  const { currentCard, isFlipped, flip, next, remaining } = useReviewStore();
+  const { currentCard, isFlipped, flip, next, prev, remaining, undoInfo, clearUndo } = useReviewStore();
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
   const [editingTags, setEditingTags] = useState(false);
   const [pendingRating, setPendingRating] = useState<number | null>(null);
   const [rateError, setRateError] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState(false);
 
   const card = currentCard();
 
@@ -40,18 +41,50 @@ export function ReviewCard() {
     return () => { cancelled = true; };
   }, [card?.id]);
 
+  const handleUndo = async () => {
+    if (!undoInfo || undoing || pendingRating !== null) return;
+    setUndoing(true);
+    try {
+      await undoReview(undoInfo);
+      prev();
+    } catch {
+      setRateError('Could not undo. Check your connection and try again.');
+    } finally {
+      setUndoing(false);
+    }
+  };
+
   if (!card || !sentence) {
     return (
-      <div className="flex items-center justify-center h-64" style={{ color: 'var(--text-tertiary)' }}>
+      <div className="flex flex-col items-center justify-center h-64 gap-3" style={{ color: 'var(--text-tertiary)' }}>
         {remaining() === 0
           ? 'No cards to review. Add some sentences first!'
           : 'Loading...'}
+        {remaining() === 0 && undoInfo && (
+          <button
+            onClick={handleUndo}
+            disabled={undoing}
+            className="px-5 py-2.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+            style={{
+              background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+              color: 'var(--accent)',
+            }}
+          >
+            {undoing ? 'Undoing...' : 'Undo last rating'}
+          </button>
+        )}
       </div>
     );
   }
 
   const isEnToZh = card.reviewMode === 'en-to-zh';
   const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
+
+  const handleFlip = () => {
+    if (undoInfo) commitReview(undoInfo).catch(console.error);
+    clearUndo();
+    flip();
+  };
 
   const handleTagsChange = async (newTags: string[]) => {
     await updateSentenceTags(sentence!.id, newTags);
@@ -62,8 +95,11 @@ export function ReviewCard() {
     setRateError(null);
     setPendingRating(rating);
     try {
-      await reviewCard(card.id, rating);
-      next();
+      const [, undo] = await Promise.all([
+        undoInfo ? commitReview(undoInfo) : undefined,
+        reviewCard(card.id, rating),
+      ]);
+      next(undo);
     } catch {
       setRateError('Could not save this review. Check your connection and try again.');
     } finally {
@@ -102,13 +138,25 @@ export function ReviewCard() {
 
         {/* Flip / Answer */}
         {!isFlipped ? (
-          <button
-            onClick={flip}
-            className="mt-6 w-full py-3 rounded-lg font-medium transition-all active:scale-[0.98] active:brightness-90"
-            style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
-          >
-            Show Answer
-          </button>
+          <div className="mt-6 space-y-2">
+            <button
+              onClick={handleFlip}
+              className="w-full py-3 rounded-lg font-medium transition-all active:scale-[0.98] active:brightness-90"
+              style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+            >
+              Show Answer
+            </button>
+            {undoInfo && (
+              <button
+                onClick={handleUndo}
+                disabled={undoing || pendingRating !== null}
+                className="w-full py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                {undoing ? 'Undoing...' : 'Undo last card'}
+              </button>
+            )}
+          </div>
         ) : (
           <>
             <div className="mt-6 pt-6 space-y-4" style={{ borderTop: '1px solid var(--border)' }}>
@@ -211,7 +259,7 @@ export function ReviewCard() {
                 { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
               ]).map((btn) => {
                 const isSelected = pendingRating === btn.rating;
-                const isDisabled = pendingRating !== null;
+                const isDisabled = pendingRating !== null || undoing;
                 return (
                   <button
                     key={btn.rating}

@@ -321,6 +321,10 @@ export async function insertReviewLog(log: ReviewLog): Promise<void> {
   await localDb.reviewLogs.put(log);
 }
 
+export async function deleteReviewLog(id: string): Promise<void> {
+  await localDb.reviewLogs.delete(id);
+}
+
 export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void> {
   if (cardIds.length === 0) return;
   await localDb.reviewLogs.where('cardId').anyOf(cardIds).delete();
