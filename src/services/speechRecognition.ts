@@ -7,6 +7,8 @@
 const SpeechRecognitionClass =
   (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
+export const CANCELLED_MESSAGE = 'Cancelled';
+
 export function isSpeechRecognitionSupported(): boolean {
   return !!SpeechRecognitionClass;
 }
@@ -37,7 +39,7 @@ export function recognizeChinese(): Promise<string> {
 
   return new Promise((resolve, reject) => {
     cancelCallback = () => {
-      reject(new Error('Cancelled'));
+      reject(new Error(CANCELLED_MESSAGE));
     };
     if (!SpeechRecognitionClass) {
       reject(new Error('Speech recognition not supported'));
@@ -67,7 +69,7 @@ export function recognizeChinese(): Promise<string> {
       activeRecognition = null;
       cancelCallback = null;
       if (event.error === 'aborted') {
-        reject(new Error('Cancelled'));
+        reject(new Error(CANCELLED_MESSAGE));
         return;
       }
       reject(new Error(event.error || 'Recognition failed'));
@@ -86,7 +88,7 @@ export function recognizeChinese(): Promise<string> {
       settled = true;
       activeRecognition = null;
       cancelCallback = null;
-      reject(new Error('Cancelled'));
+      reject(new Error(CANCELLED_MESSAGE));
     };
 
     activeRecognition = recognition;

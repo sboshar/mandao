@@ -14,6 +14,12 @@ import { TagInput } from '../components/TagInput';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { useSyncStore } from '../stores/syncStore';
 import { TUTORIAL_SENTENCES } from '../data/tutorialSentences';
+import {
+  recognizeChinese,
+  stopRecognition,
+  isSpeechRecognitionSupported,
+  CANCELLED_MESSAGE,
+} from '../services/speechRecognition';
 
 interface TokenFormData {
   surfaceForm: string;
@@ -43,6 +49,34 @@ export function AddSentencePage() {
   const [tags, setTags] = useState<string[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const aiEnabled = isAIConfigured();
+  const [listening, setListening] = useState(false);
+  const speechSupported = isSpeechRecognitionSupported();
+
+  const handleVoiceInput = async () => {
+    if (listening) {
+      stopRecognition();
+      setListening(false);
+      return;
+    }
+    setListening(true);
+    setError('');
+    try {
+      const transcript = await recognizeChinese();
+      if (transcript) {
+        setChinese((prev) => prev + transcript);
+      }
+    } catch (e: any) {
+      if (e.message !== CANCELLED_MESSAGE) {
+        setError(e.message || 'Voice recognition failed.');
+      }
+    } finally {
+      setListening(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => { stopRecognition(); };
+  }, []);
 
   // Tutorial mode: pre-fill Chinese sentence
   useEffect(() => {
@@ -275,17 +309,43 @@ export function AddSentencePage() {
                 Chinese Sentence
               </label>
               {!(isTutorial && tutorialStep === 1) && (
-                <button
-                  type="button"
-                  onClick={() => setUsePinyinIME(!usePinyinIME)}
-                  className={`text-xs px-2 py-1 rounded-full border transition-colors ${
-                    usePinyinIME
-                      ? 'bg-blue-100 border-blue-300 text-blue-700'
-                      : 'bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {usePinyinIME ? '拼 Pinyin ON' : '拼 Pinyin OFF'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {speechSupported && (
+                    <button
+                      type="button"
+                      onClick={handleVoiceInput}
+                      className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                        listening
+                          ? 'bg-red-100 border-red-300 text-red-700'
+                          : 'bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200'
+                      }`}
+                      title={listening ? 'Stop listening' : 'Speak a sentence'}
+                    >
+                      {listening ? (
+                        <span className="flex items-center gap-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                          Stop
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                          Voice
+                        </span>
+                      )}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setUsePinyinIME(!usePinyinIME)}
+                    className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                      usePinyinIME
+                        ? 'bg-blue-100 border-blue-300 text-blue-700'
+                        : 'bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {usePinyinIME ? '拼 Pinyin ON' : '拼 Pinyin OFF'}
+                  </button>
+                </div>
               )}
             </div>
             {usePinyinIME && !(isTutorial && tutorialStep === 1) ? (
