@@ -2,14 +2,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   useAISettingsStore,
-  DEFAULT_MODELS,
   PROVIDER_LABELS,
-  providerNeedsKey,
+  MODEL_OPTIONS,
   type AIProvider,
 } from '../stores/aiSettingsStore';
 import { generateCompletion } from '../services/aiProvider';
 
-const PROVIDERS: AIProvider[] = ['mandao', 'openai', 'anthropic', 'gemini'];
+const PROVIDERS: AIProvider[] = ['gemini', 'openai', 'anthropic'];
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -19,8 +18,6 @@ export function SettingsPage() {
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  const needsKey = providerNeedsKey(settings.provider);
 
   const handleProviderChange = (provider: AIProvider) => {
     update({ provider, model: '', endpointUrl: '', apiKey: '' });
@@ -85,12 +82,12 @@ export function SettingsPage() {
             {/* Provider */}
             <div>
               <label className="block text-sm font-medium mb-2">Provider</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex gap-2">
                 {PROVIDERS.map((p) => (
                   <button
                     key={p}
                     onClick={() => handleProviderChange(p)}
-                    className="py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
                     style={{
                       background: settings.provider === p ? 'var(--accent)' : 'var(--bg-inset)',
                       color: settings.provider === p ? '#fff' : 'var(--text-secondary)',
@@ -102,98 +99,111 @@ export function SettingsPage() {
               </div>
             </div>
 
-            {/* ManDao built-in info */}
-            {!needsKey && (
-              <div className="p-3 rounded-lg text-sm space-y-1" style={{ background: 'var(--bg-inset)' }}>
-                <p style={{ color: 'var(--text-primary)' }}>
-                  No setup needed — works out of the box.
+            {/* Gemini setup guide */}
+            {settings.provider === 'gemini' && !settings.apiKey && (
+              <div className="p-3 rounded-lg text-sm space-y-2" style={{ background: 'var(--bg-inset)' }}>
+                <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                  Recommended: Gemini is completely free
                 </p>
+                <ol className="list-decimal list-inside space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                  <li>
+                    Go to{' '}
+                    <a
+                      href="https://aistudio.google.com/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline font-medium"
+                      style={{ color: 'var(--accent)' }}
+                    >
+                      Google AI Studio
+                    </a>
+                  </li>
+                  <li>Click "Create API Key"</li>
+                  <li>Copy the key and paste it below</li>
+                </ol>
                 <p style={{ color: 'var(--text-tertiary)' }}>
-                  Uses GPT-4o-mini via ManDao's server. Limited to 20 requests/day.
-                  For unlimited use, select a provider above and use your own API key.
+                  No credit card required. Free tier includes up to 500 requests/day.
                 </p>
               </div>
             )}
 
-            {/* API Key (BYOK providers only) */}
-            {needsKey && (
-              <div>
-                <label className="block text-sm font-medium mb-1">API Key</label>
-                <div className="flex gap-2">
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    value={settings.apiKey}
-                    onChange={(e) => { update({ apiKey: e.target.value }); setTestResult(null); }}
-                    placeholder={`Paste your ${PROVIDER_LABELS[settings.provider]} API key`}
-                    className="flex-1 px-3 py-2 rounded-lg text-sm"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                  />
-                  <button
-                    onClick={() => setShowKey(!showKey)}
-                    className="px-3 py-2 rounded-lg text-sm transition-colors"
-                    style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-                  >
-                    {showKey ? 'Hide' : 'Show'}
-                  </button>
-                </div>
-                <p className="mt-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  Your key is stored in browser local storage and sent only to the {PROVIDER_LABELS[settings.provider]} API. It never touches our servers.
-                </p>
-                {settings.provider === 'gemini' && (
-                  <p className="mt-1 text-xs p-2 rounded" style={{ background: 'var(--warning-subtle, var(--bg-inset))', color: 'var(--warning, var(--text-secondary))' }}>
-                    Gemini's API sends your key as a URL parameter. This means it may appear in browser history and network logs. Use a restricted key with only the Generative Language API enabled.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Model (BYOK only — ManDao uses a fixed model) */}
-            {needsKey && (
-              <div>
-                <label className="block text-sm font-medium mb-1">Model</label>
+            {/* API Key */}
+            <div>
+              <label className="block text-sm font-medium mb-1">API Key</label>
+              <div className="flex gap-2">
                 <input
-                  type="text"
-                  value={settings.model}
-                  onChange={(e) => update({ model: e.target.value })}
-                  placeholder={DEFAULT_MODELS[settings.provider]}
-                  className="w-full px-3 py-2 rounded-lg text-sm"
+                  type={showKey ? 'text' : 'password'}
+                  value={settings.apiKey}
+                  onChange={(e) => { update({ apiKey: e.target.value }); setTestResult(null); }}
+                  placeholder={`Paste your ${PROVIDER_LABELS[settings.provider]} API key`}
+                  className="flex-1 px-3 py-2 rounded-lg text-sm"
                   style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                 />
-                <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  Leave blank for default: {DEFAULT_MODELS[settings.provider]}
-                </p>
+                <button
+                  onClick={() => setShowKey(!showKey)}
+                  className="px-3 py-2 rounded-lg text-sm transition-colors"
+                  style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+                >
+                  {showKey ? 'Hide' : 'Show'}
+                </button>
               </div>
-            )}
+              <p className="mt-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                Your key is stored in browser local storage and sent only to the {PROVIDER_LABELS[settings.provider]} API. It never touches our servers.
+              </p>
+              {settings.provider === 'gemini' && settings.apiKey && (
+                <p className="mt-1 text-xs p-2 rounded" style={{ background: 'var(--warning-subtle, var(--bg-inset))', color: 'var(--warning, var(--text-secondary))' }}>
+                  Gemini's API sends your key as a URL parameter. This means it may appear in browser history and network logs. Use a restricted key with only the Generative Language API enabled.
+                </p>
+              )}
+            </div>
 
-            {/* Custom Endpoint (BYOK only) */}
-            {needsKey && (
-              <details className="text-sm">
-                <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-secondary)' }}>
-                  Advanced: Custom endpoint
-                </summary>
-                <div className="mt-2 space-y-2">
-                  <input
-                    type="text"
-                    value={settings.endpointUrl}
-                    onChange={(e) => update({ endpointUrl: e.target.value })}
-                    placeholder="Leave blank for default"
-                    className="w-full px-3 py-2 rounded-lg text-sm"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                  />
-                  {settings.endpointUrl && (
-                    <p className="text-xs p-2 rounded" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-                      Your API key and prompts will be sent to this custom URL. Only use endpoints you trust.
-                    </p>
-                  )}
-                </div>
-              </details>
-            )}
+            {/* Model */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Model</label>
+              {(() => {
+                const options = MODEL_OPTIONS[settings.provider];
+                const isCustom = settings.model && !options.some((o) => o.id === settings.model);
+                const selectValue = isCustom ? '__custom__' : (settings.model || options[0].id);
+                return (
+                  <div className="space-y-2">
+                    <select
+                      value={selectValue}
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          update({ model: '__custom__' });
+                        } else {
+                          update({ model: e.target.value });
+                        }
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-sm"
+                      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                    >
+                      {options.map((o) => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                      <option value="__custom__">Custom model...</option>
+                    </select>
+                    {isCustom && (
+                      <input
+                        type="text"
+                        value={settings.model === '__custom__' ? '' : settings.model}
+                        onChange={(e) => update({ model: e.target.value || '__custom__' })}
+                        placeholder="Enter model ID"
+                        autoFocus
+                        className="w-full px-3 py-2 rounded-lg text-sm"
+                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                      />
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
 
             {/* Test Connection */}
             <div className="flex items-center gap-3">
               <button
                 onClick={handleTest}
-                disabled={testing || (needsKey && !settings.apiKey)}
+                disabled={testing || !settings.apiKey}
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                 style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
               >
@@ -211,18 +221,9 @@ export function SettingsPage() {
         {/* Security info */}
         <div className="p-3 rounded-lg text-xs space-y-1" style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}>
           <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>Security notes</p>
-          {needsKey ? (
-            <>
-              <p>Your API key is stored in this browser only. It does not sync across devices — you'll need to re-enter it on each browser you use.</p>
-              <p>Your key is sent only to your chosen provider's API endpoint and never touches our servers.</p>
-              <p>For best security: use API keys with spending limits, and rotate them periodically.</p>
-            </>
-          ) : (
-            <>
-              <p>The built-in provider routes requests through ManDao's server. Your sentences are sent to our server and forwarded to the AI model.</p>
-              <p>No API key is needed — usage is rate-limited to 20 requests/day.</p>
-            </>
-          )}
+          <p>Your API key is stored in this browser only. It does not sync across devices — you'll need to re-enter it on each browser you use.</p>
+          <p>Your key is sent only to your chosen provider's API endpoint and never touches our servers.</p>
+          <p>For best security: use API keys with spending limits, and rotate them periodically.</p>
         </div>
       </div>
     </div>

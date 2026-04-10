@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AIProvider = 'mandao' | 'openai' | 'anthropic' | 'gemini';
+export type AIProvider = 'openai' | 'anthropic' | 'gemini';
 
 export interface AISettings {
   enabled: boolean;
@@ -20,7 +20,7 @@ const STORAGE_KEY = 'mandao_ai_settings';
 
 const DEFAULTS: AISettings = {
   enabled: false,
-  provider: 'mandao',
+  provider: 'gemini',
   apiKey: '',
   model: '',
   endpointUrl: '',
@@ -30,7 +30,10 @@ function load(): AISettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULTS, ...JSON.parse(raw) };
+    // Migrate: if user had 'mandao' selected, switch to gemini
+    if (parsed.provider === 'mandao') parsed.provider = 'gemini';
+    return parsed;
   } catch {
     return DEFAULTS;
   }
@@ -41,23 +44,34 @@ function persist(settings: AISettings) {
 }
 
 export const DEFAULT_MODELS: Record<AIProvider, string> = {
-  mandao: 'gpt-4o-mini',
   openai: 'gpt-4o-mini',
   anthropic: 'claude-haiku-4-5-20251001',
-  gemini: 'gemini-2.0-flash',
+  gemini: 'gemini-3-flash',
 };
 
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  mandao: 'ManDao (built-in)',
   openai: 'OpenAI',
   anthropic: 'Anthropic',
-  gemini: 'Google Gemini',
+  gemini: 'Gemini (free)',
 };
 
-/** Providers that require the user to supply their own API key. */
-export function providerNeedsKey(provider: AIProvider): boolean {
-  return provider !== 'mandao';
-}
+/** Popular models per provider. First entry is the default. */
+export const MODEL_OPTIONS: Record<AIProvider, { id: string; label: string }[]> = {
+  gemini: [
+    { id: 'gemini-3-flash', label: 'Gemini 3 Flash — 5/min, 20/day (best for a few sentences)' },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite — 15/min, 500/day (best for bulk)' },
+  ],
+  openai: [
+    { id: 'gpt-4o-mini', label: 'GPT-4o Mini (cheap, fast)' },
+    { id: 'gpt-4o', label: 'GPT-4o (smartest)' },
+    { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+    { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (cheapest)' },
+  ],
+  anthropic: [
+    { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (cheap, fast)' },
+    { id: 'claude-sonnet-4-6-20260320', label: 'Claude Sonnet 4.6 (smartest)' },
+  ],
+};
 
 export const useAISettingsStore = create<AISettingsState>(() => {
   const initial = load();
