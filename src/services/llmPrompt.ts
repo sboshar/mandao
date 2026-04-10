@@ -48,10 +48,10 @@ export function generateAnalysisPrompt(
       .map((m) => `  ${m.headword} [${m.pinyin}] = "${m.english}"`)
       .join('\n');
     existingSection = `
-These meanings already exist in my app for characters in this sentence:
+Reference Meanings (use these EXACT strings for character-level English when they fit):
 ${lines}
 
-If a character/word has the same meaning as one listed above, pick it from the list (use the exact English string). Otherwise, assign a new meaning.
+If a character has multiple reference meanings listed, pick the one that fits this context. Use the exact English string from the list. Only assign a new meaning if none of the reference meanings apply.
 `;
   }
 
@@ -89,7 +89,7 @@ Rules:
 - Segment into linguistically correct words. Do NOT split compound words into individual characters (e.g. 作业 = one token, 正在 = one token). Do NOT merge separate words.
 - Exclude punctuation tokens (。，！？ etc.) — only include content words.
 - For pinyinNumeric: use tone numbers 1-5 (5 = neutral), separate syllables within a word by spaces (e.g. "cha4 bu4 duo1"). When a character has multiple accepted pronunciations, prefer the most common colloquial spoken form
-- For pinyinSandhi: apply all tone sandhi rules (3rd tone sandhi, 不 sandhi, 一 sandhi) and write with diacritics
+- For pinyinSandhi: apply all tone sandhi rules (3rd tone sandhi, 不 sandhi, 一 sandhi) and write with diacritics. Each token's pinyinSandhi must contain ONLY the syllables for that token's characters — never include syllables from neighboring tokens. For example, 作业 should be "zuòyè" (2 syllables for 2 characters), NOT "zuò zuòyè".
 - For english: give the CONTEXTUAL meaning only, not all possible meanings
 - For particles like 了 or 的, give their grammatical function as the english (e.g. "completion particle", "possessive particle")
 - For the "characters" array: include it for ALL tokens, even single-character ones
@@ -97,6 +97,7 @@ Rules:
   - For multi-character tokens: give each character's OWN independent meaning — the semantic building block it contributes to the compound, NOT the compound's meaning repeated or paraphrased onto the character
   - Test: the character meaning should make sense if the character appeared in a DIFFERENT compound word. If the meaning only makes sense within this specific word, you are giving the word's meaning, not the character's meaning.
   - Think of it as etymology: what does each character bring to the table? The compound's meaning emerges from combining the characters' individual meanings.
+- Validation: before returning, verify that each token's pinyinSandhi has exactly as many syllables as characters in its surfaceForm. If not, you have accidentally merged pinyin from a neighboring token — fix it.
 - Return ONLY the JSON, nothing else`;
 }
 
