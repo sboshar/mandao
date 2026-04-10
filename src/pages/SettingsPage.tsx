@@ -211,6 +211,7 @@ function SRSSection() {
   const fsrsReset = useFSRSSettingsStore((s) => s.reset);
   const [learningStepsStr, setLearningStepsStr] = useState(fsrs.learningSteps.join(', '));
   const [relearningStepsStr, setRelearningStepsStr] = useState(fsrs.relearningSteps.join(', '));
+  const [stepsError, setStepsError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -227,8 +228,13 @@ function SRSSection() {
     setDeck({ ...deck, [field]: value });
   }, [deck]);
 
-  const parseSteps = (str: string): string[] => {
-    return str.split(',').map((s) => s.trim()).filter(Boolean);
+  const STEP_PATTERN = /^\d+(m|h|d)$/;
+
+  const parseSteps = (str: string): string[] | null => {
+    const parts = str.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return null;
+    if (parts.every((p) => STEP_PATTERN.test(p))) return parts;
+    return null;
   };
 
   if (loading) {
@@ -289,7 +295,8 @@ function SRSSection() {
               onChange={(e) => setLearningStepsStr(e.target.value)}
               onBlur={() => {
                 const steps = parseSteps(learningStepsStr);
-                if (steps.length > 0) fsrsUpdate({ learningSteps: steps });
+                if (steps) { fsrsUpdate({ learningSteps: steps }); setStepsError(null); }
+                else { setStepsError('Invalid format. Use values like 1m, 10m, 1h, 1d.'); setLearningStepsStr(fsrs.learningSteps.join(', ')); }
               }}
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
@@ -308,7 +315,8 @@ function SRSSection() {
               onChange={(e) => setRelearningStepsStr(e.target.value)}
               onBlur={() => {
                 const steps = parseSteps(relearningStepsStr);
-                if (steps.length > 0) fsrsUpdate({ relearningSteps: steps });
+                if (steps) { fsrsUpdate({ relearningSteps: steps }); setStepsError(null); }
+                else { setStepsError('Invalid format. Use values like 1m, 10m, 1h, 1d.'); setRelearningStepsStr(fsrs.relearningSteps.join(', ')); }
               }}
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
@@ -317,6 +325,10 @@ function SRSSection() {
               Comma-separated intervals for lapsed cards. Default: 10m.
             </p>
           </div>
+
+          {stepsError && (
+            <p className="text-xs" style={{ color: 'var(--danger, #e53e3e)' }}>{stepsError}</p>
+          )}
 
           {/* Toggles */}
           <div className="space-y-3">

@@ -40,9 +40,17 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   },
 
   prev: () => {
-    const { currentIndex } = get();
+    const { currentIndex, queue, undoInfo } = get();
     if (currentIndex > 0) {
-      set({ currentIndex: currentIndex - 1, isFlipped: false, undoInfo: null });
+      const prevIndex = currentIndex - 1;
+      // Patch the in-memory card with reverted state so the UI isn't stale after undo
+      if (undoInfo && queue[prevIndex]?.id === undoInfo.cardId) {
+        const patched = [...queue];
+        patched[prevIndex] = { ...patched[prevIndex], ...undoInfo.oldCardState };
+        set({ queue: patched, currentIndex: prevIndex, isFlipped: false, undoInfo: null });
+      } else {
+        set({ currentIndex: prevIndex, isFlipped: false, undoInfo: null });
+      }
     }
   },
 

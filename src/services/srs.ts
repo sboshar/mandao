@@ -133,11 +133,6 @@ export async function reviewCard(
   return { cardId, logId, oldCardState, syncOpId: opId };
 }
 
-/** Commit a review — now a no-op since sync is enqueued immediately in reviewCard. */
-export async function commitReview(_undo: UndoInfo): Promise<void> {
-  // Sync op was already enqueued in reviewCard. Nothing to do.
-}
-
 /** Undo the most recent review — reverts local state and removes the pending sync op. */
 export async function undoReview(undo: UndoInfo): Promise<void> {
   await repo.updateSrsCard(undo.cardId, undo.oldCardState);
