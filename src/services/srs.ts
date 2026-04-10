@@ -13,9 +13,13 @@ import { enqueueSync } from '../db/repo';
 import type { SrsCard, ReviewLog, ReviewMode } from '../db/schema';
 import { v4 as uuid } from 'uuid';
 import { getDeviceId } from '../db/syncEngine';
+import { useFSRSSettingsStore, toFSRSParams } from '../stores/fsrsSettingsStore';
 
-const params = generatorParameters();
-const scheduler = fsrs(params);
+function getScheduler() {
+  const settings = useFSRSSettingsStore.getState();
+  const params = generatorParameters(toFSRSParams(settings));
+  return fsrs(params);
+}
 
 export { Rating };
 export type { Grade };
@@ -53,7 +57,7 @@ export async function reviewCard(
 
   const fsrsCard = toFSRSCard(card);
   const now = new Date();
-  const result = scheduler.repeat(fsrsCard, now);
+  const result = getScheduler().repeat(fsrsCard, now);
   const next = result[rating].card;
 
   const newCardState = {
@@ -127,11 +131,6 @@ export async function reviewCard(
   });
 
   return { cardId, logId, oldCardState, syncOpId: opId };
-}
-
-/** Commit a review — now a no-op since sync is enqueued immediately in reviewCard. */
-export async function commitReview(_undo: UndoInfo): Promise<void> {
-  // Sync op was already enqueued in reviewCard. Nothing to do.
 }
 
 /** Undo the most recent review — reverts local state and removes the pending sync op. */
