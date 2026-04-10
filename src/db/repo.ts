@@ -288,6 +288,10 @@ export async function insertReviewLog(log: ReviewLog): Promise<void> {
   // Review logs are enqueued via reviewCard op in srs.ts.
 }
 
+export async function deleteReviewLog(id: string): Promise<void> {
+  await local.deleteReviewLog(id);
+}
+
 export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void> {
   await local.deleteReviewLogsByCardIds(cardIds);
   // Cascaded via card/sentence delete.

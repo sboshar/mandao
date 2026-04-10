@@ -20,6 +20,12 @@ const scheduler = fsrs(params);
 export { Rating };
 export type { Grade };
 
+export interface UndoInfo {
+  cardId: string;
+  logId: string;
+  oldCardState: Partial<SrsCard>;
+}
+
 /** Convert our SrsCard to an FSRS Card for scheduling */
 function toFSRSCard(card: SrsCard): FSRSCard {
   return {
@@ -35,11 +41,11 @@ function toFSRSCard(card: SrsCard): FSRSCard {
   } as FSRSCard;
 }
 
-/** Review a card with a given rating. Updates the card and logs the review. */
+/** Review a card with a given rating. Updates the card and logs the review. Returns undo info. */
 export async function reviewCard(
   cardId: string,
   rating: Grade
-): Promise<void> {
+): Promise<UndoInfo> {
   const card = await repo.getSrsCard(cardId);
   if (!card) throw new Error(`Card not found: ${cardId}`);
 
@@ -58,6 +64,18 @@ export async function reviewCard(
     lapses: next.lapses,
     state: next.state,
     lastReview: now.getTime(),
+  };
+
+  const oldCardState: Partial<SrsCard> = {
+    due: card.due,
+    stability: card.stability,
+    difficulty: card.difficulty,
+    elapsedDays: card.elapsedDays,
+    scheduledDays: card.scheduledDays,
+    reps: card.reps,
+    lapses: card.lapses,
+    state: card.state,
+    lastReview: card.lastReview,
   };
 
   await repo.updateSrsCard(cardId, newCardState);
@@ -101,6 +119,33 @@ export async function reviewCard(
       new_reps: newCardState.reps,
       new_lapses: newCardState.lapses,
       new_state: newCardState.state,
+    },
+  });
+
+  return { cardId, logId, oldCardState };
+}
+
+/** Undo the most recent review, restoring the card to its previous state. */
+export async function undoReview(undo: UndoInfo): Promise<void> {
+  await repo.updateSrsCard(undo.cardId, undo.oldCardState);
+  await repo.deleteReviewLog(undo.logId);
+
+  await enqueueSync({
+    op: 'undoReview',
+    payload: {
+      card_id: undo.cardId,
+      log_id: undo.logId,
+      old_due: undo.oldCardState.due,
+      old_stability: undo.oldCardState.stability,
+      old_difficulty: undo.oldCardState.difficulty,
+      old_elapsed_days: undo.oldCardState.elapsedDays,
+      old_scheduled_days: undo.oldCardState.scheduledDays,
+      old_reps: undo.oldCardState.reps,
+      old_lapses: undo.oldCardState.lapses,
+      old_state: undo.oldCardState.state,
+      old_last_review: undo.oldCardState.lastReview,
+      device_id: getDeviceId(),
+      op_id: uuid(),
     },
   });
 }
