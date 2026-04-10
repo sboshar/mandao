@@ -40,6 +40,11 @@ async function getChineseVoice(): Promise<SpeechSynthesisVoice | null> {
   );
 }
 
+/** Stop any in-progress speech */
+export function stopSpeaking(): void {
+  speechSynthesis.cancel();
+}
+
 /** Speak Chinese text using Web Speech API */
 export async function speakChinese(text: string): Promise<void> {
   const voice = await getChineseVoice();
@@ -52,6 +57,7 @@ export async function speakChinese(text: string): Promise<void> {
     const zhNames = voices.filter(v => v.lang.startsWith('zh')).map(v => v.name).join(', ');
     alert(`Voice: ${voice?.name ?? 'none'}\nAll zh: ${zhNames}`);
   }
+
   return new Promise((resolve, reject) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';

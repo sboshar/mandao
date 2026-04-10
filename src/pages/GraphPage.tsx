@@ -35,21 +35,37 @@ interface GraphData {
 }
 
 // ============================================================
-// Color palette — warm, aesthetic
+// Theme-aware colors — read CSS variables at render time
 // ============================================================
 
-const COLORS = {
-  word: '#6366f1',       // indigo
-  character: '#f43f5e',  // rose
-  component: '#f97316',  // orange
-  sentence: '#10b981',   // emerald
-  pinyin: '#8b5cf6',     // violet
-  linkDefault: 'rgba(148, 163, 184, 0.15)',
-  linkHighlight: 'rgba(99, 102, 241, 0.6)',
-};
+function getThemeColors() {
+  const s = getComputedStyle(document.documentElement);
+  const get = (v: string) => s.getPropertyValue(v).trim();
+  return {
+    word: get('--accent') || '#8b7355',
+    character: get('--state-review') || '#f43f5e',
+    component: get('--warning') || '#f97316',
+    sentence: get('--success') || '#10b981',
+    pinyin: '#8b5cf6',
+    bgBase: get('--bg-base') || '#f5f1eb',
+    bgSurface: get('--bg-surface') || '#faf8f5',
+    bgInset: get('--bg-inset') || '#ece7df',
+    textPrimary: get('--text-primary') || '#2e2b26',
+    textSecondary: get('--text-secondary') || '#6b6560',
+    textTertiary: get('--text-tertiary') || '#a09a93',
+    border: get('--border') || 'rgba(0,0,0,0.08)',
+  };
+}
 
-function getNodeColor(type: GraphNode['type']): string {
-  return COLORS[type] || COLORS.character;
+function getNodeColor(type: GraphNode['type'], colors: ReturnType<typeof getThemeColors>): string {
+  switch (type) {
+    case 'word': return colors.word;
+    case 'character': return colors.character;
+    case 'component': return colors.component;
+    case 'sentence': return colors.sentence;
+    case 'pinyin': return colors.pinyin;
+    default: return colors.character;
+  }
 }
 
 // ============================================================
@@ -183,11 +199,19 @@ export function GraphPage() {
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [colors, setColors] = useState(getThemeColors);
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
 
   useEffect(() => {
     buildGraphData().then(setGraphData);
+  }, []);
+
+  // Re-read colors when theme changes
+  useEffect(() => {
+    const observer = new MutationObserver(() => setColors(getThemeColors()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -238,25 +262,26 @@ export function GraphPage() {
       const baseSize = n.type === 'sentence' ? 4 : n.type === 'pinyin' ? 5 : 6;
       const size = baseSize + Math.sqrt(n.weight) * 2;
       const fontSize = Math.max(10 / globalScale, 2);
+      const nodeColor = getNodeColor(n.type, colors);
 
       // Glow effect on hover
       if (isHovered) {
-        ctx.shadowColor = getNodeColor(n.type);
+        ctx.shadowColor = nodeColor;
         ctx.shadowBlur = 20;
       }
 
       // Node circle
       ctx.beginPath();
       ctx.arc(x, y, size, 0, 2 * Math.PI);
-      ctx.fillStyle = getNodeColor(n.type);
+      ctx.fillStyle = nodeColor;
       ctx.globalAlpha = isHovered ? 1 : 0.85;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
 
-      // White ring
+      // Ring
       if (n.type !== 'sentence') {
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.strokeStyle = colors.bgSurface;
         ctx.lineWidth = 1.5 / globalScale;
         ctx.stroke();
       }
@@ -270,7 +295,7 @@ export function GraphPage() {
 
         if (n.type === 'sentence' || n.type === 'pinyin') {
           // Label below node
-          ctx.fillStyle = 'rgba(100, 116, 139, 0.9)';
+          ctx.fillStyle = colors.textTertiary;
           ctx.fillText(label, x, y + size + fontSize * 0.8);
         } else {
           // Character/word label inside/on node
@@ -282,7 +307,7 @@ export function GraphPage() {
           // English below
           if (globalScale > 1.2 || isHovered) {
             ctx.font = `${fontSize * 0.85}px "SF Pro", system-ui, sans-serif`;
-            ctx.fillStyle = 'rgba(100, 116, 139, 0.8)';
+            ctx.fillStyle = colors.textTertiary;
             const eng =
               n.english.length > 15
                 ? n.english.slice(0, 14) + '…'
@@ -292,7 +317,7 @@ export function GraphPage() {
         }
       }
     },
-    [hoveredNode]
+    [hoveredNode, colors]
   );
 
   const paintLink = useCallback(
@@ -307,79 +332,69 @@ export function GraphPage() {
 
       const l = link as GraphLink;
       if (l.type === 'character-of') {
-        ctx.strokeStyle = 'rgba(244, 63, 94, 0.2)';
+        ctx.strokeStyle = colors.character + '33';
         ctx.lineWidth = 1.5 / globalScale;
       } else if (l.type === 'same-pinyin') {
-        ctx.strokeStyle = 'rgba(139, 92, 246, 0.15)';
+        ctx.strokeStyle = colors.pinyin + '26';
         ctx.lineWidth = 1 / globalScale;
         ctx.setLineDash([4 / globalScale, 4 / globalScale]);
       } else {
-        ctx.strokeStyle = COLORS.linkDefault;
+        ctx.strokeStyle = colors.textTertiary + '26';
         ctx.lineWidth = 0.8 / globalScale;
       }
 
       ctx.stroke();
       ctx.setLineDash([]);
     },
-    []
+    [colors]
   );
 
   return (
-    <div className="h-screen flex flex-col bg-slate-950">
+    <div className="h-screen flex flex-col" style={{ background: 'var(--bg-base)' }}>
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 bg-slate-900/80 backdrop-blur border-b border-slate-800">
-        <button
-          onClick={() => navigate('/')}
-          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300
-            text-sm transition-colors"
-        >
-          &larr; Back
-        </button>
-        <h1 className="text-lg font-medium text-slate-200 hidden sm:block">
-          MànDào Graph
-        </h1>
-        <div className="flex items-center gap-2 sm:gap-4 text-xs text-slate-500">
-          <span className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-full"
-              style={{ background: COLORS.word }}
-            />
-            Words
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-full"
-              style={{ background: COLORS.character }}
-            />
-            Characters
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-full"
-              style={{ background: COLORS.sentence }}
-            />
-            Sentences
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-full"
-              style={{ background: COLORS.pinyin }}
-            />
-            Pinyin
-          </span>
+      <div
+        className="px-3 sm:px-4 pt-9 pb-0.5 backdrop-blur"
+        style={{ background: 'var(--bg-surface)', borderBottom: `1px solid var(--border)` }}
+      >
+        <div className="flex items-center justify-between mb-0.5">
+          <button
+            onClick={() => navigate('/')}
+            className="px-3 py-1 rounded-lg text-sm transition-colors"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+          >
+            &larr; Back
+          </button>
+          <h1 className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
+            Graph
+          </h1>
+          <div className="w-16" />
+        </div>
+        <div className="flex items-center justify-center gap-3 sm:gap-4 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          {([
+            { label: 'Words', color: colors.word },
+            { label: 'Characters', color: colors.character },
+            { label: 'Sentences', color: colors.sentence },
+            { label: 'Pinyin', color: colors.pinyin },
+          ]).map((item) => (
+            <span key={item.label} className="flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ background: item.color }} />
+              {item.label}
+            </span>
+          ))}
         </div>
       </div>
 
       {/* Hover tooltip */}
       {hoveredNode && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40
-          bg-slate-800/95 backdrop-blur-sm text-white px-4 py-2.5 rounded-xl
-          shadow-2xl border border-slate-700 pointer-events-none">
+        <div
+          className="absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2.5 rounded-xl shadow-2xl pointer-events-none backdrop-blur-sm"
+          style={{ background: 'var(--bg-surface)', border: `1px solid var(--border)`, color: 'var(--text-primary)' }}
+        >
           <div className="flex items-center gap-3">
             <span className="text-2xl">{hoveredNode.label}</span>
             <div>
-              <div className="text-sm text-slate-300">{hoveredNode.pinyin}</div>
-              <div className="text-xs text-slate-400">{hoveredNode.english}</div>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{hoveredNode.pinyin}</div>
+              <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{hoveredNode.english}</div>
             </div>
           </div>
         </div>
@@ -388,7 +403,7 @@ export function GraphPage() {
       {/* Graph */}
       <div ref={containerRef} className="flex-1 relative">
         {graphData.nodes.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-slate-500">
+          <div className="flex items-center justify-center h-full" style={{ color: 'var(--text-tertiary)' }}>
             No data yet. Add some sentences first.
           </div>
         ) : (

@@ -69,7 +69,7 @@ export function ReviewPage() {
 
   if (!started) {
     return (
-      <div className="p-4 sm:p-6 max-w-md mx-auto">
+      <div className="px-4 pt-12 pb-4 sm:p-6 max-w-md mx-auto">
         <div className="flex items-center justify-between mb-8">
           <button
             onClick={() => navigate('/')}
@@ -165,14 +165,12 @@ export function ReviewPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="px-4 pt-12 pb-4 sm:p-6">
       <div className="flex items-center justify-between mb-6 max-w-2xl mx-auto">
         <button
           onClick={() => {
             reset();
-            setStarted(false);
-            setLoading(false);
-            setLoadingMode(null);
+            navigate('/');
           }}
           className="px-3 py-1 rounded text-sm transition-colors"
           style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}

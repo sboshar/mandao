@@ -92,26 +92,26 @@ export function BrowsePage() {
 
   return (
     <div className="max-w-2xl mx-auto p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-2 mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold">Browse Sentences</h1>
-        <div className="flex gap-2">
-          {sentences.length > 0 && (
-            <button
-              onClick={() => setShowDeleteAll(true)}
-              className="px-3 py-1 rounded text-sm transition-colors"
-              style={{ background: 'var(--bg-inset)', color: 'var(--danger)' }}
-            >
-              Delete All
-            </button>
-          )}
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={() => navigate('/')}
+          className="px-3 py-1 rounded text-sm transition-colors"
+          style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+        >
+          &larr; Back
+        </button>
+        <h1 className="text-xl font-bold">Browse</h1>
+        {sentences.length > 0 ? (
           <button
-            onClick={() => navigate('/')}
+            onClick={() => setShowDeleteAll(true)}
             className="px-3 py-1 rounded text-sm transition-colors"
-            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+            style={{ background: 'var(--bg-inset)', color: 'var(--danger)' }}
           >
-            &larr; Back
+            Delete All
           </button>
-        </div>
+        ) : (
+          <div className="w-20" />
+        )}
       </div>
 
       <TutorialBanner visibleAt={3}>
