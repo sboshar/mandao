@@ -123,7 +123,7 @@ export function SettingsPage() {
                   <li>Copy the key and paste it below</li>
                 </ol>
                 <p style={{ color: 'var(--text-tertiary)' }}>
-                  No credit card required. Free tier includes 15 requests/minute — more than enough for ManDao.
+                  No credit card required. Free tier includes up to 500 requests/day.
                 </p>
               </div>
             )}
