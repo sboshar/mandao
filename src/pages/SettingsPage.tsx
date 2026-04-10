@@ -122,6 +122,11 @@ export function SettingsPage() {
               <p className="mt-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
                 Your key is stored in browser local storage and sent only to the {PROVIDER_LABELS[settings.provider]} API. It never touches our servers.
               </p>
+              {settings.provider === 'gemini' && (
+                <p className="mt-1 text-xs p-2 rounded" style={{ background: 'var(--warning-subtle, var(--bg-inset))', color: 'var(--warning, var(--text-secondary))' }}>
+                  Gemini's API sends your key as a URL parameter. This means it may appear in browser history and network logs. Use a restricted key with only the Generative Language API enabled.
+                </p>
+              )}
             </div>
 
             {/* Model */}

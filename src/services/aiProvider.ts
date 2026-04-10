@@ -16,9 +16,10 @@ const DEFAULT_ENDPOINTS: Record<AIProvider, string> = {
 /** Timeout for AI requests (60 seconds). */
 const REQUEST_TIMEOUT_MS = 60_000;
 
-/** Truncate API error bodies to avoid leaking sensitive echoed data. */
+/** Truncate API error bodies and scrub API key patterns to avoid leaking sensitive data. */
 function truncateError(body: string, maxLen = 300): string {
-  return body.length > maxLen ? body.slice(0, maxLen) + '…' : body;
+  const truncated = body.length > maxLen ? body.slice(0, maxLen) + '…' : body;
+  return truncated.replace(/\b(sk-[A-Za-z0-9]{8,}|AIza[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,})\b/g, '[REDACTED]');
 }
 
 function getConfig() {
@@ -27,6 +28,9 @@ function getConfig() {
   if (!s.apiKey) throw new Error('No API key configured. Go to Settings to add one.');
   const model = s.model || DEFAULT_MODELS[s.provider];
   const endpoint = s.endpointUrl || DEFAULT_ENDPOINTS[s.provider];
+  if (s.endpointUrl && !/^https:\/\//i.test(s.endpointUrl)) {
+    throw new Error('Custom endpoint must use https://. Refusing to send API key over an insecure connection.');
+  }
   return { provider: s.provider, apiKey: s.apiKey, model, endpoint };
 }
 
