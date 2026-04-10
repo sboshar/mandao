@@ -26,7 +26,7 @@ function getConfig() {
   const s = useAISettingsStore.getState();
   if (!s.enabled) throw new Error('AI features are not enabled. Go to Settings to configure.');
   if (!s.apiKey) throw new Error('No API key configured. Go to Settings to add one.');
-  const model = s.model || DEFAULT_MODELS[s.provider];
+  const model = (s.model && s.model !== '__custom__') ? s.model : DEFAULT_MODELS[s.provider];
   const endpoint = s.endpointUrl || DEFAULT_ENDPOINTS[s.provider];
   if (s.endpointUrl && !/^https:\/\//i.test(s.endpointUrl)) {
     throw new Error('Custom endpoint must use https://. Refusing to send API key over an insecure connection.');

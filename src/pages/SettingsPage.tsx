@@ -171,7 +171,7 @@ export function SettingsPage() {
                       value={selectValue}
                       onChange={(e) => {
                         if (e.target.value === '__custom__') {
-                          update({ model: '' });
+                          update({ model: '__custom__' });
                         } else {
                           update({ model: e.target.value });
                         }
@@ -184,12 +184,13 @@ export function SettingsPage() {
                       ))}
                       <option value="__custom__">Custom model...</option>
                     </select>
-                    {(isCustom || selectValue === '__custom__') && (
+                    {isCustom && (
                       <input
                         type="text"
-                        value={settings.model}
-                        onChange={(e) => update({ model: e.target.value })}
+                        value={settings.model === '__custom__' ? '' : settings.model}
+                        onChange={(e) => update({ model: e.target.value || '__custom__' })}
                         placeholder="Enter model ID"
+                        autoFocus
                         className="w-full px-3 py-2 rounded-lg text-sm"
                         style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                       />
@@ -198,28 +199,6 @@ export function SettingsPage() {
                 );
               })()}
             </div>
-
-            {/* Custom Endpoint */}
-            <details className="text-sm">
-              <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-secondary)' }}>
-                Advanced: Custom endpoint
-              </summary>
-              <div className="mt-2 space-y-2">
-                <input
-                  type="text"
-                  value={settings.endpointUrl}
-                  onChange={(e) => update({ endpointUrl: e.target.value })}
-                  placeholder="Leave blank for default"
-                  className="w-full px-3 py-2 rounded-lg text-sm"
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                />
-                {settings.endpointUrl && (
-                  <p className="text-xs p-2 rounded" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-                    Your API key and prompts will be sent to this custom URL. Only use endpoints you trust.
-                  </p>
-                )}
-              </div>
-            </details>
 
             {/* Test Connection */}
             <div className="flex items-center gap-3">
