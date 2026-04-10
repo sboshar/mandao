@@ -1,8 +1,8 @@
 /**
  * LLM prompt generator for sentence analysis.
  *
- * Flow: CC-CEDICT tokenizer segments first → user adjusts → segments passed to LLM
- * The LLM fills in: English translation, pinyin, tone sandhi, character breakdowns, POS.
+ * Flow: user enters sentence → LLM tokenizes and analyzes → user reviews
+ * The LLM handles: segmentation, English translation, pinyin, tone sandhi, character breakdowns, POS.
  */
 import * as repo from '../db/repo';
 
@@ -12,15 +12,15 @@ export interface ExistingMeaning {
   english: string;
 }
 
-/** Look up existing meanings for the given segments (not individual characters within compounds) */
-export async function getExistingMeaningsForSegments(
-  segments: string[]
+/** Look up existing meanings for characters in the sentence */
+export async function getExistingMeanings(
+  chinese: string
 ): Promise<ExistingMeaning[]> {
-  const unique = [...new Set(segments)];
+  const chars = [...new Set(Array.from(chinese.replace(/\s/g, '')))];
   const results: ExistingMeaning[] = [];
 
-  for (const seg of unique) {
-    const meanings = await repo.getMeaningsByHeadword(seg);
+  for (const ch of chars) {
+    const meanings = await repo.getMeaningsByHeadword(ch);
 
     for (const m of meanings) {
       results.push({
@@ -35,12 +35,11 @@ export async function getExistingMeaningsForSegments(
 }
 
 /**
- * Generate LLM prompt with pre-segmented tokens.
- * The tokenizer has already split the sentence — the LLM just fills in definitions.
+ * Generate LLM prompt that tokenizes and analyzes a Chinese sentence.
+ * The LLM handles both segmentation into words and filling in definitions.
  */
 export function generateAnalysisPrompt(
   chinese: string,
-  segments: string[],
   existingMeanings?: ExistingMeaning[]
 ): string {
   let existingSection = '';
@@ -56,21 +55,20 @@ If a character/word has the same meaning as one listed above, pick it from the l
 `;
   }
 
-  const segmentList = segments.map((s) => `"${s}"`).join(', ');
-
-  return `Analyze this Chinese sentence and return ONLY a JSON object (no markdown, no explanation, no code fences).
+  return `Tokenize and analyze this Chinese sentence. Return ONLY a JSON object (no markdown, no explanation, no code fences).
 
 Sentence: ${chinese}
-Pre-segmented tokens (DO NOT change the segmentation): [${segmentList}]
 ${existingSection}
-Return this exact JSON structure:
+First, segment the sentence into words (tokens). Use linguistically correct word boundaries — for example, 作业 is one word meaning "homework", not two separate characters. Segment the way a native speaker would identify distinct words.
+
+Then return this exact JSON structure:
 {
   "chinese": "${chinese}",
   "english": "natural English translation",
   "pinyinSandhi": "full sentence pinyin with tone sandhi applied using diacritics",
   "tokens": [
     {
-      "surfaceForm": "the Chinese word/character EXACTLY as given in the pre-segmented tokens above",
+      "surfaceForm": "the Chinese word/character as segmented",
       "pinyinNumeric": "pinyin with tone numbers BEFORE sandhi e.g. hao3",
       "pinyinSandhi": "pinyin with diacritics AFTER tone sandhi applied",
       "english": "meaning IN THIS CONTEXT (not all meanings)",
@@ -88,7 +86,8 @@ Return this exact JSON structure:
 }
 
 Rules:
-- Use EXACTLY the pre-segmented tokens provided above. Do NOT re-segment or merge/split them. Output one token object per segment, in order.
+- Segment into linguistically correct words. Do NOT split compound words into individual characters (e.g. 作业 = one token, 正在 = one token). Do NOT merge separate words.
+- Exclude punctuation tokens (。，！？ etc.) — only include content words.
 - For pinyinNumeric: use tone numbers 1-5 (5 = neutral), separate syllables within a word by spaces (e.g. "cha4 bu4 duo1"). When a character has multiple accepted pronunciations, prefer the most common colloquial spoken form
 - For pinyinSandhi: apply all tone sandhi rules (3rd tone sandhi, 不 sandhi, 一 sandhi) and write with diacritics
 - For english: give the CONTEXTUAL meaning only, not all possible meanings

@@ -4,10 +4,8 @@ import { ingestSentence, type TokenInput, type CharacterInput } from '../service
 import {
   generateAnalysisPrompt,
   parseLLMResponse,
-  getExistingMeaningsForSegments,
+  getExistingMeanings,
 } from '../services/llmPrompt';
-import { tokenizeSentence } from '../services/tokenizer';
-import { loadCedict, isLoaded as cedictLoaded } from '../lib/cedict';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
 import { TutorialBanner } from '../components/TutorialBanner';
@@ -34,24 +32,14 @@ export function AddSentencePage() {
 
   const [chinese, setChinese] = useState('');
   const [english, setEnglish] = useState('');
-  const [segments, setSegments] = useState<string[]>([]);
   const [tokens, setTokens] = useState<TokenFormData[]>([]);
-  const [step, setStep] = useState<'input' | 'segment' | 'review' | 'confirm'>('input');
+  const [step, setStep] = useState<'input' | 'llm' | 'review' | 'confirm'>('input');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [dictLoading, setDictLoading] = useState(false);
   const [llmPasteValue, setLlmPasteValue] = useState('');
   const [promptCopied, setPromptCopied] = useState(false);
   const [usePinyinIME, setUsePinyinIME] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
-
-  // Load dictionary on mount
-  useEffect(() => {
-    if (!cedictLoaded()) {
-      setDictLoading(true);
-      loadCedict().then(() => setDictLoading(false));
-    }
-  }, []);
 
   // Tutorial mode: pre-fill Chinese sentence
   useEffect(() => {
@@ -60,44 +48,21 @@ export function AddSentencePage() {
     }
   }, [isTutorial, tutorialStep, step]);
 
-  // Step 1 → Step 2: Auto-segment with CC-CEDICT
-  const handleSegment = () => {
+  // Step 1 → Step 2: Go to LLM prompt step
+  const handleNext = () => {
     if (!chinese.trim()) {
       setError('Please enter a Chinese sentence.');
       return;
     }
     setError('');
-    const rawTokens = tokenizeSentence(chinese.trim());
-    const segs = rawTokens
-      .map((t) => t.text)
-      .filter((t) => t.trim().length > 0 && !/^[。，！？；：、《》（）""''…·\s]$/.test(t));
-    setSegments(segs);
-    setStep('segment');
+    setStep('llm');
   };
 
-  // Segment editing
-  const handleSplitSegment = (index: number) => {
-    const seg = segments[index];
-    if (seg.length <= 1) return;
-    const chars = Array.from(seg);
-    const newSegs = [...segments];
-    newSegs.splice(index, 1, ...chars);
-    setSegments(newSegs);
-  };
-
-  const handleMergeSegments = (index: number) => {
-    if (index >= segments.length - 1) return;
-    const newSegs = [...segments];
-    const merged = newSegs[index] + newSegs[index + 1];
-    newSegs.splice(index, 2, merged);
-    setSegments(newSegs);
-  };
-
-  // Copy LLM prompt with segments
+  // Copy LLM prompt (LLM handles tokenization)
   const handleCopyPrompt = async () => {
     setError('');
-    const existingMeanings = await getExistingMeaningsForSegments(segments);
-    const prompt = generateAnalysisPrompt(chinese.trim(), segments, existingMeanings);
+    const existingMeanings = await getExistingMeanings(chinese.trim());
+    const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings);
     await navigator.clipboard.writeText(prompt);
     setPromptCopied(true);
     setTimeout(() => setPromptCopied(false), 2000);
@@ -228,7 +193,6 @@ export function AddSentencePage() {
       } else {
         setChinese('');
         setEnglish('');
-        setSegments([]);
         setTokens([]);
         setTags([]);
         setStep('input');
@@ -314,62 +278,30 @@ export function AddSentencePage() {
             <TagInput tags={tags} onChange={setTags} />
           </div>
           <button
-            onClick={handleSegment}
-            disabled={dictLoading || !chinese.trim()}
+            onClick={handleNext}
+            disabled={!chinese.trim()}
             className={`w-full py-3 rounded-lg font-medium disabled:opacity-50 transition-colors ${
               isTutorial && tutorialStep === 1 ? 'ring-2 ring-offset-2' : ''
             }`}
             style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
-            {dictLoading ? 'Loading dictionary...' : 'Next: Segment Words'}
+            Next: Analyze with LLM
           </button>
         </div>
       )}
 
-      {/* Step 2: Adjust segmentation + copy LLM prompt */}
-      {step === 'segment' && (
+      {/* Step 2: Copy LLM prompt + paste response */}
+      {step === 'llm' && (
         <div className="space-y-4">
           {isTutorial && tutorialStep === 1 && (
             <TutorialBanner visibleAt={1}>
-              The app auto-segmented the sentence using the CC-CEDICT dictionary. You can
-              split or merge tokens if needed. Normally you'd copy a prompt to an LLM to get
-              pinyin and meanings &mdash; for this tutorial, click <strong>Use Tutorial Data</strong> to skip that step.
+              Normally you'd copy a prompt to an LLM to get tokenization, pinyin, and
+              meanings &mdash; for this tutorial, click <strong>Use Tutorial Data</strong> to skip that step.
             </TutorialBanner>
           )}
 
           <div className="p-3 rounded-lg inset">
             <div className="text-lg">{chinese}</div>
-          </div>
-
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Adjust word boundaries: click a word to split into characters, or{' '}
-            <strong>+</strong> to merge adjacent tokens.
-          </p>
-
-          {/* Segment editing */}
-          <div className="flex flex-wrap gap-1 items-center p-3 rounded-lg surface">
-            {segments.map((seg, i) => (
-              <div key={i} className="flex items-center">
-                <button
-                  onClick={() => handleSplitSegment(i)}
-                  className="px-3 py-2 rounded-lg text-xl transition-colors"
-                  style={{ border: '2px solid var(--border)', background: 'var(--bg-surface)' }}
-                  title={seg.length > 1 ? 'Click to split' : 'Single character'}
-                >
-                  {seg}
-                </button>
-                {i < segments.length - 1 && (
-                  <button
-                    onClick={() => handleMergeSegments(i)}
-                    className="mx-0.5 px-1 text-lg font-bold"
-                    style={{ color: 'var(--text-tertiary)' }}
-                    title="Merge with next"
-                  >
-                    +
-                  </button>
-                )}
-              </div>
-            ))}
           </div>
 
           {/* Tutorial shortcut or normal LLM flow */}
@@ -384,7 +316,7 @@ export function AddSentencePage() {
           ) : (
             <div className="p-4 rounded-lg space-y-3 inset" style={{ border: '1px solid var(--border)' }}>
               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                1. Copy the analysis prompt (includes your segmentation + existing meanings)
+                1. Copy the analysis prompt (the LLM will tokenize and analyze the sentence)
               </p>
               <button
                 onClick={handleCopyPrompt}
@@ -403,7 +335,7 @@ export function AddSentencePage() {
                 placeholder="Paste the JSON response here..."
                 rows={6}
                 className="w-full px-3 py-2 rounded-lg text-sm font-mono"
-              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               />
               <button
                 onClick={handleParseLLMResponse}
@@ -568,7 +500,7 @@ export function AddSentencePage() {
 
           <div className="flex gap-2">
             <button
-              onClick={() => setStep('segment')}
+              onClick={() => setStep('llm')}
               className="flex-1 py-3 rounded-lg font-medium transition-colors"
               style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
             >
