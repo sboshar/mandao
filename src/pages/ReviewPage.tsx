@@ -22,7 +22,7 @@ export function ReviewPage() {
   const { deckId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { setQueue, remaining, reset, currentCard } = useReviewStore();
+  const { setQueue, remaining, reset } = useReviewStore();
   const [mode, setMode] = useState<ModeOption>('en-to-zh');
   const [started, setStarted] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
