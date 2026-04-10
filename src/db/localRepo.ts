@@ -280,6 +280,14 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
   return localDb.decks.get(id);
 }
 
+export async function updateDeck(id: string, updates: Partial<Deck>): Promise<void> {
+  await localDb.decks.update(id, updates);
+}
+
+export async function getAllDecks(): Promise<Deck[]> {
+  return localDb.decks.toArray();
+}
+
 export async function ensureDefaultDeck(userId: string): Promise<string> {
   const deckId = 'default-' + userId;
   const existing = await localDb.decks.get(deckId);

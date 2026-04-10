@@ -255,6 +255,14 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
   return local.getDeck(id);
 }
 
+export async function updateDeck(id: string, updates: Partial<Deck>): Promise<void> {
+  await local.updateDeck(id, updates);
+}
+
+export async function getAllDecks(): Promise<Deck[]> {
+  return local.getAllDecks();
+}
+
 export async function ensureDefaultDeck(): Promise<string> {
   // Prefer cached ID to avoid network call (works offline).
   // Falls through to getUser() only if cache is cold (rare at startup).
