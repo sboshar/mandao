@@ -26,7 +26,11 @@ function getConfig() {
   const s = useAISettingsStore.getState();
   if (!s.enabled) throw new Error('AI features are not enabled. Go to Settings to configure.');
   if (!s.apiKey) throw new Error('No API key configured. Go to Settings to add one.');
-  const model = (s.model && s.model !== '__custom__') ? s.model : DEFAULT_MODELS[s.provider];
+  const rawModel = (s.model && s.model !== '__custom__') ? s.model : DEFAULT_MODELS[s.provider];
+  if (!/^[a-zA-Z0-9._-]+$/.test(rawModel)) {
+    throw new Error('Invalid model ID. Only letters, numbers, dots, hyphens, and underscores are allowed.');
+  }
+  const model = rawModel;
   const endpoint = s.endpointUrl || DEFAULT_ENDPOINTS[s.provider];
   if (s.endpointUrl && !/^https:\/\//i.test(s.endpointUrl)) {
     throw new Error('Custom endpoint must use https://. Refusing to send API key over an insecure connection.');
@@ -126,6 +130,7 @@ async function callGemini(prompt: string): Promise<string> {
   const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.3 },
