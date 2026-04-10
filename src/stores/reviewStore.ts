@@ -3,18 +3,22 @@
  */
 import { create } from 'zustand';
 import type { SrsCard } from '../db/schema';
+import type { UndoInfo } from '../services/srs';
 
 interface ReviewState {
   queue: SrsCard[];
   currentIndex: number;
   isFlipped: boolean;
   isLoading: boolean;
+  undoInfo: UndoInfo | null;
 
   setQueue: (cards: SrsCard[]) => void;
   flip: () => void;
-  next: () => void;
+  next: (undo?: UndoInfo) => void;
+  prev: () => void;
   currentCard: () => SrsCard | null;
   remaining: () => number;
+  clearUndo: () => void;
   reset: () => void;
 }
 
@@ -23,15 +27,23 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   currentIndex: 0,
   isFlipped: false,
   isLoading: false,
+  undoInfo: null,
 
   setQueue: (cards) =>
-    set({ queue: cards, currentIndex: 0, isFlipped: false, isLoading: false }),
+    set({ queue: cards, currentIndex: 0, isFlipped: false, isLoading: false, undoInfo: null }),
 
   flip: () => set({ isFlipped: true }),
 
-  next: () => {
+  next: (undo) => {
     const { currentIndex } = get();
-    set({ currentIndex: currentIndex + 1, isFlipped: false });
+    set({ currentIndex: currentIndex + 1, isFlipped: false, undoInfo: undo ?? null });
+  },
+
+  prev: () => {
+    const { currentIndex } = get();
+    if (currentIndex > 0) {
+      set({ currentIndex: currentIndex - 1, isFlipped: false, undoInfo: null });
+    }
   },
 
   currentCard: () => {
@@ -44,6 +56,8 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
     return queue.length - currentIndex;
   },
 
+  clearUndo: () => set({ undoInfo: null }),
+
   reset: () =>
-    set({ queue: [], currentIndex: 0, isFlipped: false, isLoading: false }),
+    set({ queue: [], currentIndex: 0, isFlipped: false, isLoading: false, undoInfo: null }),
 }));

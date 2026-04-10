@@ -25,6 +25,7 @@ import type {
   ReviewLog,
 } from './schema';
 import { v4 as uuid } from 'uuid';
+import { useSyncStore } from '../stores/syncStore';
 
 export { clearRemoteCache as clearCachedUserId };
 export { getRemoteUserId as getUserId };
@@ -38,6 +39,7 @@ async function enqueue(op: Pick<SyncOp, 'op' | 'payload'>): Promise<void> {
     deviceId: getDeviceId(),
     opId: uuid(),
   });
+  if (navigator.onLine) useSyncStore.getState().setStatus('syncing');
   scheduleSyncSoon();
 }
 
@@ -284,6 +286,10 @@ export async function getAllReviewLogs(): Promise<ReviewLog[]> {
 export async function insertReviewLog(log: ReviewLog): Promise<void> {
   await local.insertReviewLog(log);
   // Review logs are enqueued via reviewCard op in srs.ts.
+}
+
+export async function deleteReviewLog(id: string): Promise<void> {
+  await local.deleteReviewLog(id);
 }
 
 export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void> {

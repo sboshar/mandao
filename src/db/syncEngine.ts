@@ -180,6 +180,7 @@ async function pushReviewOps(ops: SyncOp[]): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+
 async function pushIngestBundle(op: SyncOp): Promise<void> {
   const { error } = await supabase.rpc('apply_ingest_bundle', { bundle: op.payload });
   if (error) throw new Error(error.message);
