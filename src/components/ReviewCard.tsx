@@ -109,7 +109,7 @@ export function ReviewCard() {
       <div className="text-sm text-center mb-4" style={{ color: 'var(--text-tertiary)' }}>
         {remaining()} cards remaining
         <span className="ml-2 text-xs">
-          ({card.reviewMode === 'en-to-zh' ? 'EN \u2192 ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY \u2192 EN+ZH' : 'ZH \u2192 EN'})
+          ({card.reviewMode === 'en-to-zh' ? 'EN \u2192 ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY \u2192 EN+ZH' : card.reviewMode === 'listen-type' ? 'Listen & Type' : 'ZH \u2192 EN'})
         </span>
       </div>
 

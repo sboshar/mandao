@@ -72,7 +72,7 @@ create table srs_cards (
   user_id uuid not null references auth.users(id) on delete cascade,
   sentence_id text not null references sentences(id) on delete cascade,
   deck_id text not null references decks(id) on delete cascade,
-  review_mode text not null check (review_mode in ('en-to-zh', 'zh-to-en', 'py-to-en-zh')),
+  review_mode text not null check (review_mode in ('en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type')),
   due bigint not null,
   stability float not null default 0,
   difficulty float not null default 0,

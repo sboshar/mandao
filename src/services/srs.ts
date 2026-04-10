@@ -233,8 +233,8 @@ export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
   const dueLearning = learningCards.filter((c) => c.due <= now);
   const dueReview = reviewCards.filter((c) => c.due <= now);
 
-  const modes: (ReviewMode | 'all')[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh'];
-  const byMode: ModeCounts = { 'en-to-zh': 0, 'zh-to-en': 0, 'py-to-en-zh': 0 };
+  const modes: (ReviewMode | 'all')[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'];
+  const byMode: ModeCounts = { 'en-to-zh': 0, 'zh-to-en': 0, 'py-to-en-zh': 0, 'listen-type': 0 };
   const byModeAndState = {} as DueBreakdown['byModeAndState'];
 
   for (const m of modes) {

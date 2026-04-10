@@ -9,12 +9,13 @@ import type { ReviewMode } from '../db/schema';
 
 type ModeOption = ReviewMode | 'all';
 
-const MODE_CYCLE: ModeOption[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh'];
+const MODE_CYCLE: ModeOption[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'];
 const MODE_LABEL: Record<ModeOption, string> = {
   'all': 'All',
   'en-to-zh': 'EN→ZH',
   'zh-to-en': 'ZH→EN',
   'py-to-en-zh': 'PY→',
+  'listen-type': 'Listen',
 };
 
 export function DashboardPage() {
@@ -42,7 +43,7 @@ export function DashboardPage() {
   const states = breakdown?.byModeAndState[mode] ?? { newCount: 0, learningCount: 0, reviewCount: 0 };
   const dueForMode = states.newCount + states.learningCount + states.reviewCount;
   const totalAll = breakdown
-    ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh']
+    ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh'] + (breakdown.byMode['listen-type'] ?? 0)
     : 0;
 
   const reviewParam = mode === 'all' ? 'both' : mode;
