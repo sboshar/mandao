@@ -25,6 +25,7 @@ import type {
   ReviewLog,
 } from './schema';
 import { v4 as uuid } from 'uuid';
+import { useSyncStore } from '../stores/syncStore';
 
 export { clearRemoteCache as clearCachedUserId };
 export { getRemoteUserId as getUserId };
@@ -38,6 +39,7 @@ async function enqueue(op: Pick<SyncOp, 'op' | 'payload'>): Promise<void> {
     deviceId: getDeviceId(),
     opId: uuid(),
   });
+  if (navigator.onLine) useSyncStore.getState().setStatus('syncing');
   scheduleSyncSoon();
 }
 
