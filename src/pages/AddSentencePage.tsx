@@ -18,6 +18,7 @@ import {
   recognizeChinese,
   stopRecognition,
   isSpeechRecognitionSupported,
+  CANCELLED_MESSAGE,
 } from '../services/speechRecognition';
 
 interface TokenFormData {
@@ -65,12 +66,17 @@ export function AddSentencePage() {
         setChinese((prev) => prev + transcript);
       }
     } catch (e: any) {
-      if (e.message !== 'Cancelled') {
+      if (e.message !== CANCELLED_MESSAGE) {
         setError(e.message || 'Voice recognition failed.');
       }
+    } finally {
+      setListening(false);
     }
-    setListening(false);
   };
+
+  useEffect(() => {
+    return () => { stopRecognition(); };
+  }, []);
 
   // Tutorial mode: pre-fill Chinese sentence
   useEffect(() => {
