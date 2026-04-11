@@ -13,6 +13,7 @@ import { generateCompletion } from '../services/aiProvider';
 import { isAIConfigured } from '../services/aiProvider';
 import { downloadAnkiExport } from '../services/ankiExport';
 import { importFromAnki, type ImportProgress } from '../services/ankiImport';
+import { importFromApkg, downloadApkgExport } from '../services/ankiApkg';
 import * as repo from '../db/repo';
 import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
@@ -611,13 +612,18 @@ function AnkiSection() {
   const abortRef = useRef<AbortController | null>(null);
   const aiEnabled = isAIConfigured();
 
-  const handleAnkiExport = async () => {
+  const handleAnkiExport = async (format: 'text' | 'apkg') => {
     setAnkiExporting(true);
     setAnkiExportResult(null);
     setAnkiError(null);
     try {
-      const count = await downloadAnkiExport();
-      setAnkiExportResult(`Exported ${count} sentence${count !== 1 ? 's' : ''} to Anki format.`);
+      if (format === 'apkg') {
+        const count = await downloadApkgExport();
+        setAnkiExportResult(`Exported ${count} sentence${count !== 1 ? 's' : ''} as .apkg file.`);
+      } else {
+        const count = await downloadAnkiExport();
+        setAnkiExportResult(`Exported ${count} sentence${count !== 1 ? 's' : ''} to Anki text format.`);
+      }
     } catch (e: any) {
       setAnkiError(e.message || 'Export failed');
     }
@@ -631,7 +637,9 @@ function AnkiSection() {
     abortRef.current = new AbortController();
 
     try {
-      const result = await importFromAnki(
+      const isApkg = file.name.toLowerCase().endsWith('.apkg');
+      const importFn = isApkg ? importFromApkg : importFromAnki;
+      const result = await importFn(
         file,
         (p) => setAnkiProgress({ ...p }),
         abortRef.current.signal,
@@ -653,34 +661,42 @@ function AnkiSection() {
       {/* Export to Anki */}
       <SectionCard
         title="Export to Anki"
-        description="Download all sentences as a tab-separated text file that Anki can import."
+        description="Download all sentences in a format Anki can import."
       >
-        <div>
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={handleAnkiExport}
+            onClick={() => handleAnkiExport('apkg')}
             disabled={ankiExporting}
             className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
             style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
-            {ankiExporting ? 'Exporting...' : 'Export to Anki'}
+            {ankiExporting ? 'Exporting...' : 'Export as .apkg'}
+          </button>
+          <button
+            onClick={() => handleAnkiExport('text')}
+            disabled={ankiExporting}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+          >
+            {ankiExporting ? 'Exporting...' : 'Export as Text'}
           </button>
           {ankiExportResult && (
-            <p className="mt-2 text-sm" style={{ color: 'var(--success)' }}>{ankiExportResult}</p>
+            <p className="w-full mt-1 text-sm" style={{ color: 'var(--success)' }}>{ankiExportResult}</p>
           )}
           {ankiError && !ankiImporting && (
-            <p className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>{ankiError}</p>
+            <p className="w-full mt-1 text-sm" style={{ color: 'var(--danger)' }}>{ankiError}</p>
           )}
         </div>
         <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-          Format: Front (Chinese) | Back (English + Pinyin) | Tags | FSRS scheduling data.
-          In Anki, use File &gt; Import to load the .txt file.
+          .apkg files can be imported directly into Anki with File &gt; Import.
+          Text export uses tab-separated format with FSRS scheduling data.
         </p>
       </SectionCard>
 
       {/* Import from Anki */}
       <SectionCard
         title="Import from Anki"
-        description="Upload a text or CSV file exported from Anki. The AI will detect field mappings and process each sentence."
+        description="Upload an .apkg file or a text/CSV file exported from Anki. The AI will detect field mappings and process each sentence."
       >
         {!aiEnabled && (
           <div className="p-3 rounded-lg text-sm" style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}>
@@ -699,7 +715,7 @@ function AnkiSection() {
               Choose Anki File
               <input
                 type="file"
-                accept=".txt,.csv,.tsv"
+                accept=".txt,.csv,.tsv,.apkg"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -709,7 +725,7 @@ function AnkiSection() {
               />
             </label>
             <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              Accepts .txt, .csv, or .tsv files. In Anki, use Export to create a text file.
+              Accepts .apkg, .txt, .csv, or .tsv files. In Anki, use File &gt; Export to create a file.
             </p>
           </div>
         )}
