@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   useAISettingsStore,
@@ -10,17 +10,22 @@ import { useAuthStore } from '../stores/authStore';
 import { useThemeStore } from '../stores/themeStore';
 import { useFSRSSettingsStore } from '../stores/fsrsSettingsStore';
 import { generateCompletion } from '../services/aiProvider';
+import { isAIConfigured } from '../services/aiProvider';
+import { downloadAnkiExport } from '../services/ankiExport';
+import { importFromAnki, type ImportProgress } from '../services/ankiImport';
+import { importFromApkg, downloadApkgExport, analyzeApkg, type ApkgFieldInfo } from '../services/ankiApkg';
 import * as repo from '../db/repo';
 import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 
-type Section = 'account' | 'srs' | 'display' | 'ai' | 'data';
+type Section = 'account' | 'srs' | 'display' | 'ai' | 'anki' | 'data';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'account', label: 'Account' },
   { id: 'srs', label: 'SRS' },
   { id: 'display', label: 'Display' },
   { id: 'ai', label: 'AI' },
+  { id: 'anki', label: 'Anki' },
   { id: 'data', label: 'Data' },
 ];
 
@@ -74,6 +79,7 @@ export function SettingsPage() {
       {section === 'srs' && <SRSSection />}
       {section === 'display' && <DisplaySection />}
       {section === 'ai' && <AISection />}
+      {section === 'anki' && <AnkiSection />}
       {section === 'data' && <DataSection />}
     </div>
   );
@@ -596,6 +602,461 @@ function AISection() {
 // ────────────────────────────────────────────────────────────
 // Data Management
 // ────────────────────────────────────────────────────────────
+
+function AnkiSection() {
+  const [ankiExporting, setAnkiExporting] = useState(false);
+  const [ankiExportResult, setAnkiExportResult] = useState<string | null>(null);
+  const [ankiImporting, setAnkiImporting] = useState(false);
+  const [ankiProgress, setAnkiProgress] = useState<ImportProgress | null>(null);
+  const [ankiError, setAnkiError] = useState<string | null>(null);
+  const [apkgInfo, setApkgInfo] = useState<ApkgFieldInfo | null>(null);
+  const [apkgFile, setApkgFile] = useState<File | null>(null);
+  const [apkgAnalyzing, setApkgAnalyzing] = useState(false);
+  const [chineseField, setChineseField] = useState(0);
+  const [displayField, setDisplayField] = useState(0);
+  const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
+  const lastClickedIdx = useRef<number | null>(null);
+  const dragSelectMode = useRef<boolean | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const aiEnabled = isAIConfigured();
+
+  // Reset stale drag mode if mouse released anywhere
+  useEffect(() => {
+    const handler = () => { dragSelectMode.current = null; };
+    window.addEventListener('mouseup', handler);
+    return () => window.removeEventListener('mouseup', handler);
+  }, []);
+
+  const handleAnkiExport = async (format: 'text' | 'apkg') => {
+    setAnkiExporting(true);
+    setAnkiExportResult(null);
+    setAnkiError(null);
+    try {
+      if (format === 'apkg') {
+        const count = await downloadApkgExport();
+        setAnkiExportResult(`Exported ${count} sentence${count !== 1 ? 's' : ''} as .apkg file.`);
+      } else {
+        const count = await downloadAnkiExport();
+        setAnkiExportResult(`Exported ${count} sentence${count !== 1 ? 's' : ''} to Anki text format.`);
+      }
+    } catch (e: any) {
+      setAnkiError(e.message || 'Export failed');
+    }
+    setAnkiExporting(false);
+  };
+
+  const handleFileSelected = async (file: File) => {
+    if (file.name.toLowerCase().endsWith('.apkg')) {
+      setApkgAnalyzing(true);
+      setAnkiError(null);
+      try {
+        const info = await analyzeApkg(file);
+        setApkgInfo(info);
+        setApkgFile(file);
+        setChineseField(info.suggestedChineseField);
+        const otherField = info.fieldNames.findIndex((_, i) => i !== info.suggestedChineseField);
+        setDisplayField(otherField >= 0 ? otherField : 0);
+        setSelectedNotes(new Set(info.notes.map(n => n.id)));
+      } catch (e: any) {
+        setAnkiError(e.message || 'Failed to read .apkg file');
+      }
+      setApkgAnalyzing(false);
+    } else {
+      await runImport(() => importFromAnki(file, (p) => setAnkiProgress({ ...p }), abortRef.current!.signal));
+    }
+  };
+
+  const startApkgImport = async () => {
+    if (!apkgFile) return;
+    const noteIds = new Set(selectedNotes);
+    const file = apkgFile;
+    const chIdx = chineseField;
+    setApkgInfo(null);
+    setApkgFile(null);
+    await runImport(() => importFromApkg(file, (p) => setAnkiProgress({ ...p }), abortRef.current!.signal, chIdx, noteIds));
+  };
+
+  const runImport = async (importFn: () => Promise<ImportProgress>) => {
+    setAnkiImporting(true);
+    setAnkiError(null);
+    setAnkiProgress(null);
+    abortRef.current = new AbortController();
+    try {
+      const result = await importFn();
+      setAnkiProgress(result);
+    } catch (e: any) {
+      setAnkiError(e.message || 'Import failed');
+    }
+    setAnkiImporting(false);
+    abortRef.current = null;
+  };
+
+  const handleAbort = () => {
+    abortRef.current?.abort();
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Export to Anki */}
+      <SectionCard
+        title="Export to Anki"
+        description="Download all sentences in a format Anki can import."
+      >
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => handleAnkiExport('apkg')}
+            disabled={ankiExporting}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+          >
+            {ankiExporting ? 'Exporting...' : 'Export as .apkg'}
+          </button>
+          <button
+            onClick={() => handleAnkiExport('text')}
+            disabled={ankiExporting}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+          >
+            {ankiExporting ? 'Exporting...' : 'Export as Text'}
+          </button>
+          {ankiExportResult && (
+            <p className="w-full mt-1 text-sm" style={{ color: 'var(--success)' }}>{ankiExportResult}</p>
+          )}
+          {ankiError && !ankiImporting && (
+            <p className="w-full mt-1 text-sm" style={{ color: 'var(--danger)' }}>{ankiError}</p>
+          )}
+        </div>
+        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          .apkg files can be imported directly into Anki with File &gt; Import.
+          Text export uses tab-separated format with FSRS scheduling data.
+        </p>
+      </SectionCard>
+
+      {/* Import from Anki */}
+      <SectionCard
+        title="Import from Anki"
+        description="Upload an .apkg or text file exported from Anki. For .apkg files, choose which field contains the Chinese sentence to import (Import field), and which field to browse by (Display as) — e.g. switch to English to find sentences by meaning. The AI will then analyze each selected sentence to generate pinyin, tokenization, and word breakdowns."
+      >
+        {!aiEnabled && (
+          <div className="p-3 rounded-lg text-sm" style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}>
+            AI must be configured to import from Anki. The AI is used to detect column mappings and
+            analyze each sentence for tokenization and pinyin.
+            Go to the <strong>AI</strong> tab to set up a provider.
+          </div>
+        )}
+
+        {aiEnabled && !ankiImporting && !ankiProgress && !apkgInfo && (
+          <div>
+            <label
+              className="inline-block px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              style={{
+                background: apkgAnalyzing ? 'var(--bg-inset)' : 'var(--accent)',
+                color: apkgAnalyzing ? 'var(--text-tertiary)' : 'var(--text-inverted)',
+                pointerEvents: apkgAnalyzing ? 'none' : undefined,
+              }}
+            >
+              {apkgAnalyzing ? 'Reading file...' : 'Choose Anki File'}
+              <input
+                type="file"
+                accept=".txt,.csv,.tsv,.apkg"
+                className="hidden"
+                disabled={apkgAnalyzing}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFileSelected(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              Accepts .apkg, .txt, .csv, or .tsv files. In Anki, use File &gt; Export to create a file.
+            </p>
+          </div>
+        )}
+
+        {/* .apkg browse & select */}
+        {apkgInfo && !ankiImporting && !ankiProgress && (
+          <div className="space-y-4">
+            {/* Field selectors */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Import field (Chinese)</label>
+                <select
+                  value={chineseField}
+                  onChange={(e) => setChineseField(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                >
+                  {apkgInfo.fieldNames.map((name, idx) => (
+                    <option key={idx} value={idx}>{name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Display as</label>
+                <select
+                  value={displayField}
+                  onChange={(e) => setDisplayField(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                >
+                  {apkgInfo.fieldNames.map((name, idx) => (
+                    <option key={idx} value={idx}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Select all / none */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {selectedNotes.size} of {apkgInfo.notes.length} selected
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedNotes(new Set(apkgInfo.notes.map(n => n.id)))}
+                  className="text-xs px-2 py-1 rounded transition-colors"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  Select all
+                </button>
+                <button
+                  onClick={() => setSelectedNotes(new Set())}
+                  className="text-xs px-2 py-1 rounded transition-colors"
+                  style={{ color: 'var(--text-tertiary)' }}
+                >
+                  Select none
+                </button>
+              </div>
+            </div>
+
+            {/* Note list — shift-click for range, drag to paint-select */}
+            <div
+              className="rounded-lg overflow-y-auto select-none"
+              style={{ maxHeight: 400, border: '1px solid var(--border)' }}
+              onMouseLeave={() => { dragSelectMode.current = null; }}
+              onMouseUp={() => { dragSelectMode.current = null; }}
+            >
+              {apkgInfo.notes.map((note, idx) => {
+                const display = note.fields[displayField] ?? '';
+                const isSelected = selectedNotes.has(note.id);
+
+                return (
+                  <div
+                    key={note.id}
+                    className="flex items-center gap-3 px-3 py-2.5 cursor-pointer"
+                    style={{
+                      background: isSelected ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-surface))' : 'transparent',
+                      borderBottom: '1px solid var(--border)',
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      if (e.shiftKey && lastClickedIdx.current !== null) {
+                        // Shift-click: select range
+                        const from = Math.min(lastClickedIdx.current, idx);
+                        const to = Math.max(lastClickedIdx.current, idx);
+                        setSelectedNotes(prev => {
+                          const next = new Set(prev);
+                          for (let j = from; j <= to; j++) {
+                            next.add(apkgInfo.notes[j].id);
+                          }
+                          return next;
+                        });
+                      } else {
+                        // Toggle and start drag
+                        const willSelect = !isSelected;
+                        dragSelectMode.current = willSelect;
+                        setSelectedNotes(prev => {
+                          const next = new Set(prev);
+                          if (willSelect) next.add(note.id);
+                          else next.delete(note.id);
+                          return next;
+                        });
+                      }
+                      lastClickedIdx.current = idx;
+                    }}
+                    onMouseEnter={() => {
+                      if (dragSelectMode.current === null) return;
+                      setSelectedNotes(prev => {
+                        const next = new Set(prev);
+                        if (dragSelectMode.current) next.add(note.id);
+                        else next.delete(note.id);
+                        return next;
+                      });
+                    }}
+                  >
+                    <div
+                      className="shrink-0 w-4 h-4 rounded border flex items-center justify-center"
+                      style={{
+                        borderColor: isSelected ? 'var(--accent)' : 'var(--border)',
+                        background: isSelected ? 'var(--accent)' : 'transparent',
+                      }}
+                    >
+                      {isSelected && (
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="2 6 5 9 10 3" />
+                        </svg>
+                      )}
+                    </div>
+                    <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                      {display || <span style={{ color: 'var(--text-tertiary)' }}>(empty)</span>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              Click to toggle. Shift-click for range. Drag to select multiple.
+            </p>
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              <button
+                onClick={startApkgImport}
+                disabled={selectedNotes.size === 0}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+              >
+                Import {selectedNotes.size} sentence{selectedNotes.size !== 1 ? 's' : ''}
+              </button>
+              <button
+                onClick={() => setApkgInfo(null)}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Progress indicator */}
+        {ankiImporting && ankiProgress && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">
+                Processing {ankiProgress.processed} / {ankiProgress.total}
+              </span>
+              <button
+                onClick={handleAbort}
+                className="px-3 py-1 rounded text-xs font-medium transition-colors"
+                style={{ background: 'var(--bg-inset)', color: 'var(--danger)' }}
+              >
+                Stop
+              </button>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-inset)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{
+                  width: `${ankiProgress.total > 0 ? (ankiProgress.processed / ankiProgress.total) * 100 : 0}%`,
+                  background: 'var(--accent)',
+                }}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div>
+                <span className="font-medium" style={{ color: 'var(--success)' }}>{ankiProgress.imported}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}> imported</span>
+              </div>
+              <div>
+                <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{ankiProgress.skipped}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}> skipped</span>
+              </div>
+              <div>
+                <span className="font-medium" style={{ color: 'var(--danger)' }}>{ankiProgress.failed}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}> failed</span>
+              </div>
+            </div>
+
+            {ankiProgress.currentSentence && (
+              <p className="text-xs truncate" style={{ color: 'var(--text-tertiary)' }}>
+                {ankiProgress.currentSentence}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Summary after completion */}
+        {!ankiImporting && ankiProgress && (
+          <div className="space-y-3">
+            <div className="p-3 rounded-lg" style={{ background: 'var(--bg-inset)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                Import complete
+              </p>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-center text-sm">
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'var(--success)' }}>{ankiProgress.imported}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>imported</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'var(--text-secondary)' }}>{ankiProgress.skipped}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>skipped</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'var(--danger)' }}>{ankiProgress.failed}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>failed</div>
+                </div>
+              </div>
+
+              {ankiProgress.issues && ankiProgress.issues.length > 0 && (
+                <details className="mt-3">
+                  <summary className="text-xs cursor-pointer" style={{ color: 'var(--text-tertiary)' }}>
+                    {ankiProgress.skipped + ankiProgress.failed} skipped/failed — tap to see details
+                  </summary>
+                  <div className="mt-2 rounded-lg overflow-y-auto" style={{ maxHeight: 250, border: '1px solid var(--border)' }}>
+                    {ankiProgress.issues.map((issue, i) => (
+                      <div
+                        key={i}
+                        className="px-3 py-2 text-xs"
+                        style={{ borderBottom: '1px solid var(--border)' }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                            style={{
+                              background: issue.type === 'failed'
+                                ? 'color-mix(in srgb, var(--danger) 15%, var(--bg-surface))'
+                                : 'color-mix(in srgb, var(--text-secondary) 10%, var(--bg-surface))',
+                              color: issue.type === 'failed' ? 'var(--danger)' : 'var(--text-secondary)',
+                            }}
+                          >
+                            {issue.type}
+                          </span>
+                          <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                            {issue.sentence}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 pl-[52px]" style={{ color: 'var(--text-tertiary)' }}>
+                          {issue.reason}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+
+            <button
+              onClick={() => { setAnkiProgress(null); setAnkiError(null); }}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+            >
+              Import Another File
+            </button>
+          </div>
+        )}
+
+        {ankiError && ankiImporting && (
+          <p className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>{ankiError}</p>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
 
 function DataSection() {
   const { signOut } = useAuthStore();
