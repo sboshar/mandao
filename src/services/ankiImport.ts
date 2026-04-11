@@ -20,6 +20,12 @@ export interface FieldMapping {
   separator: string;
 }
 
+export interface ImportIssue {
+  sentence: string;
+  reason: string;
+  type: 'skipped' | 'failed';
+}
+
 export interface ImportProgress {
   total: number;
   processed: number;
@@ -27,7 +33,7 @@ export interface ImportProgress {
   skipped: number;
   failed: number;
   currentSentence: string;
-  errors: string[];
+  issues: ImportIssue[];
 }
 
 export type ProgressCallback = (progress: ImportProgress) => void;
@@ -238,12 +244,17 @@ export async function importFromAnki(
   file: File,
   onProgress: ProgressCallback,
   abortSignal?: AbortSignal,
+  maxItems?: number,
 ): Promise<ImportProgress> {
   const content = await readFileAsText(file);
-  const rows = parseRows(content);
+  let rows = parseRows(content);
 
   if (rows.length === 0) {
     throw new Error('No data rows found in the file. Make sure the file contains Anki card data.');
+  }
+
+  if (maxItems && maxItems > 0) {
+    rows = rows.slice(0, maxItems);
   }
 
   const progress: ImportProgress = {
@@ -253,7 +264,7 @@ export async function importFromAnki(
     skipped: 0,
     failed: 0,
     currentSentence: '',
-    errors: [],
+    issues: [],
   };
 
   onProgress({ ...progress, currentSentence: 'Detecting field mapping...' });
@@ -269,6 +280,7 @@ export async function importFromAnki(
 
     if (!fields) {
       progress.skipped++;
+      progress.issues.push({ sentence: rows[i].slice(0, 60), reason: 'Could not extract fields', type: 'skipped' });
       progress.processed++;
       onProgress({ ...progress });
       continue;
@@ -288,11 +300,10 @@ export async function importFromAnki(
     } catch (e: any) {
       if (e.message === 'duplicate' || e.message?.includes('already exists')) {
         progress.skipped++;
+        progress.issues.push({ sentence: fields.chinese, reason: 'Duplicate — already in app', type: 'skipped' });
       } else {
         progress.failed++;
-        if (progress.errors.length < 10) {
-          progress.errors.push(`"${fields.chinese}": ${e.message?.slice(0, 100) || 'Unknown error'}`);
-        }
+        progress.issues.push({ sentence: fields.chinese, reason: e.message?.slice(0, 150) || 'Unknown error', type: 'failed' });
       }
     }
 

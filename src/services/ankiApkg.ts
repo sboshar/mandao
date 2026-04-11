@@ -24,28 +24,75 @@ let sqlPromise: Promise<Awaited<ReturnType<typeof initSqlJs>>> | null = null;
 function getSql() {
   if (!sqlPromise) {
     sqlPromise = initSqlJs({
-      locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
+      locateFile: () => '/sql-wasm.wasm',
     });
   }
   return sqlPromise;
 }
 
-// ────────────────────────────────────────────────────────────
-// HTML stripping
-// ────────────────────────────────────────────────────────────
-
 function stripAnkiHtml(html: string): string {
   return html
-    .replace(/\[sound:[^\]]+\]/g, '')       // remove [sound:...]
-    .replace(/<img[^>]*>/g, '')              // remove <img> tags
-    .replace(/<br\s*\/?>/g, '\n')            // <br> to newline
-    .replace(/<[^>]+>/g, '')                 // remove all other HTML
+    .replace(/\[sound:[^\]]+\]/g, '')
+    .replace(/<img[^>]*>/g, '')
+    .replace(/<br\s*\/?>/g, '\n')
+    .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+async function openApkgDatabase(file: File): Promise<{ db: Database; tableNames: string[] }> {
+  const arrayBuf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuf);
+  const SQL = await getSql();
+
+  const anki21b = zip.file('collection.anki21b');
+  const anki2 = zip.file('collection.anki2');
+
+  let db: Database;
+  if (anki21b) {
+    db = new SQL.Database(decompress(await anki21b.async('uint8array')));
+  } else if (anki2) {
+    db = new SQL.Database(await anki2.async('uint8array'));
+  } else {
+    throw new Error('No collection database found in .apkg file.');
+  }
+
+  const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+  const tableNames = tables[0]?.values.map(r => String(r[0])) || [];
+
+  if (!tableNames.includes('notes')) {
+    db.close();
+    throw new Error('Invalid .apkg database: no notes table found.');
+  }
+
+  return { db, tableNames };
+}
+
+function extractFieldNames(db: Database, tableNames: string[]): string[] {
+  if (tableNames.includes('notetypes') && tableNames.includes('fields')) {
+    const ntResult = db.exec('SELECT id FROM notetypes LIMIT 1');
+    if (ntResult[0]?.values[0]?.[0]) {
+      const ntId = ntResult[0].values[0][0];
+      const fieldsResult = db.exec(`SELECT name FROM fields WHERE ntid = ${ntId} ORDER BY ord`);
+      const names = fieldsResult[0]?.values.map(r => String(r[0])) || [];
+      if (names.length > 0) return names;
+    }
+  }
+  if (tableNames.includes('col')) {
+    try {
+      const modelsResult = db.exec('SELECT models FROM col LIMIT 1');
+      if (modelsResult[0]?.values[0]?.[0]) {
+        const models = JSON.parse(String(modelsResult[0].values[0][0]));
+        const firstModel = Object.values(models)[0] as any;
+        if (firstModel?.flds) return firstModel.flds.map((f: any) => f.name);
+      }
+    } catch { /* legacy format may not parse */ }
+  }
+  return ['Front', 'Back'];
 }
 
 // ────────────────────────────────────────────────────────────
@@ -206,13 +253,59 @@ function convertSm2ToFsrs(card: AnkiCard, colCreatedMs: number): ConvertedSchedu
 }
 
 // ────────────────────────────────────────────────────────────
-// Import .apkg
+// Analyze .apkg (step 1: extract fields for user to pick mapping)
+// ────────────────────────────────────────────────────────────
+
+export interface ApkgNote {
+  id: number;
+  /** Raw fields split by \x1f, HTML stripped */
+  fields: string[];
+}
+
+export interface ApkgFieldInfo {
+  fieldNames: string[];
+  notes: ApkgNote[];
+  suggestedChineseField: number;
+}
+
+export async function analyzeApkg(file: File): Promise<ApkgFieldInfo> {
+  const { db, tableNames } = await openApkgDatabase(file);
+
+  try {
+    const fieldNames = extractFieldNames(db, tableNames);
+
+    const notesResult = db.exec('SELECT id, flds FROM notes');
+    const notes: ApkgNote[] = (notesResult[0]?.values || []).map(row => ({
+      id: Number(row[0]),
+      fields: String(row[1]).split('\x1f').map(f => stripAnkiHtml(f)),
+    }));
+
+    // Single-pass Chinese field detection
+    const counts = new Array(fieldNames.length).fill(0);
+    const chineseRe = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+    for (const n of notes) {
+      for (let idx = 0; idx < fieldNames.length; idx++) {
+        if (chineseRe.test(n.fields[idx] ?? '')) counts[idx]++;
+      }
+    }
+    const suggestedChineseField = counts.indexOf(Math.max(...counts));
+
+    return { fieldNames, notes, suggestedChineseField: Math.max(0, suggestedChineseField) };
+  } finally {
+    db.close();
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// Import .apkg (step 2: process with user-confirmed mapping)
 // ────────────────────────────────────────────────────────────
 
 export async function importFromApkg(
   file: File,
   onProgress: ProgressCallback,
   abortSignal?: AbortSignal,
+  chineseFieldIndex?: number,
+  selectedNoteIds?: Set<number>,
 ): Promise<ImportProgress> {
   const progress: ImportProgress = {
     total: 0,
@@ -221,45 +314,14 @@ export async function importFromApkg(
     skipped: 0,
     failed: 0,
     currentSentence: '',
-    errors: [],
+    issues: [],
   };
 
   onProgress({ ...progress, currentSentence: 'Reading .apkg file...' });
 
-  // 1. Unzip
-  const arrayBuf = await file.arrayBuffer();
-  const zip = await JSZip.loadAsync(arrayBuf);
-
-  // 2. Open SQLite database
-  onProgress({ ...progress, currentSentence: 'Opening database...' });
-  const SQL = await getSql();
-  let db: Database;
-
-  const anki21b = zip.file('collection.anki21b');
-  const anki2 = zip.file('collection.anki2');
-
-  if (anki21b) {
-    // Zstandard-compressed SQLite
-    const compressed = await anki21b.async('uint8array');
-    const decompressed = decompress(compressed);
-    db = new SQL.Database(decompressed);
-  } else if (anki2) {
-    const data = await anki2.async('uint8array');
-    db = new SQL.Database(data);
-  } else {
-    throw new Error('No collection database found in .apkg file. Expected collection.anki21b or collection.anki2.');
-  }
+  const { db, tableNames } = await openApkgDatabase(file);
 
   try {
-    // 3. Check if this is a stub database
-    const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
-    const tableNames = tables[0]?.values.map(r => String(r[0])) || [];
-
-    if (!tableNames.includes('notes')) {
-      throw new Error('Invalid .apkg database: no notes table found. The database may be a stub.');
-    }
-
-    // 4. Get collection creation time (for due date conversion)
     let colCreatedMs = Date.now();
     if (tableNames.includes('col')) {
       const colResult = db.exec('SELECT crt FROM col LIMIT 1');
@@ -269,48 +331,19 @@ export async function importFromApkg(
       }
     }
 
-    // 5. Get field names from notetypes
-    let fieldNames: string[] = [];
-    if (tableNames.includes('notetypes') && tableNames.includes('fields')) {
-      // Modern schema: separate notetypes and fields tables
-      const ntResult = db.exec('SELECT id FROM notetypes LIMIT 1');
-      if (ntResult[0]?.values[0]?.[0]) {
-        const ntId = ntResult[0].values[0][0];
-        const fieldsResult = db.exec(
-          `SELECT name FROM fields WHERE ntid = ${ntId} ORDER BY ord`
-        );
-        fieldNames = fieldsResult[0]?.values.map(r => String(r[0])) || [];
-      }
-    } else if (tableNames.includes('col')) {
-      // Legacy schema: models stored as JSON in col table
-      try {
-        const modelsResult = db.exec('SELECT models FROM col LIMIT 1');
-        if (modelsResult[0]?.values[0]?.[0]) {
-          const models = JSON.parse(String(modelsResult[0].values[0][0]));
-          const firstModel = Object.values(models)[0] as any;
-          if (firstModel?.flds) {
-            fieldNames = firstModel.flds.map((f: any) => f.name);
-          }
-        }
-      } catch {
-        // Could not parse legacy models
-      }
-    }
-
-    if (fieldNames.length === 0) {
-      fieldNames = ['Front', 'Back'];
-    }
-
-    // 6. Get all notes
     const notesResult = db.exec('SELECT id, flds FROM notes');
     if (!notesResult[0] || notesResult[0].values.length === 0) {
       throw new Error('No notes found in the .apkg file.');
     }
 
-    const notes = notesResult[0].values.map(row => ({
+    let notes = notesResult[0].values.map(row => ({
       id: Number(row[0]),
       fields: String(row[1]).split('\x1f'),
     }));
+
+    if (selectedNoteIds && selectedNoteIds.size > 0) {
+      notes = notes.filter(n => selectedNoteIds.has(n.id));
+    }
 
     // 7. Get cards with scheduling data
     const cardsMap = new Map<number, AnkiCard>();
@@ -341,11 +374,9 @@ export async function importFromApkg(
       }
     }
 
-    // 8. Use LLM to detect field mapping
+    // 8. Determine Chinese field index
     progress.total = notes.length;
-    onProgress({ ...progress, currentSentence: 'Detecting field mapping with AI...' });
-
-    const mapping = await detectApkgFieldMapping(fieldNames, notes.slice(0, 8).map(n => n.fields));
+    const chIdx = chineseFieldIndex ?? 0;
 
     // 9. Process each note
     for (let i = 0; i < notes.length; i++) {
@@ -355,26 +386,16 @@ export async function importFromApkg(
       const fields = note.fields;
 
       // Extract Chinese text
-      const rawChinese = fields[mapping.chineseFieldIndex] ?? '';
+      const rawChinese = fields[chIdx] ?? '';
       const chinese = stripAnkiHtml(rawChinese).trim();
 
       if (!chinese || !/[\u4e00-\u9fff\u3400-\u4dbf]/.test(chinese)) {
         progress.skipped++;
+        progress.issues.push({ sentence: rawChinese.slice(0, 60) || '(empty)', reason: 'No Chinese characters found', type: 'skipped' });
         progress.processed++;
         onProgress({ ...progress });
         continue;
       }
-
-      // Extract English
-      let english = '';
-      if (mapping.englishFieldIndex !== mapping.chineseFieldIndex) {
-        english = stripAnkiHtml(fields[mapping.englishFieldIndex] ?? '').trim();
-      }
-
-      // Extract pinyin
-      const pinyin = mapping.pinyinFieldIndex !== null
-        ? stripAnkiHtml(fields[mapping.pinyinFieldIndex] ?? '').trim()
-        : null;
 
       progress.currentSentence = chinese;
       onProgress({ ...progress });
@@ -392,11 +413,9 @@ export async function importFromApkg(
         const raw = await generateCompletion(prompt);
         const parsed = parseLLMResponse(raw);
 
-        const finalEnglish = english || parsed.english;
-
         const sentenceId = await ingestSentence({
           chinese,
-          english: finalEnglish,
+          english: parsed.english,
           tokens: parsed.tokens.map((t) => ({
             surfaceForm: t.surfaceForm,
             pinyinNumeric: t.pinyinNumeric,
@@ -438,11 +457,10 @@ export async function importFromApkg(
       } catch (e: any) {
         if (e.message === 'duplicate' || e.message?.includes('already exists')) {
           progress.skipped++;
+          progress.issues.push({ sentence: chinese, reason: 'Duplicate — already in app', type: 'skipped' });
         } else {
           progress.failed++;
-          if (progress.errors.length < 10) {
-            progress.errors.push(`"${chinese.slice(0, 30)}": ${e.message?.slice(0, 100) || 'Unknown error'}`);
-          }
+          progress.issues.push({ sentence: chinese, reason: e.message?.slice(0, 150) || 'Unknown error', type: 'failed' });
         }
       }
 
