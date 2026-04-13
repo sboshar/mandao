@@ -87,7 +87,7 @@ export function ReviewCard() {
         <div className="flex-1 flex flex-col items-center justify-center">
           {isEnToZh ? (
             <div className="text-xl text-center">
-              <ClickableEnglish text={sentence.english} />
+              {sentence.english}
             </div>
           ) : isPyToEnZh ? (
             <div className="text-center">
