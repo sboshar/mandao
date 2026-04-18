@@ -389,9 +389,12 @@ export async function deleteAudioRecording(id: string) {
 export async function fetchAudioBlob(id: string): Promise<Blob | null> {
   const rec = await local.getAudioRecording(id);
   if (!rec?.storagePath) return null;
+  // Short TTL: the URL is consumed immediately by the fetch below, so a
+  // longer expiry just widens the leak window (browser history, HAR
+  // exports, extensions) for what is otherwise per-user private content.
   const { data, error } = await supabase.storage
     .from('audio-recordings')
-    .createSignedUrl(rec.storagePath, 3600);
+    .createSignedUrl(rec.storagePath, 60);
   if (error || !data?.signedUrl) return null;
   try {
     const resp = await fetch(data.signedUrl);
