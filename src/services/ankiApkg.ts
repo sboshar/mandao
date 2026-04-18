@@ -10,7 +10,6 @@ import { generateAnalysisPrompt, parseLLMResponse, getExistingMeanings } from '.
 import { ingestSentence } from './ingestion';
 import * as repo from '../db/repo';
 import type { ImportProgress, ProgressCallback } from './ankiImport';
-import { v4 as uuid } from 'uuid';
 
 // Re-export types for convenience
 export type { ImportProgress, ProgressCallback };
@@ -93,80 +92,6 @@ function extractFieldNames(db: Database, tableNames: string[]): string[] {
     } catch { /* legacy format may not parse */ }
   }
   return ['Front', 'Back'];
-}
-
-// ────────────────────────────────────────────────────────────
-// Field detection via LLM
-// ────────────────────────────────────────────────────────────
-
-interface ApkgFieldMapping {
-  chineseFieldIndex: number;
-  englishFieldIndex: number;
-  pinyinFieldIndex: number | null;
-}
-
-/**
- * Ask the LLM to identify which fields contain Chinese, English, and pinyin
- * given the field names and sample note values.
- */
-async function detectApkgFieldMapping(
-  fieldNames: string[],
-  sampleNotes: string[][],
-): Promise<ApkgFieldMapping> {
-  const samplesText = sampleNotes
-    .slice(0, 5)
-    .map((fields, i) => {
-      const fieldStrs = fields.map((val, j) =>
-        `  ${fieldNames[j] || `Field ${j}`}: "${stripAnkiHtml(val).slice(0, 100)}"`
-      );
-      return `Note ${i + 1}:\n${fieldStrs.join('\n')}`;
-    })
-    .join('\n\n');
-
-  const prompt = `You are analyzing an Anki .apkg deck for Chinese language study.
-
-The note type has these fields: ${fieldNames.map((n, i) => `${i}: "${n}"`).join(', ')}
-
-Here are sample notes (HTML stripped):
-${samplesText}
-
-Determine which field index (0-based) contains:
-1. Chinese text (characters/hanzi)
-2. English translation
-3. Pinyin (if any field has it, otherwise null)
-
-Return ONLY a JSON object:
-{
-  "chineseFieldIndex": <number>,
-  "englishFieldIndex": <number>,
-  "pinyinFieldIndex": <number or null>
-}
-
-Rules:
-- Chinese text contains Chinese characters (hanzi like \u4f60\u597d)
-- If a single field contains both Chinese and English, set both indices to that field
-- Return ONLY valid JSON, no markdown or explanation`;
-
-  const raw = await generateCompletion(prompt);
-  let cleaned = raw.trim()
-    .replace(/^```json\s*/i, '').replace(/^```\s*/i, '')
-    .replace(/\s*```$/i, '').trim();
-
-  try {
-    const mapping = JSON.parse(cleaned) as ApkgFieldMapping;
-    if (typeof mapping.chineseFieldIndex !== 'number' || mapping.chineseFieldIndex < 0) {
-      throw new Error('Invalid chineseFieldIndex');
-    }
-    if (typeof mapping.englishFieldIndex !== 'number' || mapping.englishFieldIndex < 0) {
-      throw new Error('Invalid englishFieldIndex');
-    }
-    if (mapping.pinyinFieldIndex !== null && typeof mapping.pinyinFieldIndex !== 'number') {
-      mapping.pinyinFieldIndex = null;
-    }
-    return mapping;
-  } catch (e: any) {
-    throw new Error(`Failed to parse LLM field mapping: ${e.message}\n\nRaw: ${raw.slice(0, 200)}`);
-  }
 }
 
 // ────────────────────────────────────────────────────────────

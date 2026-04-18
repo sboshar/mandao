@@ -8,6 +8,7 @@ import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
 import { ClickableEnglish } from '../components/ClickableEnglish';
 import { TagInput } from '../components/TagInput';
+import { SentenceAudioControls } from '../components/SentenceAudioControls';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TutorialBanner } from '../components/TutorialBanner';
@@ -200,7 +201,13 @@ export function BrowsePage() {
                 </button>
 
                 {expandedId === s.id && (
-                  <div className="px-4 pb-4 pt-0" style={{ borderTop: '1px solid var(--border)' }}>
+                  <div
+                    className="px-4 pb-4 pt-3 rounded-b-lg"
+                    style={{
+                      borderTop: '1px solid var(--border)',
+                      background: 'var(--bg-surface-hover)',
+                    }}
+                  >
                     <div className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
                       <PinyinDisplay
                         pinyin={s.pinyinSandhi}
@@ -276,6 +283,9 @@ export function BrowsePage() {
                         />
                       </div>
                     )}
+                    <div className="mt-4 pt-3 flex justify-center" style={{ borderTop: '1px solid var(--border)' }}>
+                      <SentenceAudioControls sentenceId={s.id} text={s.chinese} />
+                    </div>
                   </div>
                 )}
               </div>

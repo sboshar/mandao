@@ -4,7 +4,7 @@ import * as repo from '../db/repo';
 import { getTokensForSentence, updateSentenceTags } from '../services/ingestion';
 import { TokenSpan } from './TokenSpan';
 import { PinyinDisplay } from './PinyinDisplay';
-import { AudioButton } from './AudioButton';
+import { SentenceAudioControls } from './SentenceAudioControls';
 import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
@@ -163,7 +163,12 @@ export function ReviewCard() {
                 Listen and type the pinyin:
               </p>
               <div className="flex items-center gap-3">
-                <AudioButton text={sentence.chinese} className="text-2xl" rate={speechRate} />
+                <SentenceAudioControls
+                  sentenceId={sentence.id}
+                  text={sentence.chinese}
+                  rate={speechRate}
+                  className="text-2xl"
+                />
                 <button
                   onClick={() => setSpeedIndex((i) => (i + 1) % SPEED_OPTIONS.length)}
                   className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
@@ -176,7 +181,7 @@ export function ReviewCard() {
             </div>
           ) : isEnToZh ? (
             <div className="text-xl text-center">
-              <ClickableEnglish text={sentence.english} />
+              {sentence.english}
             </div>
           ) : isPyToEnZh ? (
             <div className="text-center">
@@ -342,7 +347,7 @@ export function ReviewCard() {
               )}
 
               <div className="text-center">
-                <AudioButton text={sentence.chinese} />
+                <SentenceAudioControls sentenceId={sentence.id} text={sentence.chinese} />
               </div>
 
               {/* Tags */}

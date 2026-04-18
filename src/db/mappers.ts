@@ -11,6 +11,7 @@ import type {
   Deck,
   ReviewLog,
 } from './schema';
+import { normalizeChinese } from './localRepo';
 
 export function meaningFromRow(r: any): Meaning {
   return {
@@ -32,12 +33,14 @@ export function meaningLinkFromRow(r: any): MeaningLink {
 }
 
 export function sentenceFromRow(r: any): Sentence {
+  const chinese: string = r.chinese ?? '';
   return {
-    id: r.id, chinese: r.chinese, english: r.english,
+    id: r.id, chinese, english: r.english,
     pinyin: r.pinyin, pinyinSandhi: r.pinyin_sandhi,
     audioUrl: r.audio_url, source: r.source,
     tags: r.tags || [], createdAt: r.created_at,
     usn: r.usn,
+    normalizedChinese: normalizeChinese(chinese),
   };
 }
 
