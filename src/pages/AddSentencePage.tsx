@@ -15,7 +15,6 @@ import { useTutorialStore } from '../stores/tutorialStore';
 import { useSyncStore } from '../stores/syncStore';
 import { TUTORIAL_SENTENCES } from '../data/tutorialSentences';
 import {
-  stopRecognition,
   isSpeechRecognitionSupported,
   CANCELLED_MESSAGE,
 } from '../services/speechRecognition';
@@ -145,7 +144,11 @@ export function AddSentencePage() {
   })();
 
   useEffect(() => {
-    return () => { stopRecognition(); };
+    return () => {
+      // Cancel both SpeechRecognition and the parallel MediaRecorder if still active.
+      streamingHandleRef.current?.cancel();
+      streamingHandleRef.current = null;
+    };
   }, []);
 
   // Tutorial mode: pre-fill Chinese sentence

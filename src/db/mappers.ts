@@ -11,6 +11,7 @@ import type {
   Deck,
   ReviewLog,
 } from './schema';
+import { normalizeChinese } from './localRepo';
 
 export function meaningFromRow(r: any): Meaning {
   return {
@@ -39,20 +40,8 @@ export function sentenceFromRow(r: any): Sentence {
     audioUrl: r.audio_url, source: r.source,
     tags: r.tags || [], createdAt: r.created_at,
     usn: r.usn,
-    normalizedChinese: normalizeForIndex(chinese),
+    normalizedChinese: normalizeChinese(chinese),
   };
-}
-
-function normalizeForIndex(s: string): string {
-  let out = '';
-  for (const c of s) {
-    const code = c.codePointAt(0)!;
-    if (code >= 0x4e00 && code <= 0x9fff) { out += c; continue; }
-    if ((code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) {
-      out += c.toLowerCase();
-    }
-  }
-  return out;
 }
 
 export function tokenFromRow(r: any): SentenceToken {

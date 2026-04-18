@@ -181,3 +181,9 @@ button:active:not(:disabled) {
 .inset {
   background: var(--bg-inset);
 }
+
+/* Used by the Speak page mic button while listening. */
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}

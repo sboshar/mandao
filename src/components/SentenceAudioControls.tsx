@@ -57,6 +57,8 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
 
   // Inline recording state
   const [recordHandle, setRecordHandle] = useState<RecordingHandle | null>(null);
+  // Mirror of recordHandle for cleanup — effect cleanups see stale state.
+  const recordHandleRef = useRef<RecordingHandle | null>(null);
   const [pendingClip, setPendingClip] = useState<RecordingResult | null>(null);
   const [pendingName, setPendingName] = useState('');
   const [error, setError] = useState('');
@@ -77,6 +79,9 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
       cancelled = true;
       stopPlaybackRef.current?.();
       stopSpeaking();
+      // Release the mic if the user navigates away mid-recording.
+      recordHandleRef.current?.cancel();
+      recordHandleRef.current = null;
     };
   }, [sentenceId]);
 
@@ -113,6 +118,7 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     if (pendingClip || recordHandle) return;
     try {
       const handle = await startRecording();
+      recordHandleRef.current = handle;
       setRecordHandle(handle);
     } catch (e: any) {
       setError(e?.message || 'Could not access microphone.');
@@ -123,11 +129,13 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     if (!recordHandle) return;
     try {
       const result = await recordHandle.stop();
+      recordHandleRef.current = null;
       setRecordHandle(null);
       setPendingClip(result);
       setPendingName(defaultName());
     } catch (e: any) {
       setError(e?.message || 'Recording failed.');
+      recordHandleRef.current = null;
       setRecordHandle(null);
     }
   };

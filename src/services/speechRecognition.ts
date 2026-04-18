@@ -14,7 +14,6 @@ export function isSpeechRecognitionSupported(): boolean {
 }
 
 let activeRecognition: any = null;
-let cancelCallback: (() => void) | null = null;
 
 export interface StreamingHandle {
   /** Stop recognition and resolve with the final transcript. */
@@ -73,7 +72,6 @@ export function startStreamingRecognition(opts: StreamingOptions = {}): Streamin
     if (settled) return;
     settled = true;
     activeRecognition = null;
-    cancelCallback = null;
     resolveStop?.(finalTranscript);
   };
 
@@ -81,7 +79,6 @@ export function startStreamingRecognition(opts: StreamingOptions = {}): Streamin
     if (settled) return;
     settled = true;
     activeRecognition = null;
-    cancelCallback = null;
     resolveStop?.(finalTranscript);
   };
 
@@ -102,7 +99,6 @@ export function startStreamingRecognition(opts: StreamingOptions = {}): Streamin
     try { recognition.abort(); } catch {}
     settled = true;
     activeRecognition = null;
-    cancelCallback = null;
   };
 
   return { stop, cancel };
@@ -116,74 +112,5 @@ export function stopRecognition(): void {
     try { activeRecognition.abort(); } catch {}
     activeRecognition = null;
   }
-  if (cancelCallback) {
-    cancelCallback();
-    cancelCallback = null;
-  }
 }
 
-/**
- * Start listening for Chinese speech. Returns the recognized text.
- */
-export function recognizeChinese(): Promise<string> {
-  // Kill any previous session first
-  stopRecognition();
-
-  return new Promise((resolve, reject) => {
-    cancelCallback = () => {
-      reject(new Error(CANCELLED_MESSAGE));
-    };
-    if (!SpeechRecognitionClass) {
-      reject(new Error('Speech recognition not supported'));
-      return;
-    }
-
-    const recognition = new SpeechRecognitionClass();
-    recognition.lang = 'zh-CN';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    let settled = false;
-
-    recognition.onresult = (event: any) => {
-      if (settled) return;
-      settled = true;
-      activeRecognition = null;
-      cancelCallback = null;
-      const transcript = event.results[0]?.[0]?.transcript || '';
-      resolve(transcript);
-    };
-
-    recognition.onerror = (event: any) => {
-      if (settled) return;
-      settled = true;
-      activeRecognition = null;
-      cancelCallback = null;
-      if (event.error === 'aborted') {
-        reject(new Error(CANCELLED_MESSAGE));
-        return;
-      }
-      reject(new Error(event.error || 'Recognition failed'));
-    };
-
-    recognition.onnomatch = () => {
-      if (settled) return;
-      settled = true;
-      activeRecognition = null;
-      cancelCallback = null;
-      reject(new Error('No speech detected. Try again.'));
-    };
-
-    recognition.onend = () => {
-      if (settled) return;
-      settled = true;
-      activeRecognition = null;
-      cancelCallback = null;
-      reject(new Error(CANCELLED_MESSAGE));
-    };
-
-    activeRecognition = recognition;
-    recognition.start();
-  });
-}

@@ -413,10 +413,6 @@ export async function getAudioRecordingsBySentence(
     .sortBy('createdAt');
 }
 
-export async function getAudioRecording(id: string): Promise<AudioRecording | undefined> {
-  return localDb.audioRecordings.get(id);
-}
-
 export async function insertAudioRecording(rec: AudioRecording): Promise<void> {
   await localDb.audioRecordings.put(rec);
 }

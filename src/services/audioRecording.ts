@@ -2,16 +2,14 @@
  * Audio recording service using MediaRecorder.
  *
  * Two modes:
- *   - startRecording(): capture raw audio only (used by Browse page).
- *   - recordChineseWithAudio(): capture audio AND run speech recognition
- *     in parallel, so we get a transcript plus a keepable audio clip
- *     from a single mic session (used by the voice button on Add Sentence).
+ *   - startRecording(): capture raw audio only (used by the Browse / review
+ *     recording controls).
+ *   - startStreamingRecognitionWithAudio(): capture audio AND stream speech
+ *     recognition in parallel, so one mic session yields both a transcript
+ *     and a keepable audio clip (used by the voice button on Add Sentence).
  */
 import {
-  recognizeChinese,
-  stopRecognition,
   startStreamingRecognition,
-  CANCELLED_MESSAGE,
   type StreamingOptions,
 } from './speechRecognition';
 
@@ -119,47 +117,6 @@ export interface VoiceWithAudioResult {
   audio: RecordingResult | null;
 }
 
-/**
- * Run MediaRecorder and SpeechRecognition in parallel so the user can,
- * from a single mic session, both get their speech transcribed and
- * optionally save the raw audio clip as a named recording.
- *
- * SpeechRecognition resolves when the API detects end-of-speech; we then
- * stop MediaRecorder to produce the blob. If recognition fails, audio is
- * still returned so the user can salvage the recording.
- */
-export async function recognizeChineseWithAudio(): Promise<VoiceWithAudioResult> {
-  // Start audio capture first so we don't miss the beginning of speech.
-  let recHandle: RecordingHandle | null = null;
-  if (isAudioRecordingSupported()) {
-    try {
-      recHandle = await startRecording();
-    } catch {
-      recHandle = null;
-    }
-  }
-
-  try {
-    const transcript = await recognizeChinese();
-    const audio = recHandle ? await recHandle.stop().catch(() => null) : null;
-    return { transcript, audio };
-  } catch (err: any) {
-    if (recHandle) {
-      if (err?.message === CANCELLED_MESSAGE) {
-        recHandle.cancel();
-      } else {
-        const audio = await recHandle.stop().catch(() => null);
-        if (audio) return { transcript: '', audio };
-      }
-    }
-    throw err;
-  }
-}
-
-export function abortRecognizeWithAudio(): void {
-  stopRecognition();
-}
-
 export interface StreamingWithAudioHandle {
   /** Stop streaming; resolves with final transcript + audio blob. */
   stop: () => Promise<VoiceWithAudioResult>;
@@ -168,9 +125,10 @@ export interface StreamingWithAudioHandle {
 }
 
 /**
- * Streaming counterpart to recognizeChineseWithAudio: MediaRecorder runs the
- * whole time and SpeechRecognition streams interim results until the caller
- * stops it. Used for the "hold-to-talk" voice button on Add Sentence.
+ * Start a streaming recognition session with parallel audio capture.
+ * MediaRecorder runs the whole time and SpeechRecognition streams interim
+ * results until the caller invokes stop(). Used for the voice button on
+ * Add Sentence.
  */
 export async function startStreamingRecognitionWithAudio(
   opts: StreamingOptions = {}

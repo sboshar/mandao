@@ -359,7 +359,6 @@ export function SpeakPage() {
             )}
           </button>
         </div>
-        <style>{`@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }`}</style>
 
         {recognizedText !== null && (
           <div className="flex gap-2 justify-center">
