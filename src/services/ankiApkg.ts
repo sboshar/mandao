@@ -10,6 +10,8 @@ import { generateAnalysisPrompt, parseLLMResponse, getExistingMeanings } from '.
 import { ingestSentence } from './ingestion';
 import * as repo from '../db/repo';
 import type { ImportProgress, ProgressCallback } from './ankiImport';
+import { v4 as uuid } from 'uuid';
+import type { AudioRecording } from '../db/schema';
 
 // Re-export types for convenience
 export type { ImportProgress, ProgressCallback };
@@ -43,7 +45,9 @@ function stripAnkiHtml(html: string): string {
     .trim();
 }
 
-async function openApkgDatabase(file: File): Promise<{ db: Database; tableNames: string[] }> {
+async function openApkgDatabase(
+  file: File,
+): Promise<{ db: Database; tableNames: string[]; zip: JSZip; media: Record<string, string> }> {
   const arrayBuf = await file.arrayBuffer();
   const zip = await JSZip.loadAsync(arrayBuf);
   const SQL = await getSql();
@@ -68,7 +72,64 @@ async function openApkgDatabase(file: File): Promise<{ db: Database; tableNames:
     throw new Error('Invalid .apkg database: no notes table found.');
   }
 
-  return { db, tableNames };
+  let media: Record<string, string> = {};
+  const mediaFile = zip.file('media');
+  if (mediaFile) {
+    try {
+      media = JSON.parse(await mediaFile.async('string'));
+    } catch {
+      // Legacy decks may have a binary media file; skip gracefully.
+    }
+  }
+
+  return { db, tableNames, zip, media };
+}
+
+/** Extract [sound:filename] tokens from an Anki field. */
+function extractSoundRefs(fieldText: string): string[] {
+  const out: string[] = [];
+  const re = /\[sound:([^\]]+)\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(fieldText)) !== null) {
+    out.push(m[1]);
+  }
+  return out;
+}
+
+/** Guess a MIME type from an audio filename extension. */
+function mimeFromAudioFilename(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  switch (ext) {
+    case 'mp3': return 'audio/mpeg';
+    case 'ogg': case 'oga': return 'audio/ogg';
+    case 'wav': return 'audio/wav';
+    case 'webm': return 'audio/webm';
+    case 'm4a': case 'mp4': case 'aac': return 'audio/mp4';
+    case 'flac': return 'audio/flac';
+    default: return 'audio/mpeg';
+  }
+}
+
+/**
+ * Given a media map (index→filename) and a target filename, return the zip
+ * entry that holds the blob, plus the resolved filename. Returns null if the
+ * file isn't in the deck.
+ */
+function resolveMediaBlob(
+  zip: JSZip,
+  media: Record<string, string>,
+  filename: string,
+): { entry: JSZip.JSZipObject; filename: string } | null {
+  for (const [index, name] of Object.entries(media)) {
+    if (name === filename) {
+      const entry = zip.file(index);
+      if (entry) return { entry, filename: name };
+    }
+  }
+  // Fallback: some decks store media by filename directly.
+  const direct = zip.file(filename);
+  if (direct) return { entry: direct, filename };
+  return null;
 }
 
 function extractFieldNames(db: Database, tableNames: string[]): string[] {
@@ -191,31 +252,52 @@ export interface ApkgFieldInfo {
   fieldNames: string[];
   notes: ApkgNote[];
   suggestedChineseField: number;
+  /** First field containing `[sound:...]` tokens, or null if the deck has no audio. */
+  suggestedAudioField: number | null;
+  /** Whether the deck's media manifest lists any audio files. */
+  hasAudio: boolean;
 }
 
 export async function analyzeApkg(file: File): Promise<ApkgFieldInfo> {
-  const { db, tableNames } = await openApkgDatabase(file);
+  const { db, tableNames, media } = await openApkgDatabase(file);
 
   try {
     const fieldNames = extractFieldNames(db, tableNames);
 
     const notesResult = db.exec('SELECT id, flds FROM notes');
-    const notes: ApkgNote[] = (notesResult[0]?.values || []).map(row => ({
-      id: Number(row[0]),
-      fields: String(row[1]).split('\x1f').map(f => stripAnkiHtml(f)),
-    }));
-
-    // Single-pass Chinese field detection
-    const counts = new Array(fieldNames.length).fill(0);
+    const rawRows = notesResult[0]?.values || [];
+    const notes: ApkgNote[] = [];
+    const chineseCounts = new Array(fieldNames.length).fill(0);
+    const audioCounts = new Array(fieldNames.length).fill(0);
     const chineseRe = /[\u4e00-\u9fff\u3400-\u4dbf]/;
-    for (const n of notes) {
-      for (let idx = 0; idx < fieldNames.length; idx++) {
-        if (chineseRe.test(n.fields[idx] ?? '')) counts[idx]++;
-      }
-    }
-    const suggestedChineseField = counts.indexOf(Math.max(...counts));
 
-    return { fieldNames, notes, suggestedChineseField: Math.max(0, suggestedChineseField) };
+    for (const row of rawRows) {
+      const rawFields = String(row[1]).split('\x1f');
+      for (let idx = 0; idx < fieldNames.length; idx++) {
+        const raw = rawFields[idx] ?? '';
+        if (/\[sound:[^\]]+\]/.test(raw)) audioCounts[idx]++;
+      }
+      const stripped = rawFields.map(f => stripAnkiHtml(f));
+      for (let idx = 0; idx < fieldNames.length; idx++) {
+        if (chineseRe.test(stripped[idx] ?? '')) chineseCounts[idx]++;
+      }
+      notes.push({ id: Number(row[0]), fields: stripped });
+    }
+
+    const suggestedChineseField = chineseCounts.indexOf(Math.max(...chineseCounts));
+    const maxAudio = Math.max(...audioCounts);
+    const suggestedAudioField = maxAudio > 0 ? audioCounts.indexOf(maxAudio) : null;
+    const hasAudio = Object.values(media).some(name =>
+      /\.(mp3|ogg|oga|wav|webm|m4a|mp4|aac|flac)$/i.test(name),
+    );
+
+    return {
+      fieldNames,
+      notes,
+      suggestedChineseField: Math.max(0, suggestedChineseField),
+      suggestedAudioField,
+      hasAudio,
+    };
   } finally {
     db.close();
   }
@@ -231,6 +313,8 @@ export async function importFromApkg(
   abortSignal?: AbortSignal,
   chineseFieldIndex?: number,
   selectedNoteIds?: Set<number>,
+  audioFieldIndex?: number | null,
+  audioSourceName?: string,
 ): Promise<ImportProgress> {
   const progress: ImportProgress = {
     total: 0,
@@ -244,7 +328,10 @@ export async function importFromApkg(
 
   onProgress({ ...progress, currentSentence: 'Reading .apkg file...' });
 
-  const { db, tableNames } = await openApkgDatabase(file);
+  const { db, tableNames, zip, media } = await openApkgDatabase(file);
+  const audioEnabled =
+    typeof audioFieldIndex === 'number' && audioFieldIndex >= 0;
+  const audioLabel = (audioSourceName?.trim() || 'anki');
 
   try {
     let colCreatedMs = Date.now();
@@ -356,6 +443,35 @@ export async function importFromApkg(
           source: 'anki-apkg-import',
           tags: ['anki-import'],
         });
+
+        // Import attached audio if the user picked an audio field.
+        if (audioEnabled) {
+          const rawAudioField = fields[audioFieldIndex!] ?? '';
+          const soundRefs = extractSoundRefs(rawAudioField);
+          for (const refName of soundRefs) {
+            const resolved = resolveMediaBlob(zip, media, refName);
+            if (!resolved) {
+              progress.issues.push({
+                sentence: chinese,
+                reason: `Audio file not found in deck: ${refName}`,
+                type: 'skipped',
+              });
+              continue;
+            }
+            const mimeType = mimeFromAudioFilename(resolved.filename);
+            const blob = await resolved.entry.async('blob');
+            const rec: AudioRecording = {
+              id: uuid(),
+              sentenceId,
+              name: audioLabel,
+              blob: blob.type ? blob : new Blob([blob], { type: mimeType }),
+              mimeType,
+              source: 'manual',
+              createdAt: Date.now(),
+            };
+            await repo.insertAudioRecording(rec);
+          }
+        }
 
         // Apply scheduling data from Anki card if available
         const ankiCard = cardsMap.get(note.id);

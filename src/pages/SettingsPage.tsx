@@ -614,6 +614,8 @@ function AnkiSection() {
   const [apkgAnalyzing, setApkgAnalyzing] = useState(false);
   const [chineseField, setChineseField] = useState(0);
   const [displayField, setDisplayField] = useState(0);
+  const [audioField, setAudioField] = useState<number | null>(null);
+  const [audioName, setAudioName] = useState('anki');
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
   const lastClickedIdx = useRef<number | null>(null);
   const dragSelectMode = useRef<boolean | null>(null);
@@ -656,6 +658,8 @@ function AnkiSection() {
         setChineseField(info.suggestedChineseField);
         const otherField = info.fieldNames.findIndex((_, i) => i !== info.suggestedChineseField);
         setDisplayField(otherField >= 0 ? otherField : 0);
+        setAudioField(null);
+        setAudioName('anki');
         setSelectedNotes(new Set(info.notes.map(n => n.id)));
       } catch (e: any) {
         setAnkiError(e.message || 'Failed to read .apkg file');
@@ -671,9 +675,19 @@ function AnkiSection() {
     const noteIds = new Set(selectedNotes);
     const file = apkgFile;
     const chIdx = chineseField;
+    const audioIdx = audioField;
+    const audioLabel = audioName;
     setApkgInfo(null);
     setApkgFile(null);
-    await runImport(() => importFromApkg(file, (p) => setAnkiProgress({ ...p }), abortRef.current!.signal, chIdx, noteIds));
+    await runImport(() => importFromApkg(
+      file,
+      (p) => setAnkiProgress({ ...p }),
+      abortRef.current!.signal,
+      chIdx,
+      noteIds,
+      audioIdx,
+      audioLabel,
+    ));
   };
 
   const runImport = async (importFn: () => Promise<ImportProgress>) => {
@@ -777,7 +791,7 @@ function AnkiSection() {
         {/* .apkg browse & select */}
         {apkgInfo && !ankiImporting && !ankiProgress && (
           <div className="space-y-4">
-            {/* Field selectors */}
+            {/* Primary: Import field + Audio field */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Import field (Chinese)</label>
@@ -793,19 +807,38 @@ function AnkiSection() {
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Display as</label>
+                <label className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Audio field</label>
                 <select
-                  value={displayField}
-                  onChange={(e) => setDisplayField(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  value={audioField === null ? '' : audioField}
+                  onChange={(e) => setAudioField(e.target.value === '' ? null : Number(e.target.value))}
+                  disabled={!apkgInfo.hasAudio}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none disabled:opacity-50"
                   style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                 >
+                  <option value="">{apkgInfo.hasAudio ? 'None (skip audio)' : 'No audio in deck'}</option>
                   {apkgInfo.fieldNames.map((name, idx) => (
-                    <option key={idx} value={idx}>{name}</option>
+                    <option key={idx} value={idx}>
+                      {name}{idx === apkgInfo.suggestedAudioField ? ' (detected)' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
             </div>
+
+            {/* Audio name (only meaningful when audio is enabled) */}
+            {apkgInfo.hasAudio && audioField !== null && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Audio name</label>
+                <input
+                  type="text"
+                  value={audioName}
+                  onChange={(e) => setAudioName(e.target.value)}
+                  placeholder="anki"
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                />
+              </div>
+            )}
 
             {/* Select all / none */}
             <div className="flex items-center justify-between">
@@ -828,6 +861,21 @@ function AnkiSection() {
                   Select none
                 </button>
               </div>
+            </div>
+
+            {/* Secondary: Display-as (how the note list previews each note) */}
+            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              <span>Display notes as</span>
+              <select
+                value={displayField}
+                onChange={(e) => setDisplayField(Number(e.target.value))}
+                className="px-2 py-1 rounded outline-none bg-transparent"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+              >
+                {apkgInfo.fieldNames.map((name, idx) => (
+                  <option key={idx} value={idx}>{name}</option>
+                ))}
+              </select>
             </div>
 
             {/* Note list — shift-click for range, drag to paint-select */}
