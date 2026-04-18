@@ -93,9 +93,9 @@ create table if not exists audio_recordings (
   user_id uuid not null references auth.users(id) on delete cascade,
   sentence_id text not null references sentences(id) on delete cascade,
   name text not null,
-  -- Path inside the `audio-recordings` bucket. Must start with the owner's
-  -- uid so delete triggers and RLS remain consistent even if the row is
-  -- updated in-place by a misbehaving client. See check constraint below.
+  -- Path inside the `audio-recordings` bucket. Locked to a single filename
+  -- under the owner's uid folder so traversal characters can't sneak in.
+  -- See check constraint below + the immutable trigger.
   storage_path text not null,
   mime_type text not null,
   duration_ms int,
@@ -104,8 +104,20 @@ create table if not exists audio_recordings (
   updated_at bigint not null default 0,
   usn bigint not null default 0,
   constraint audio_recordings_path_owner_prefix
-    check (storage_path like (user_id::text || '/%'))
+    check (storage_path ~ ('^' || user_id::text || '/[A-Za-z0-9._-]+$')),
+  constraint audio_recordings_name_length
+    check (length(name) between 1 and 200)
 );
+
+-- Re-apply constraints in-place for environments where the table already
+-- exists from an earlier (looser) version of this migration.
+alter table audio_recordings drop constraint if exists audio_recordings_path_owner_prefix;
+alter table audio_recordings add constraint audio_recordings_path_owner_prefix
+  check (storage_path ~ ('^' || user_id::text || '/[A-Za-z0-9._-]+$'));
+
+alter table audio_recordings drop constraint if exists audio_recordings_name_length;
+alter table audio_recordings add constraint audio_recordings_name_length
+  check (length(name) between 1 and 200);
 
 create index if not exists idx_audio_recordings_user
   on audio_recordings(user_id);
@@ -119,6 +131,25 @@ drop trigger if exists trg_audio_recordings_sync on audio_recordings;
 create trigger trg_audio_recordings_sync
   before insert or update on audio_recordings
   for each row execute function bump_sync_meta('with_updated_at');
+
+-- storage_path is set at insert time and must never change. The delete
+-- trigger trusts OLD.storage_path to point at the right Storage object,
+-- so allowing a client to repoint it would let them target any file in
+-- their own folder for deletion via a single update+delete.
+create or replace function reject_audio_storage_path_change()
+returns trigger language plpgsql as $func$
+begin
+  if NEW.storage_path is distinct from OLD.storage_path then
+    raise exception 'audio_recordings.storage_path is immutable';
+  end if;
+  return NEW;
+end;
+$func$;
+
+drop trigger if exists trg_audio_recordings_immutable_path on audio_recordings;
+create trigger trg_audio_recordings_immutable_path
+  before update on audio_recordings
+  for each row execute function reject_audio_storage_path_change();
 
 -- ============================================================
 -- 4. Table RLS
