@@ -12,6 +12,7 @@ import type {
   SrsCard,
   Deck,
   ReviewLog,
+  AudioRecording,
 } from './schema';
 
 // ============================================================
@@ -72,6 +73,7 @@ import {
   srsCardFromRow,
   deckFromRow,
   reviewLogFromRow,
+  audioRecordingFromRow,
 } from './mappers';
 
 // --- camelCase → snake_case (used only by this module) ---
@@ -312,6 +314,17 @@ export async function getAllReviewLogs(): Promise<ReviewLog[]> {
 export async function insertReviewLog(log: ReviewLog): Promise<void> {
   const userId = await getUserId();
   throwOnError(await supabase.from('review_logs').insert(reviewLogToRow(log, userId)));
+}
+
+// ============================================================
+// Audio recordings (metadata only — blobs live in Storage)
+// ============================================================
+
+export async function getAllAudioRecordings(): Promise<AudioRecording[]> {
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('audio_recordings').select().order('id').range(from, to)
+  );
+  return data.map(audioRecordingFromRow);
 }
 
 // ============================================================

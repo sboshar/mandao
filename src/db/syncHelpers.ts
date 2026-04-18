@@ -33,6 +33,22 @@ export function computeSafeUsn(
 }
 
 /**
+ * Pick a file extension for an audio Storage object based on the Blob's
+ * MIME type. Used to build the deterministic Storage path
+ * `{user_id}/{id}.{ext}`. Accepts codec-qualified types (e.g. webm;codecs=opus).
+ */
+export function extensionFromMime(mime: string): string {
+  const base = mime.split(';')[0].trim().toLowerCase();
+  if (base.includes('webm')) return 'webm';
+  if (base.includes('mpeg')) return 'mp3';
+  if (base.includes('mp4')) return 'm4a';
+  if (base.includes('ogg')) return 'ogg';
+  if (base.includes('wav')) return 'wav';
+  if (base.includes('aac')) return 'aac';
+  return 'bin';
+}
+
+/**
  * Group outbox ops into consecutive runs of the same type.
  * Preserves causal ordering (e.g. ingest before its delete).
  */

@@ -38,6 +38,19 @@ const RecordDot = (
   </svg>
 );
 
+const DownloadingSpinner = (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+    <path d="M12 2v4" />
+    <path d="M12 18v4" />
+    <path d="M4.93 4.93l2.83 2.83" />
+    <path d="M16.24 16.24l2.83 2.83" />
+    <path d="M2 12h4" />
+    <path d="M18 12h4" />
+    <path d="M4.93 19.07l2.83-2.83" />
+    <path d="M16.24 7.76l2.83-2.83" />
+  </svg>
+);
+
 interface Props {
   sentenceId: string;
   text: string;
@@ -63,6 +76,7 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   const [pendingName, setPendingName] = useState('');
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const canRecord = isAudioRecordingSupported();
 
   const refresh = async () => {
@@ -102,11 +116,29 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     setPlayingId((cur) => (cur === 'default' ? null : cur));
   };
 
-  const playRecording = (rec: AudioRecording) => {
+  const playRecording = async (rec: AudioRecording) => {
     if (playingId === rec.id) { stopAll(); return; }
+    if (downloadingId === rec.id) return;
     stopAll();
+
+    let blob = rec.blob;
+    if (!blob) {
+      setDownloadingId(rec.id);
+      try {
+        const fetched = await repo.fetchAudioBlob(rec.id);
+        if (!fetched) {
+          setError('Could not load this recording.');
+          return;
+        }
+        blob = fetched;
+        await refresh();
+      } finally {
+        setDownloadingId((cur) => (cur === rec.id ? null : cur));
+      }
+    }
+
     setPlayingId(rec.id);
-    stopPlaybackRef.current = playBlob(rec.blob, () => {
+    stopPlaybackRef.current = playBlob(blob, () => {
       setPlayingId((cur) => (cur === rec.id ? null : cur));
     });
   };
@@ -202,16 +234,18 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
         {/* Saved recordings */}
         {recordings.map((rec) => {
           const active = playingId === rec.id;
+          const downloading = downloadingId === rec.id;
           const confirming = confirmDeleteId === rec.id;
           return (
             <div key={rec.id} className="flex flex-col items-center">
               <button
                 onClick={() => playRecording(rec)}
+                disabled={downloading}
                 className="inline-flex items-center justify-center transition-all active:scale-90"
                 style={iconBtnStyle(active)}
-                title={active ? 'Stop' : `Play "${rec.name}"`}
+                title={active ? 'Stop' : downloading ? 'Downloading…' : `Play "${rec.name}"`}
               >
-                {active ? StopIcon : SpeakerIcon}
+                {downloading ? DownloadingSpinner : active ? StopIcon : SpeakerIcon}
               </button>
               <span className="text-[10px] leading-none max-w-[6rem] truncate"
                 style={{ color: 'var(--text-tertiary)' }}>

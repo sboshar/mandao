@@ -413,12 +413,19 @@ export async function getAudioRecordingsBySentence(
     .sortBy('createdAt');
 }
 
+export async function getAudioRecording(id: string): Promise<AudioRecording | undefined> {
+  return localDb.audioRecordings.get(id);
+}
+
 export async function insertAudioRecording(rec: AudioRecording): Promise<void> {
   await localDb.audioRecordings.put(rec);
 }
 
-export async function updateAudioRecordingName(id: string, name: string): Promise<void> {
-  await localDb.audioRecordings.update(id, { name, updatedAt: Date.now() });
+export async function updateAudioRecording(
+  id: string,
+  patch: Partial<AudioRecording>,
+): Promise<void> {
+  await localDb.audioRecordings.update(id, patch);
 }
 
 export async function deleteAudioRecording(id: string): Promise<void> {

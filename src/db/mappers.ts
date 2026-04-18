@@ -10,6 +10,7 @@ import type {
   SrsCard,
   Deck,
   ReviewLog,
+  AudioRecording,
 } from './schema';
 import { normalizeChinese } from './localRepo';
 
@@ -82,6 +83,51 @@ export function reviewLogFromRow(r: any): ReviewLog {
     elapsedDays: r.elapsed_days, scheduledDays: r.scheduled_days,
     reviewedAt: r.reviewed_at,
     usn: r.usn,
+  };
+}
+
+/**
+ * Blob intentionally omitted — the wire-format row has no blob, only a path.
+ * Consumers lazy-fetch the blob via Storage signed URLs on first play.
+ */
+export function audioRecordingFromRow(r: any): AudioRecording {
+  return {
+    id: r.id,
+    sentenceId: r.sentence_id,
+    name: r.name,
+    storagePath: r.storage_path,
+    mimeType: r.mime_type,
+    durationMs: r.duration_ms ?? undefined,
+    source: r.source,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    usn: r.usn,
+  };
+}
+
+export function audioRecordingToRow(
+  rec: {
+    id: string;
+    sentenceId: string;
+    name: string;
+    mimeType: string;
+    durationMs?: number | null;
+    source: 'voice-input' | 'manual';
+    createdAt: number;
+  },
+  userId: string,
+  storagePath: string,
+) {
+  return {
+    id: rec.id,
+    user_id: userId,
+    sentence_id: rec.sentenceId,
+    name: rec.name,
+    storage_path: storagePath,
+    mime_type: rec.mimeType,
+    duration_ms: rec.durationMs ?? null,
+    source: rec.source,
+    created_at: rec.createdAt,
   };
 }
 

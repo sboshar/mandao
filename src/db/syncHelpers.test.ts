@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { computeSafeUsn, groupConsecutiveRuns, type TableStats } from './syncHelpers';
+import {
+  computeSafeUsn,
+  extensionFromMime,
+  groupConsecutiveRuns,
+  type TableStats,
+} from './syncHelpers';
 import type { SyncOp } from './localDb';
 
 // ============================================================
@@ -167,5 +172,36 @@ describe('groupConsecutiveRuns', () => {
     expect(runs[0][0].op).toBe('ingestBundle');
     expect(runs[1][0].op).toBe('updateTags');
     expect(runs[2][0].op).toBe('ingestBundle');
+  });
+});
+
+// ============================================================
+// extensionFromMime
+// ============================================================
+
+describe('extensionFromMime', () => {
+  it('maps plain audio types to their canonical extension', () => {
+    expect(extensionFromMime('audio/webm')).toBe('webm');
+    expect(extensionFromMime('audio/mpeg')).toBe('mp3');
+    expect(extensionFromMime('audio/mp4')).toBe('m4a');
+    expect(extensionFromMime('audio/ogg')).toBe('ogg');
+    expect(extensionFromMime('audio/wav')).toBe('wav');
+    expect(extensionFromMime('audio/aac')).toBe('aac');
+  });
+
+  it('ignores codec parameters', () => {
+    expect(extensionFromMime('audio/webm;codecs=opus')).toBe('webm');
+    expect(extensionFromMime('audio/ogg; codecs=opus')).toBe('ogg');
+    expect(extensionFromMime('audio/mp4;codecs=mp4a.40.2')).toBe('m4a');
+  });
+
+  it('is case-insensitive', () => {
+    expect(extensionFromMime('AUDIO/WEBM')).toBe('webm');
+    expect(extensionFromMime('Audio/Mpeg;Codecs=Mp3')).toBe('mp3');
+  });
+
+  it('falls back to bin on unknown types', () => {
+    expect(extensionFromMime('application/octet-stream')).toBe('bin');
+    expect(extensionFromMime('')).toBe('bin');
   });
 });
