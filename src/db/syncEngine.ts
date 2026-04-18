@@ -24,7 +24,12 @@ import {
   audioRecordingToRow,
 } from './mappers';
 import { getCachedUserIdOrThrow } from './remoteRepo';
-import { computeSafeUsn, groupConsecutiveRuns, type TableStats } from './syncHelpers';
+import {
+  computeSafeUsn,
+  extensionFromMime,
+  groupConsecutiveRuns,
+  type TableStats,
+} from './syncHelpers';
 import { useSyncStore } from '../stores/syncStore';
 
 // ============================================================
@@ -204,22 +209,6 @@ async function pushDeleteAllData(): Promise<void> {
 }
 
 /**
- * Pick a file extension for the Storage object name based on the Blob's
- * MIME type. Path is `{user_id}/{id}.{ext}` — matching the server-side
- * `audio_recordings_path_owner_prefix` CHECK constraint.
- */
-function extensionFromMime(mime: string): string {
-  const base = mime.split(';')[0].trim().toLowerCase();
-  if (base.includes('webm')) return 'webm';
-  if (base.includes('mpeg')) return 'mp3';
-  if (base.includes('mp4')) return 'm4a';
-  if (base.includes('ogg')) return 'ogg';
-  if (base.includes('wav')) return 'wav';
-  if (base.includes('aac')) return 'aac';
-  return 'bin';
-}
-
-/**
  * upsert:true makes retries idempotent on the deterministic path. FK 23503
  * handles the race where the parent sentence was deleted remotely between
  * enqueue and push — we silently drop the op and clean up instead of
@@ -256,6 +245,11 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
     .upsert(audioRecordingToRow(payload, userId, storagePath));
   if (rowErr) {
     if ((rowErr as { code?: string }).code === '23503') {
+      // Leave a trail — silently erasing the user's local recording here would
+      // make any unexpected firing (RLS regression, schema drift) invisible.
+      console.warn(
+        `[sync] dropping audio recording ${payload.id}: parent sentence ${payload.sentenceId} not found (FK 23503)`,
+      );
       try {
         await supabase.storage.from('audio-recordings').remove([storagePath]);
       } catch {}
