@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
@@ -6,8 +6,8 @@ import { getAllTags } from '../services/ingestion';
 import { speakChinese } from '../services/audio';
 import {
   isSpeechRecognitionSupported,
-  recognizeChinese,
-  stopRecognition,
+  startStreamingRecognition,
+  type StreamingHandle,
 } from '../services/speechRecognition';
 import {
   compareCharacters,
@@ -114,37 +114,53 @@ export function SpeakPage() {
     setError('');
   };
 
+  const streamHandleRef = useRef<StreamingHandle | null>(null);
+
+  const finalizeText = async (text: string) => {
+    setRecognizedText(text);
+    lookupPinyin(text);
+    if (mode === 'sentence' && sentence) {
+      const comp = compareCharacters(sentence.chinese, text);
+      setComparison(comp);
+      const expChars = comp.map((r) => r.char);
+      const heardChars = comp.map((r) => r.heard || '');
+      const [ep, hp] = await Promise.all([
+        lookupPinyinForChars(expChars),
+        lookupPinyinForChars(heardChars),
+      ]);
+      setExpectedPinyin(ep);
+      setHeardPinyin(hp);
+    }
+  };
+
   const handleMic = async () => {
     if (isListening) {
-      stopRecognition();
+      const handle = streamHandleRef.current;
+      streamHandleRef.current = null;
       setIsListening(false);
+      if (handle) {
+        try {
+          const text = await handle.stop();
+          await finalizeText(text);
+        } catch (e: any) {
+          if (e?.message !== 'Cancelled') {
+            setError(e?.message || 'Recognition failed');
+          }
+        }
+      }
       return;
     }
+
     resetResult();
-    setIsListening(true);
     try {
-      const text = await recognizeChinese();
-      setRecognizedText(text);
-      lookupPinyin(text);
-      if (mode === 'sentence' && sentence) {
-        const comp = compareCharacters(sentence.chinese, text);
-        setComparison(comp);
-        // Lookup pinyin for expected and heard characters
-        const expChars = comp.map((r) => r.char);
-        const heardChars = comp.map((r) => r.heard || '');
-        const [ep, hp] = await Promise.all([
-          lookupPinyinForChars(expChars),
-          lookupPinyinForChars(heardChars),
-        ]);
-        setExpectedPinyin(ep);
-        setHeardPinyin(hp);
-      }
+      const handle = startStreamingRecognition({
+        onInterim: (text) => setRecognizedText(text),
+      });
+      streamHandleRef.current = handle;
+      setIsListening(true);
     } catch (e: any) {
-      if (e.message !== 'Cancelled') {
-        setError(e.message || 'Recognition failed');
-      }
+      setError(e?.message || 'Recognition failed');
     }
-    setIsListening(false);
   };
 
   const handleNext = () => {
@@ -185,15 +201,15 @@ export function SpeakPage() {
   if (!started) {
     return (
       <div className="p-6 max-w-md mx-auto">
-        <div className="flex items-center justify-between mb-8">
+        <div className="grid grid-cols-3 items-center mb-8">
           <button
             onClick={() => navigate('/')}
-            className="px-3 py-1 rounded text-sm transition-colors"
+            className="justify-self-start px-3 py-1 rounded text-sm transition-colors"
             style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
           >
             &larr; Back
           </button>
-          <h1 className="text-xl font-bold">Speak</h1>
+          <h1 className="text-xl font-bold text-center">Speak</h1>
           <div />
         </div>
 
@@ -284,15 +300,15 @@ export function SpeakPage() {
   if (mode === 'free') {
     return (
       <div className="max-w-md mx-auto p-6">
-        <div className="flex items-center justify-between mb-8">
+        <div className="grid grid-cols-3 items-center mb-8">
           <button
             onClick={() => { setMode(null); resetResult(); }}
-            className="px-3 py-1 rounded text-sm transition-colors"
+            className="justify-self-start px-3 py-1 rounded text-sm transition-colors"
             style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
           >
             &larr; Back
           </button>
-          <h1 className="text-xl font-bold">Free Speak</h1>
+          <h1 className="text-xl font-bold text-center">Free Speak</h1>
           <div />
         </div>
 
@@ -320,18 +336,27 @@ export function SpeakPage() {
         <div className="flex justify-center mb-6">
           <button
             onClick={handleMic}
-            disabled={isListening}
-            className="w-20 h-20 rounded-full flex items-center justify-center text-3xl transition-all"
+            className="w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95"
             style={{
-              background: isListening
-                ? 'color-mix(in srgb, var(--danger) 20%, var(--bg-surface))'
-                : 'var(--bg-inset)',
-              border: `3px solid ${isListening ? 'var(--danger)' : 'var(--border)'}`,
+              background: 'transparent',
+              border: 'none',
               color: isListening ? 'var(--danger)' : 'var(--text-secondary)',
               animation: isListening ? 'pulse 1.5s ease-in-out infinite' : 'none',
+              cursor: 'pointer',
             }}
+            title={isListening ? 'Stop' : 'Start speaking'}
           >
-            {isListening ? '\u23F9' : '\u{1F3A4}'}
+            {isListening ? (
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            ) : (
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" x2="12" y1="19" y2="22" />
+              </svg>
+            )}
           </button>
         </div>
         <style>{`@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }`}</style>
@@ -386,16 +411,16 @@ export function SpeakPage() {
   return (
     <div className="max-w-md mx-auto p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="grid grid-cols-3 items-center mb-8">
         <button
           onClick={() => { setMode(null); resetResult(); setCurrentIndex(0); }}
-          className="px-3 py-1 rounded text-sm transition-colors"
+          className="justify-self-start px-3 py-1 rounded text-sm transition-colors"
           style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
         >
           &larr; Back
         </button>
-        <h1 className="text-xl font-bold">Speak</h1>
-        <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{remaining} left</div>
+        <h1 className="text-xl font-bold text-center">Speak</h1>
+        <div className="justify-self-end text-sm" style={{ color: 'var(--text-tertiary)' }}>{remaining} left</div>
       </div>
 
       {/* Sentence */}
@@ -485,21 +510,29 @@ export function SpeakPage() {
       <div className="flex justify-center mb-6">
         <button
           onClick={handleMic}
-          disabled={isListening}
-          className="w-20 h-20 rounded-full flex items-center justify-center text-3xl transition-all"
+          className="w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95"
           style={{
-            background: isListening
-              ? 'color-mix(in srgb, var(--danger) 20%, var(--bg-surface))'
-              : 'var(--bg-inset)',
-            border: `3px solid ${isListening ? 'var(--danger)' : 'var(--border)'}`,
+            background: 'transparent',
+            border: 'none',
             color: isListening ? 'var(--danger)' : 'var(--text-secondary)',
             animation: isListening ? 'pulse 1.5s ease-in-out infinite' : 'none',
+            cursor: 'pointer',
           }}
+          title={isListening ? 'Stop' : 'Start speaking'}
         >
-          {isListening ? '\u23F9' : '\u{1F3A4}'}
+          {isListening ? (
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          ) : (
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" x2="12" y1="19" y2="22" />
+            </svg>
+          )}
         </button>
       </div>
-      <style>{`@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }`}</style>
 
       {/* Action buttons */}
       <div className="flex gap-2 justify-center flex-wrap">

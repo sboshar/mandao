@@ -51,11 +51,37 @@ export interface Sentence {
   audioUrl: string | null;
   /** e.g. "manual", "textbook-ch3" */
   source: string;
+  /**
+   * Lowercase Hanzi + alphanumerics of `chinese`, with punctuation/whitespace
+   * stripped. Indexed locally for instant dedup lookup pre-LLM. Local-only —
+   * not sent to Supabase; backfilled on Dexie upgrade and when pulling rows.
+   */
+  normalizedChinese?: string;
   /** User-defined tags, e.g. "restaurant", "travel" */
   tags: string[];
   createdAt: number;
   updatedAt?: number;
   usn?: number;
+}
+
+/**
+ * User- or voice-captured audio clip attached to a sentence.
+ * Multiple recordings per sentence are supported; each has a user-given name.
+ * Stored as a Blob in IndexedDB. Not yet synced to Supabase — local only.
+ */
+export interface AudioRecording {
+  id: string;
+  sentenceId: string;
+  /** User-facing label, e.g. "My voice", "Native speaker". */
+  name: string;
+  /** Raw audio data. */
+  blob: Blob;
+  mimeType: string;
+  durationMs?: number;
+  /** Where this recording came from. */
+  source: 'voice-input' | 'manual';
+  createdAt: number;
+  updatedAt?: number;
 }
 
 /** Junction table: links sentences to meanings, preserving token order. */

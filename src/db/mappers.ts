@@ -32,13 +32,27 @@ export function meaningLinkFromRow(r: any): MeaningLink {
 }
 
 export function sentenceFromRow(r: any): Sentence {
+  const chinese: string = r.chinese ?? '';
   return {
-    id: r.id, chinese: r.chinese, english: r.english,
+    id: r.id, chinese, english: r.english,
     pinyin: r.pinyin, pinyinSandhi: r.pinyin_sandhi,
     audioUrl: r.audio_url, source: r.source,
     tags: r.tags || [], createdAt: r.created_at,
     usn: r.usn,
+    normalizedChinese: normalizeForIndex(chinese),
   };
+}
+
+function normalizeForIndex(s: string): string {
+  let out = '';
+  for (const c of s) {
+    const code = c.codePointAt(0)!;
+    if (code >= 0x4e00 && code <= 0x9fff) { out += c; continue; }
+    if ((code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) {
+      out += c.toLowerCase();
+    }
+  }
+  return out;
 }
 
 export function tokenFromRow(r: any): SentenceToken {

@@ -10,6 +10,7 @@ import { v4 as uuid } from 'uuid';
 import * as repo from '../db/repo';
 import { enqueueSync } from '../db/repo';
 import * as local from '../db/localRepo';
+import { normalizeChinese } from '../db/localRepo';
 import type {
   Meaning,
   MeaningLink,
@@ -66,7 +67,7 @@ export interface SentenceInput {
 export async function ingestSentence(input: SentenceInput): Promise<string> {
   const sentenceId = uuid();
 
-  const existing = await repo.getSentenceByChinese(input.chinese.trim());
+  const existing = await repo.getSentenceByNormalizedChinese(input.chinese.trim());
   if (existing) {
     throw new Error(`This sentence already exists in the app.`);
   }
@@ -123,6 +124,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     source: input.source || 'manual',
     tags: input.tags || [],
     createdAt: Date.now(),
+    normalizedChinese: normalizeChinese(input.chinese),
   };
 
   let sentenceInserted = false;

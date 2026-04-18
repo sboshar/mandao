@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router';
 import { ingestSentence, type TokenInput, type CharacterInput } from '../services/ingestion';
 import {
@@ -15,11 +15,23 @@ import { useTutorialStore } from '../stores/tutorialStore';
 import { useSyncStore } from '../stores/syncStore';
 import { TUTORIAL_SENTENCES } from '../data/tutorialSentences';
 import {
-  recognizeChinese,
   stopRecognition,
   isSpeechRecognitionSupported,
   CANCELLED_MESSAGE,
 } from '../services/speechRecognition';
+import {
+  startStreamingRecognitionWithAudio,
+  isAudioRecordingSupported,
+  formatDuration,
+  playBlob,
+  type RecordingResult,
+  type StreamingWithAudioHandle,
+} from '../services/audioRecording';
+import { pinyin as toPinyin } from 'pinyin-pro';
+import { computeTokenCoverage } from '../services/tokenCoverage';
+import { v4 as uuid } from 'uuid';
+import * as repo from '../db/repo';
+import type { AudioRecording } from '../db/schema';
 
 interface TokenFormData {
   surfaceForm: string;
@@ -48,31 +60,89 @@ export function AddSentencePage() {
   const [usePinyinIME, setUsePinyinIME] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
+  /** Chars the analyzer dropped — nonzero until user re-analyzes or adds them manually. */
+  const [missingChars, setMissingChars] = useState<string[]>([]);
+  const [reanalyzing, setReanalyzing] = useState(false);
   const aiEnabled = isAIConfigured();
   const [listening, setListening] = useState(false);
   const speechSupported = isSpeechRecognitionSupported();
+  const audioCaptureSupported = isAudioRecordingSupported();
+  /** Last voice-input recording, pending user decision to keep it as a clip. */
+  const [pendingVoiceClip, setPendingVoiceClip] = useState<RecordingResult | null>(null);
+  const [pendingVoiceClipName, setPendingVoiceClipName] = useState('My voice');
+  const [voicePlaying, setVoicePlaying] = useState(false);
+  const stopVoicePlaybackRef = useRef<(() => void) | null>(null);
+  /** Live (interim + final) transcript streaming from SpeechRecognition. */
+  const [voiceInterim, setVoiceInterim] = useState('');
+  const streamingHandleRef = useRef<StreamingWithAudioHandle | null>(null);
 
+  /** Start/stop a continuous recognition + MediaRecorder session. */
   const handleVoiceInput = async () => {
     if (listening) {
-      stopRecognition();
+      // User is toggling off — finalize the stream.
+      const handle = streamingHandleRef.current;
+      streamingHandleRef.current = null;
       setListening(false);
+      if (handle) {
+        try {
+          const { transcript, audio } = await handle.stop();
+          if (transcript) setChinese((prev) => prev + transcript);
+          if (audio && audio.blob.size > 0) {
+            setPendingVoiceClip(audio);
+            setPendingVoiceClipName('My voice');
+          }
+        } catch (e: any) {
+          if (e?.message !== CANCELLED_MESSAGE) {
+            setError(e?.message || 'Voice recognition failed.');
+          }
+        } finally {
+          setVoiceInterim('');
+        }
+      }
       return;
     }
-    setListening(true);
+
+    // Starting fresh.
     setError('');
+    setVoiceInterim('');
     try {
-      const transcript = await recognizeChinese();
-      if (transcript) {
-        setChinese((prev) => prev + transcript);
-      }
+      const handle = await startStreamingRecognitionWithAudio({
+        onInterim: (text) => setVoiceInterim(text),
+      });
+      streamingHandleRef.current = handle;
+      setListening(true);
     } catch (e: any) {
-      if (e.message !== CANCELLED_MESSAGE) {
-        setError(e.message || 'Voice recognition failed.');
-      }
-    } finally {
-      setListening(false);
+      setError(e?.message || 'Voice recognition failed.');
     }
   };
+
+  const handlePlayPendingClip = () => {
+    if (!pendingVoiceClip) return;
+    if (voicePlaying) {
+      stopVoicePlaybackRef.current?.();
+      setVoicePlaying(false);
+      return;
+    }
+    setVoicePlaying(true);
+    stopVoicePlaybackRef.current = playBlob(pendingVoiceClip.blob, () => setVoicePlaying(false));
+  };
+
+  const handleDiscardPendingClip = () => {
+    stopVoicePlaybackRef.current?.();
+    setVoicePlaying(false);
+    setPendingVoiceClip(null);
+  };
+
+  /** Local pinyin preview (pinyin-pro, no LLM, no network). */
+  const livePinyin = (() => {
+    const src = listening ? voiceInterim || chinese : chinese;
+    if (!src.trim()) return '';
+    try {
+      return toPinyin(src, { toneType: 'symbol', type: 'string' });
+    } catch {
+      return '';
+    }
+  })();
 
   useEffect(() => {
     return () => { stopRecognition(); };
@@ -85,14 +155,27 @@ export function AddSentencePage() {
     }
   }, [isTutorial, tutorialStep, step]);
 
-  // Step 1 → Step 2: Go to LLM prompt step
-  const handleNext = () => {
-    if (!chinese.trim()) {
+  // Step 1 → Step 2: Go to LLM prompt step.
+  // Instant indexed dedup check so a duplicate never triggers an LLM call.
+  const handleNext = async () => {
+    const trimmed = chinese.trim();
+    if (!trimmed) {
       setError('Please enter a Chinese sentence.');
       return;
     }
+    if (!isTutorial) {
+      const existing = await repo.getSentenceByNormalizedChinese(trimmed);
+      if (existing) {
+        setError(`This sentence is already in your deck: "${existing.chinese}"`);
+        return;
+      }
+    }
     setError('');
     setStep('llm');
+  };
+
+  const handleChineseChange = (next: string) => {
+    setChinese(next);
   };
 
   // Copy LLM prompt (LLM handles tokenization)
@@ -131,6 +214,8 @@ export function AddSentencePage() {
       }));
 
       setTokens(formTokens);
+      const cov = computeTokenCoverage(chinese.trim(), formTokens);
+      setMissingChars(cov.missing.map((m) => m.surfaceForm));
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -159,6 +244,8 @@ export function AddSentencePage() {
       }));
 
       setTokens(formTokens);
+      const cov = computeTokenCoverage(chinese.trim(), formTokens);
+      setMissingChars(cov.missing.map((m) => m.surfaceForm));
       setLlmPasteValue('');
       setStep('review');
       setError('');
@@ -193,6 +280,10 @@ export function AddSentencePage() {
     const newTokens = [...tokens];
     newTokens[index] = { ...newTokens[index], [field]: value };
     setTokens(newTokens);
+    if (missingChars.length > 0) {
+      const cov = computeTokenCoverage(chinese.trim(), newTokens);
+      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+    }
   };
 
   const updateCharacter = (tokenIndex: number, charIndex: number, field: string, value: string) => {
@@ -206,9 +297,78 @@ export function AddSentencePage() {
     setTokens(newTokens);
   };
 
+  /** Re-run the analyzer with an explicit hint about which chars it dropped. */
+  const handleReanalyze = async () => {
+    setError('');
+    setReanalyzing(true);
+    try {
+      const existingMeanings = await getExistingMeanings(chinese.trim());
+      const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
+      const raw = await generateCompletion(prompt);
+      const parsed = parseLLMResponse(raw);
+      if (parsed.english) setEnglish(parsed.english);
+
+      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
+        surfaceForm: t.surfaceForm,
+        pinyinNumeric: t.pinyinNumeric,
+        pinyinSandhi: t.pinyinSandhi || '',
+        english: t.english,
+        partOfSpeech: t.partOfSpeech || '',
+        characters: t.characters?.map((c) => ({
+          char: c.char,
+          pinyinNumeric: c.pinyinNumeric,
+          pinyinSandhi: c.pinyinSandhi,
+          english: c.english,
+        })),
+      }));
+
+      setTokens(formTokens);
+      const cov = computeTokenCoverage(chinese.trim(), formTokens);
+      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+    } catch (e: any) {
+      setError(e.message || 'Re-analyze failed');
+    }
+    setReanalyzing(false);
+  };
+
+  /** Insert missing chars at their positional slots as placeholder tokens. */
+  const handleAddMissingManually = () => {
+    const cov = computeTokenCoverage(chinese.trim(), tokens);
+    if (cov.complete) {
+      setMissingChars([]);
+      return;
+    }
+    const next = [...tokens];
+    // Insert in reverse order so earlier insertAtIndex values stay valid.
+    for (const m of [...cov.missing].reverse()) {
+      next.splice(m.insertAtIndex, 0, {
+        surfaceForm: m.surfaceForm,
+        pinyinNumeric: m.pinyinNumeric,
+        pinyinSandhi: '',
+        english: '',
+        partOfSpeech: '',
+        characters: [{
+          char: m.surfaceForm,
+          pinyinNumeric: m.pinyinNumeric,
+          english: '',
+        }],
+      });
+    }
+    setTokens(next);
+    const recheck = computeTokenCoverage(chinese.trim(), next);
+    setMissingChars(recheck.missing.map((m) => m.surfaceForm));
+  };
+
   const handleConfirm = () => {
     if (!english.trim()) {
       setError('Please provide an English translation for the sentence.');
+      return;
+    }
+    // Re-check coverage using current tokens (user may have edited surfaceForms).
+    const cov = computeTokenCoverage(chinese.trim(), tokens);
+    if (!cov.complete) {
+      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+      setError(`These characters are not covered by any token: ${cov.missing.map((m) => m.surfaceForm).join(' ')}. Re-analyze or add them manually.`);
       return;
     }
     for (const t of tokens) {
@@ -234,8 +394,9 @@ export function AddSentencePage() {
         characters: t.characters,
       }));
 
+      let createdSentenceId: string | null = null;
       try {
-        await ingestSentence({
+        createdSentenceId = await ingestSentence({
           chinese: chinese.trim(),
           english: english.trim(),
           tokens: tokenInputs,
@@ -246,6 +407,21 @@ export function AddSentencePage() {
         if (!(isTutorial && e.message?.includes('already exists'))) {
           throw e;
         }
+      }
+
+      // Persist the voice-input recording as a named audio clip on the new sentence.
+      if (createdSentenceId && pendingVoiceClip && pendingVoiceClip.blob.size > 0) {
+        const rec: AudioRecording = {
+          id: uuid(),
+          sentenceId: createdSentenceId,
+          name: pendingVoiceClipName.trim() || 'My voice',
+          blob: pendingVoiceClip.blob,
+          mimeType: pendingVoiceClip.mimeType,
+          durationMs: pendingVoiceClip.durationMs,
+          source: 'voice-input',
+          createdAt: Date.now(),
+        };
+        try { await repo.insertAudioRecording(rec); } catch {}
       }
 
       // Tutorial mode: seed remaining sentences in the background, then advance
@@ -266,6 +442,10 @@ export function AddSentencePage() {
         setTokens([]);
         setTags([]);
         setStep('input');
+        setPendingVoiceClip(null);
+        stopVoicePlaybackRef.current?.();
+        setVoiceInterim('');
+        setMissingChars([]);
         navigate('/');
       }
     } catch (e: any) {
@@ -351,14 +531,14 @@ export function AddSentencePage() {
             {usePinyinIME && !(isTutorial && tutorialStep === 1) ? (
               <PinyinIMEInput
                 value={chinese}
-                onChange={setChinese}
+                onChange={handleChineseChange}
                 placeholder="Type pinyin, e.g. nihao"
               />
             ) : (
               <input
                 type="text"
                 value={chinese}
-                onChange={(e) => setChinese(e.target.value)}
+                onChange={(e) => handleChineseChange(e.target.value)}
                 placeholder="他差不多吃完了。"
                 className="w-full px-3 py-2 rounded-lg focus:ring-2 text-lg"
                 style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
@@ -366,7 +546,64 @@ export function AddSentencePage() {
                 readOnly={isTutorial && tutorialStep === 1}
               />
             )}
+            {listening && voiceInterim && (
+              <div className="mt-2 text-lg" style={{ color: 'var(--text-tertiary)' }}>
+                {voiceInterim}
+              </div>
+            )}
+            {livePinyin && (
+              <div className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {livePinyin}
+              </div>
+            )}
           </div>
+
+          {pendingVoiceClip && audioCaptureSupported && (
+            <div className="p-3 rounded-lg space-y-2"
+              style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)' }}>
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                  Save your recording?{' '}
+                  <span className="font-normal" style={{ color: 'var(--text-tertiary)' }}>
+                    (optional)
+                  </span>
+                </div>
+                <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  {formatDuration(pendingVoiceClip.durationMs)}
+                </span>
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                It'll be attached to this sentence alongside the default Google voice. Skip it with Discard.
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePlayPendingClip}
+                  className="text-xs px-2 py-1 rounded"
+                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--accent)' }}
+                >
+                  {voicePlaying ? '■ Stop' : '▶ Play'}
+                </button>
+                <input
+                  type="text"
+                  value={pendingVoiceClipName}
+                  onChange={(e) => setPendingVoiceClipName(e.target.value)}
+                  placeholder="Name this recording"
+                  className="flex-1 px-2 py-1 rounded text-sm"
+                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                />
+                <button
+                  type="button"
+                  onClick={handleDiscardPendingClip}
+                  className="text-xs px-2 py-1 rounded"
+                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Tags <span className="text-gray-400 font-normal">(optional)</span>
@@ -501,6 +738,40 @@ export function AddSentencePage() {
           <div className="p-3 rounded-lg inset">
             <div className="text-lg">{chinese}</div>
           </div>
+
+          {missingChars.length > 0 && (
+            <div className="p-3 rounded-lg space-y-2"
+              style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)' }}>
+              <div className="text-sm" style={{ color: 'var(--danger)' }}>
+                Analysis skipped these characters:{' '}
+                <span className="font-bold text-base">{missingChars.join(' ')}</span>
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Every character in the sentence must be covered by a token before saving.
+              </div>
+              <div className="flex gap-2">
+                {aiEnabled && (
+                  <button
+                    type="button"
+                    onClick={handleReanalyze}
+                    disabled={reanalyzing}
+                    className="text-xs px-3 py-1 rounded font-medium disabled:opacity-60"
+                    style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+                  >
+                    {reanalyzing ? 'Re-analyzing…' : 'Re-analyze with AI'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleAddMissingManually}
+                  className="text-xs px-3 py-1 rounded font-medium"
+                  style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                >
+                  Add manually
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Sentence-level English */}
           <div>

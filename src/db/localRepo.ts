@@ -12,6 +12,7 @@ import type {
   SrsCard,
   Deck,
   ReviewLog,
+  AudioRecording,
 } from './schema';
 
 // ============================================================
@@ -103,6 +104,28 @@ export async function getSentenceByChinese(chinese: string): Promise<Sentence | 
   return localDb.sentences.where('chinese').equals(chinese).first();
 }
 
+/** Strip everything except Hanzi and alphanumerics; lowercase. */
+export function normalizeChinese(s: string): string {
+  let out = '';
+  for (const c of s) {
+    const code = c.codePointAt(0)!;
+    // CJK Unified Ideographs
+    if (code >= 0x4e00 && code <= 0x9fff) { out += c; continue; }
+    // ASCII alphanumerics
+    if ((code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) {
+      out += c.toLowerCase();
+    }
+  }
+  return out;
+}
+
+/** Indexed instant lookup used as a pre-LLM dedup guard. */
+export async function getSentenceByNormalizedChinese(chinese: string): Promise<Sentence | undefined> {
+  const key = normalizeChinese(chinese);
+  if (!key) return undefined;
+  return localDb.sentences.where('normalizedChinese').equals(key).first();
+}
+
 export async function getSentencesBySource(source: string): Promise<Sentence[]> {
   const rows = await localDb.sentences.where('source').equals(source).toArray();
   return rows.sort((a, b) => b.createdAt - a.createdAt);
@@ -148,7 +171,13 @@ export async function updateSentenceTags(id: string, tags: string[]): Promise<vo
 export async function deleteSentenceById(id: string): Promise<void> {
   await localDb.transaction(
     'rw',
-    [localDb.sentences, localDb.sentenceTokens, localDb.srsCards, localDb.reviewLogs],
+    [
+      localDb.sentences,
+      localDb.sentenceTokens,
+      localDb.srsCards,
+      localDb.reviewLogs,
+      localDb.audioRecordings,
+    ],
     async () => {
       const cards = await localDb.srsCards.where('sentenceId').equals(id).toArray();
       const cardIds = cards.map((c) => c.id);
@@ -157,6 +186,7 @@ export async function deleteSentenceById(id: string): Promise<void> {
       }
       await localDb.srsCards.where('sentenceId').equals(id).delete();
       await localDb.sentenceTokens.where('sentenceId').equals(id).delete();
+      await localDb.audioRecordings.where('sentenceId').equals(id).delete();
       await localDb.sentences.delete(id);
     }
   );
@@ -353,6 +383,7 @@ export async function deleteAllUserData(): Promise<void> {
       localDb.srsCards,
       localDb.decks,
       localDb.reviewLogs,
+      localDb.audioRecordings,
     ],
     async () => {
       await Promise.all([
@@ -363,7 +394,37 @@ export async function deleteAllUserData(): Promise<void> {
         localDb.meanings.clear(),
         localDb.meaningLinks.clear(),
         localDb.decks.clear(),
+        localDb.audioRecordings.clear(),
       ]);
     }
   );
+}
+
+// ============================================================
+// Audio recordings
+// ============================================================
+
+export async function getAudioRecordingsBySentence(
+  sentenceId: string
+): Promise<AudioRecording[]> {
+  return localDb.audioRecordings
+    .where('sentenceId')
+    .equals(sentenceId)
+    .sortBy('createdAt');
+}
+
+export async function getAudioRecording(id: string): Promise<AudioRecording | undefined> {
+  return localDb.audioRecordings.get(id);
+}
+
+export async function insertAudioRecording(rec: AudioRecording): Promise<void> {
+  await localDb.audioRecordings.put(rec);
+}
+
+export async function updateAudioRecordingName(id: string, name: string): Promise<void> {
+  await localDb.audioRecordings.update(id, { name, updatedAt: Date.now() });
+}
+
+export async function deleteAudioRecording(id: string): Promise<void> {
+  await localDb.audioRecordings.delete(id);
 }
