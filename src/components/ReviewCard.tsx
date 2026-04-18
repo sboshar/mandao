@@ -176,7 +176,7 @@ export function ReviewCard() {
             </div>
           ) : isEnToZh ? (
             <div className="text-xl text-center">
-              <ClickableEnglish text={sentence.english} />
+              {sentence.english}
             </div>
           ) : isPyToEnZh ? (
             <div className="text-center">
