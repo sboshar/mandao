@@ -20,6 +20,7 @@ export async function hydrateLocalDb(): Promise<void> {
     decks,
     srsCards,
     reviewLogs,
+    audioRecordings,
   ] = await Promise.all([
     remote.getAllMeanings(),
     remote.getAllMeaningLinks(),
@@ -28,6 +29,7 @@ export async function hydrateLocalDb(): Promise<void> {
     remote.getAllDecks(),
     remote.getAllSrsCards(),
     remote.getAllReviewLogs(),
+    remote.getAllAudioRecordings(),
   ]);
 
   // Derive max USN from the data we already fetched (no extra network calls).
@@ -40,6 +42,7 @@ export async function hydrateLocalDb(): Promise<void> {
     maxUsnFromRows(decks),
     maxUsnFromRows(srsCards),
     maxUsnFromRows(reviewLogs),
+    maxUsnFromRows(audioRecordings),
   );
 
   await localDb.transaction(
@@ -52,6 +55,7 @@ export async function hydrateLocalDb(): Promise<void> {
       localDb.srsCards,
       localDb.decks,
       localDb.reviewLogs,
+      localDb.audioRecordings,
       localDb.syncMeta,
     ],
     async () => {
@@ -63,6 +67,7 @@ export async function hydrateLocalDb(): Promise<void> {
         localDb.srsCards.clear(),
         localDb.decks.clear(),
         localDb.reviewLogs.clear(),
+        localDb.audioRecordings.clear(),
       ]);
 
       await Promise.all([
@@ -73,6 +78,8 @@ export async function hydrateLocalDb(): Promise<void> {
         decks.length > 0 ? localDb.decks.bulkPut(decks) : undefined,
         srsCards.length > 0 ? localDb.srsCards.bulkPut(srsCards) : undefined,
         reviewLogs.length > 0 ? localDb.reviewLogs.bulkPut(reviewLogs) : undefined,
+        // Blobs are lazy-fetched on first play, so only the metadata lands here.
+        audioRecordings.length > 0 ? localDb.audioRecordings.bulkPut(audioRecordings) : undefined,
       ]);
 
       await localDb.syncMeta.put({ key: 'lastUsn', value: maxUsn });

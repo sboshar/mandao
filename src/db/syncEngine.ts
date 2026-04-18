@@ -20,8 +20,16 @@ import {
   srsCardFromRow,
   deckFromRow,
   reviewLogFromRow,
+  audioRecordingFromRow,
+  audioRecordingToRow,
 } from './mappers';
-import { computeSafeUsn, groupConsecutiveRuns, type TableStats } from './syncHelpers';
+import { getCachedUserIdOrThrow } from './remoteRepo';
+import {
+  computeSafeUsn,
+  extensionFromMime,
+  groupConsecutiveRuns,
+  type TableStats,
+} from './syncHelpers';
 import { useSyncStore } from '../stores/syncStore';
 
 // ============================================================
@@ -139,6 +147,9 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
     case 'updateTags':
       await pushSequential(ops, pushUpdateTags);
       break;
+    case 'upsertAudioRecording':
+      await pushSequential(ops, pushUpsertAudioRecording);
+      break;
   }
 }
 
@@ -197,6 +208,77 @@ async function pushDeleteAllData(): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * upsert:true makes retries idempotent on the deterministic path. FK 23503
+ * handles the race where the parent sentence was deleted remotely between
+ * enqueue and push — we silently drop the op and clean up instead of
+ * retrying into a permanent failure.
+ *
+ * If the local row already has `storagePath` set, the blob is already in
+ * Storage and this push is a metadata-only change (e.g. rename). We skip
+ * the Storage upload — the server-side immutable trigger would reject a
+ * path change anyway, and re-uploading on every rename wastes bandwidth.
+ * This also lets renames on rows pulled from another device (no local
+ * blob) actually reach the server.
+ */
+async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
+  const payload = op.payload as {
+    id: string;
+    sentenceId: string;
+    name: string;
+    mimeType: string;
+    durationMs: number | null;
+    source: 'voice-input' | 'manual';
+    createdAt: number;
+  };
+
+  const rec = await localDb.audioRecordings.get(payload.id);
+  if (!rec) return;
+  // Nothing local to upload and nothing on the server either.
+  if (!rec.blob && !rec.storagePath) return;
+
+  const userId = getCachedUserIdOrThrow();
+  const isFirstUpload = !rec.storagePath;
+  let storagePath = rec.storagePath;
+  if (isFirstUpload) {
+    const ext = extensionFromMime(payload.mimeType);
+    storagePath = `${userId}/${payload.id}.${ext}`;
+    const { error: uploadErr } = await supabase.storage
+      .from('audio-recordings')
+      .upload(storagePath, rec.blob!, {
+        contentType: payload.mimeType,
+        upsert: true,
+      });
+    if (uploadErr) throw new Error(uploadErr.message);
+  }
+
+  const { error: rowErr } = await supabase
+    .from('audio_recordings')
+    .upsert(audioRecordingToRow(payload, userId, storagePath!));
+  if (rowErr) {
+    if ((rowErr as { code?: string }).code === '23503') {
+      console.warn(
+        `Dropping audio recording ${payload.id}: parent sentence ${payload.sentenceId} not found (FK 23503)`,
+      );
+      // Only clean up the Storage object we ourselves just uploaded. If
+      // this was a metadata-only push, the cascade from the deleted
+      // sentence already removed the object via the delete trigger.
+      if (isFirstUpload) {
+        try {
+          await supabase.storage.from('audio-recordings').remove([storagePath!]);
+        } catch {}
+      }
+      await localDb.audioRecordings.delete(payload.id);
+      return;
+    }
+    throw new Error(rowErr.message);
+  }
+
+  if (isFirstUpload) {
+    await localDb.audioRecordings.update(payload.id, { storagePath });
+  }
+}
+
 async function pushUpdateTags(op: SyncOp): Promise<void> {
   const { id, tags } = op.payload;
   // Uses RLS-protected direct update. The bump_sync_meta trigger
@@ -248,8 +330,10 @@ async function pullOnePage(): Promise<boolean> {
     decks: any[];
     srs_cards: any[];
     review_logs: any[];
+    audio_recordings?: any[];
     graves: any[];
   };
+  const audioRows = changes.audio_recordings ?? [];
 
   const stats: TableStats[] = [];
   let syncResult: { safeUsn: number; anyTruncated: boolean } | null = null;
@@ -273,6 +357,7 @@ async function pullOnePage(): Promise<boolean> {
       localDb.srsCards,
       localDb.decks,
       localDb.reviewLogs,
+      localDb.audioRecordings,
       localDb.syncMeta,
     ],
     async () => {
@@ -327,6 +412,16 @@ async function pullOnePage(): Promise<boolean> {
       }
       trackRows(changes.review_logs);
 
+      // Audio recordings: server wins for metadata, but preserve any local
+      // blob (the wire row has none, and we don't want to drop cached bytes).
+      if (audioRows.length > 0) {
+        const mapped = audioRows.map(audioRecordingFromRow);
+        const existing = await localDb.audioRecordings.bulkGet(mapped.map((r) => r.id));
+        const merged = mapped.map((r, i) => ({ ...r, blob: existing[i]?.blob }));
+        await localDb.audioRecordings.bulkPut(merged);
+      }
+      trackRows(audioRows);
+
       for (const g of changes.graves) {
         const { entity_type, entity_id } = g;
         switch (entity_type) {
@@ -338,6 +433,7 @@ async function pullOnePage(): Promise<boolean> {
             }
             await localDb.srsCards.where('sentenceId').equals(entity_id).delete();
             await localDb.sentenceTokens.where('sentenceId').equals(entity_id).delete();
+            await localDb.audioRecordings.where('sentenceId').equals(entity_id).delete();
             await localDb.sentences.delete(entity_id);
             break;
           }
@@ -369,6 +465,11 @@ async function pullOnePage(): Promise<boolean> {
             break;
           case 'sentence_token':
             await localDb.sentenceTokens.delete(entity_id);
+            break;
+          case 'audio_recording':
+            // Row delete drops the local blob too; the server already wiped
+            // the Storage object via the delete trigger.
+            await localDb.audioRecordings.delete(entity_id);
             break;
         }
       }

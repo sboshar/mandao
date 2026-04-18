@@ -20,7 +20,8 @@ export type SyncOpType =
   | 'ingestBundle'
   | 'deleteEntity'
   | 'deleteAllData'
-  | 'updateTags';
+  | 'updateTags'
+  | 'upsertAudioRecording';
 
 export interface SyncOp {
   id?: number;

@@ -9,6 +9,7 @@
  */
 import * as local from './localRepo';
 import { localDb, type SyncOp } from './localDb';
+import { supabase } from '../lib/supabase';
 import { getDeviceId, scheduleSyncSoon } from './syncEngine';
 import {
   getUserId as getRemoteUserId,
@@ -324,23 +325,86 @@ export async function deleteAllUserData(): Promise<void> {
 }
 
 // ============================================================
-// Audio recordings — local-only for now (blobs don't sync)
+// Audio recordings — write local, sync metadata + Storage via outbox
 // ============================================================
 
 export async function getAudioRecordingsBySentence(sentenceId: string) {
   return local.getAudioRecordingsBySentence(sentenceId);
 }
 
+/**
+ * Build the outbox payload for an audio recording. The Blob intentionally
+ * stays in Dexie — the push handler reads it fresh at upload time so the
+ * outbox row stays tiny even if the upload retries.
+ */
+function audioUpsertPayload(rec: import('./schema').AudioRecording) {
+  return {
+    id: rec.id,
+    sentenceId: rec.sentenceId,
+    name: rec.name,
+    mimeType: rec.mimeType,
+    durationMs: rec.durationMs ?? null,
+    source: rec.source,
+    createdAt: rec.createdAt,
+  };
+}
+
 export async function insertAudioRecording(rec: import('./schema').AudioRecording) {
   await local.insertAudioRecording(rec);
+  await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
 }
 
 export async function updateAudioRecordingName(id: string, name: string) {
-  await local.updateAudioRecordingName(id, name);
+  await local.updateAudioRecording(id, { name, updatedAt: Date.now() });
+  const rec = await local.getAudioRecording(id);
+  if (rec) {
+    await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
+  }
 }
 
 export async function deleteAudioRecording(id: string) {
+  // Coalesce any still-pending upsert for this id so record-then-delete
+  // offline doesn't waste an upload. Narrowed by the `op` index first.
+  const pendingUpsert = await localDb.outbox
+    .where('op')
+    .equals('upsertAudioRecording')
+    .filter((op) => op.status === 'pending' && op.payload?.id === id)
+    .first();
+  if (pendingUpsert?.id != null) {
+    await localDb.outbox.delete(pendingUpsert.id);
+  }
+
   await local.deleteAudioRecording(id);
+  await enqueue({
+    op: 'deleteEntity',
+    payload: { entity_type: 'audio_recording', entity_id: id },
+  });
+}
+
+/**
+ * Lazy-fetch a recording's Blob via a short-lived signed URL and cache it
+ * back into Dexie so future plays skip the network. Returns null on failure
+ * (no row, no storagePath, or network error).
+ */
+export async function fetchAudioBlob(id: string): Promise<Blob | null> {
+  const rec = await local.getAudioRecording(id);
+  if (!rec?.storagePath) return null;
+  // Short TTL: the URL is consumed immediately by the fetch below, so a
+  // longer expiry just widens the leak window (browser history, HAR
+  // exports, extensions) for what is otherwise per-user private content.
+  const { data, error } = await supabase.storage
+    .from('audio-recordings')
+    .createSignedUrl(rec.storagePath, 60);
+  if (error || !data?.signedUrl) return null;
+  try {
+    const resp = await fetch(data.signedUrl);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    await local.updateAudioRecording(id, { blob });
+    return blob;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================
