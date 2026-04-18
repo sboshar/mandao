@@ -145,14 +145,14 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public, storage
-as $$
+as $func$
 begin
   delete from storage.objects
   where bucket_id = 'audio-recordings'
     and name = OLD.storage_path;
   return OLD;
 end;
-$$;
+$func$;
 
 drop trigger if exists trg_audio_recordings_delete_object on audio_recordings;
 create trigger trg_audio_recordings_delete_object
@@ -171,10 +171,10 @@ create trigger trg_audio_recordings_delete_object
 create or replace function pull_changes(last_usn bigint, max_rows int default 1000)
 returns jsonb
 language plpgsql security invoker set search_path = public
-as $$
+as $func$
 declare
   uid uuid := auth.uid();
-  result jsonb := '{}'::jsonb;
+  v_result jsonb := '{}'::jsonb;
 begin
   set local statement_timeout = '10s';
 
@@ -219,11 +219,11 @@ begin
       select jsonb_agg(row_to_json(g))
       from (select * from sync_graves where user_id = uid and usn > last_usn order by usn limit max_rows) g
     ), '[]'::jsonb)
-  ) into result;
+  ) into v_result;
 
-  return result;
+  return v_result;
 end;
-$$;
+$func$;
 
 -- ============================================================
 -- 7. Extend apply_delete_ops with an `audio_recording` branch so
@@ -236,7 +236,7 @@ $$;
 create or replace function apply_delete_ops(ops jsonb)
 returns void
 language plpgsql security invoker set search_path = public
-as $$
+as $func$
 declare
   uid uuid := auth.uid();
   op jsonb;
@@ -283,7 +283,7 @@ begin
       deleted_at = extract(epoch from now()) * 1000;
   end loop;
 end;
-$$;
+$func$;
 
 -- ============================================================
 -- 8. delete_all_user_data now also wipes audio_recordings.
@@ -301,7 +301,7 @@ $$;
 create or replace function delete_all_user_data()
 returns void
 language plpgsql security invoker set search_path = public
-as $$
+as $func$
 declare
   uid uuid := auth.uid();
   now_ms bigint := (extract(epoch from now()) * 1000)::bigint;
@@ -332,4 +332,4 @@ begin
   delete from meanings where user_id = uid;
   delete from decks where user_id = uid;
 end;
-$$;
+$func$;
