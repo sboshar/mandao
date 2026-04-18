@@ -129,7 +129,6 @@ export function DashboardPage() {
           },
           { label: 'Graph', path: '/graph', onClick: () => navigate('/graph') },
           { label: 'Stats', path: '/stats', onClick: () => navigate('/stats') },
-          { label: 'Settings', path: '/settings', onClick: () => navigate('/settings') },
         ].map((btn) => (
           <button
             key={btn.label}
