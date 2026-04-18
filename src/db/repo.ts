@@ -109,6 +109,10 @@ export async function getSentence(id: string): Promise<Sentence | undefined> {
   return local.getSentence(id);
 }
 
+export async function getSentenceByNormalizedChinese(chinese: string): Promise<Sentence | undefined> {
+  return local.getSentenceByNormalizedChinese(chinese);
+}
+
 export async function getSentenceByChinese(chinese: string): Promise<Sentence | undefined> {
   return local.getSentenceByChinese(chinese);
 }
@@ -317,6 +321,26 @@ export async function deleteAllUserData(): Promise<void> {
   await localDb.syncMeta.delete('lastUsn');
   await localDb.syncMeta.delete('schemaVersion');
   await enqueue({ op: 'deleteAllData', payload: {} });
+}
+
+// ============================================================
+// Audio recordings — local-only for now (blobs don't sync)
+// ============================================================
+
+export async function getAudioRecordingsBySentence(sentenceId: string) {
+  return local.getAudioRecordingsBySentence(sentenceId);
+}
+
+export async function insertAudioRecording(rec: import('./schema').AudioRecording) {
+  await local.insertAudioRecording(rec);
+}
+
+export async function updateAudioRecordingName(id: string, name: string) {
+  await local.updateAudioRecordingName(id, name);
+}
+
+export async function deleteAudioRecording(id: string) {
+  await local.deleteAudioRecording(id);
 }
 
 // ============================================================

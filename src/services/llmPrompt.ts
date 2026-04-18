@@ -40,8 +40,13 @@ export async function getExistingMeanings(
  */
 export function generateAnalysisPrompt(
   chinese: string,
-  existingMeanings?: ExistingMeaning[]
+  existingMeanings?: ExistingMeaning[],
+  /** Characters the previous response omitted — tells the model to include them this time. */
+  missingChars?: string[],
 ): string {
+  const retrySection = missingChars && missingChars.length > 0
+    ? `\nIMPORTANT: A previous analysis of this sentence omitted these characters: ${missingChars.join(' ')}. Include them as tokens this time. Every Hanzi character in the sentence must appear in exactly one token's surfaceForm.\n`
+    : '';
   let existingSection = '';
   if (existingMeanings && existingMeanings.length > 0) {
     const lines = existingMeanings
@@ -58,7 +63,7 @@ If a character has multiple reference meanings listed, pick the one that fits th
   return `Tokenize and analyze this Chinese sentence. Return ONLY a JSON object (no markdown, no explanation, no code fences).
 
 Sentence: ${chinese}
-${existingSection}
+${retrySection}${existingSection}
 First, segment the sentence into words (tokens). Use linguistically correct word boundaries — for example, 作业 is one word meaning "homework", not two separate characters. Segment the way a native speaker would identify distinct words.
 
 Then return this exact JSON structure:
