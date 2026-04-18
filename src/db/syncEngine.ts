@@ -213,6 +213,13 @@ async function pushDeleteAllData(): Promise<void> {
  * handles the race where the parent sentence was deleted remotely between
  * enqueue and push — we silently drop the op and clean up instead of
  * retrying into a permanent failure.
+ *
+ * If the local row already has `storagePath` set, the blob is already in
+ * Storage and this push is a metadata-only change (e.g. rename). We skip
+ * the Storage upload — the server-side immutable trigger would reject a
+ * path change anyway, and re-uploading on every rename wastes bandwidth.
+ * This also lets renames on rows pulled from another device (no local
+ * blob) actually reach the server.
  */
 async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
   const payload = op.payload as {
@@ -226,40 +233,50 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
   };
 
   const rec = await localDb.audioRecordings.get(payload.id);
-  if (!rec || !rec.blob) return;
+  if (!rec) return;
+  // Nothing local to upload and nothing on the server either.
+  if (!rec.blob && !rec.storagePath) return;
 
   const userId = getCachedUserIdOrThrow();
-  const ext = extensionFromMime(payload.mimeType);
-  const storagePath = `${userId}/${payload.id}.${ext}`;
-
-  const { error: uploadErr } = await supabase.storage
-    .from('audio-recordings')
-    .upload(storagePath, rec.blob, {
-      contentType: payload.mimeType,
-      upsert: true,
-    });
-  if (uploadErr) throw new Error(uploadErr.message);
+  const isFirstUpload = !rec.storagePath;
+  let storagePath = rec.storagePath;
+  if (isFirstUpload) {
+    const ext = extensionFromMime(payload.mimeType);
+    storagePath = `${userId}/${payload.id}.${ext}`;
+    const { error: uploadErr } = await supabase.storage
+      .from('audio-recordings')
+      .upload(storagePath, rec.blob!, {
+        contentType: payload.mimeType,
+        upsert: true,
+      });
+    if (uploadErr) throw new Error(uploadErr.message);
+  }
 
   const { error: rowErr } = await supabase
     .from('audio_recordings')
-    .upsert(audioRecordingToRow(payload, userId, storagePath));
+    .upsert(audioRecordingToRow(payload, userId, storagePath!));
   if (rowErr) {
     if ((rowErr as { code?: string }).code === '23503') {
-      // Leave a trail — silently erasing the user's local recording here would
-      // make any unexpected firing (RLS regression, schema drift) invisible.
       console.warn(
-        `[sync] dropping audio recording ${payload.id}: parent sentence ${payload.sentenceId} not found (FK 23503)`,
+        `Dropping audio recording ${payload.id}: parent sentence ${payload.sentenceId} not found (FK 23503)`,
       );
-      try {
-        await supabase.storage.from('audio-recordings').remove([storagePath]);
-      } catch {}
+      // Only clean up the Storage object we ourselves just uploaded. If
+      // this was a metadata-only push, the cascade from the deleted
+      // sentence already removed the object via the delete trigger.
+      if (isFirstUpload) {
+        try {
+          await supabase.storage.from('audio-recordings').remove([storagePath!]);
+        } catch {}
+      }
       await localDb.audioRecordings.delete(payload.id);
       return;
     }
     throw new Error(rowErr.message);
   }
 
-  await localDb.audioRecordings.update(payload.id, { storagePath });
+  if (isFirstUpload) {
+    await localDb.audioRecordings.update(payload.id, { storagePath });
+  }
 }
 
 async function pushUpdateTags(op: SyncOp): Promise<void> {
