@@ -105,6 +105,32 @@ export function audioRecordingFromRow(r: any): AudioRecording {
   };
 }
 
+export function audioRecordingToRow(
+  rec: {
+    id: string;
+    sentenceId: string;
+    name: string;
+    mimeType: string;
+    durationMs?: number | null;
+    source: 'voice-input' | 'manual';
+    createdAt: number;
+  },
+  userId: string,
+  storagePath: string,
+) {
+  return {
+    id: rec.id,
+    user_id: userId,
+    sentence_id: rec.sentenceId,
+    name: rec.name,
+    storage_path: storagePath,
+    mime_type: rec.mimeType,
+    duration_ms: rec.durationMs ?? null,
+    source: rec.source,
+    created_at: rec.createdAt,
+  };
+}
+
 /** Extract the highest USN from an array of raw Supabase rows. */
 export function maxUsnFromRows(rows: any[]): number {
   let max = 0;

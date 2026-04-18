@@ -21,7 +21,9 @@ import {
   deckFromRow,
   reviewLogFromRow,
   audioRecordingFromRow,
+  audioRecordingToRow,
 } from './mappers';
+import { getCachedUserIdOrThrow } from './remoteRepo';
 import { computeSafeUsn, groupConsecutiveRuns, type TableStats } from './syncHelpers';
 import { useSyncStore } from '../stores/syncStore';
 
@@ -218,14 +220,10 @@ function extensionFromMime(mime: string): string {
 }
 
 /**
- * Push a locally-created audio recording.
- * Steps: verify the parent sentence still exists, read the Blob fresh from
- * Dexie, upload to Storage at a deterministic path (upsert:true so retries
- * are safe), insert the metadata row, and cache the path locally so we can
- * lazy-fetch the blob again if it's ever evicted.
- *
- * "Silently drop" paths (not a retry) cover races where the audio's parent
- * sentence was deleted before the upload reached the server.
+ * upsert:true makes retries idempotent on the deterministic path. FK 23503
+ * handles the race where the parent sentence was deleted remotely between
+ * enqueue and push — we silently drop the op and clean up instead of
+ * retrying into a permanent failure.
  */
 async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
   const payload = op.payload as {
@@ -238,25 +236,10 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
     createdAt: number;
   };
 
-  // The local row was just enqueued; if it's gone now, the user deleted it
-  // before we got online. deleteAudioRecording should have coalesced the
-  // pending upsert, but guard anyway.
   const rec = await localDb.audioRecordings.get(payload.id);
   if (!rec || !rec.blob) return;
 
-  // Parent sentence must still exist locally — its ingestBundle op was
-  // enqueued before this one, so if it's missing the user (or another
-  // device) deleted it. Drop the upload and the local recording.
-  const sentence = await localDb.sentences.get(payload.sentenceId);
-  if (!sentence) {
-    await localDb.audioRecordings.delete(payload.id);
-    return;
-  }
-
-  const { data: { session } } = await supabase.auth.getSession();
-  const userId = session?.user?.id;
-  if (!userId) throw new Error('Not authenticated');
-
+  const userId = getCachedUserIdOrThrow();
   const ext = extensionFromMime(payload.mimeType);
   const storagePath = `${userId}/${payload.id}.${ext}`;
 
@@ -270,20 +253,8 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
 
   const { error: rowErr } = await supabase
     .from('audio_recordings')
-    .upsert({
-      id: payload.id,
-      user_id: userId,
-      sentence_id: payload.sentenceId,
-      name: payload.name,
-      storage_path: storagePath,
-      mime_type: payload.mimeType,
-      duration_ms: payload.durationMs,
-      source: payload.source,
-      created_at: payload.createdAt,
-    });
+    .upsert(audioRecordingToRow(payload, userId, storagePath));
   if (rowErr) {
-    // FK violation: parent sentence was deleted remotely between our
-    // local check and the server write. Treat as silent-drop + cleanup.
     if ((rowErr as { code?: string }).code === '23503') {
       try {
         await supabase.storage.from('audio-recordings').remove([storagePath]);
@@ -432,13 +403,11 @@ async function pullOnePage(): Promise<boolean> {
 
       // Audio recordings: server wins for metadata, but preserve any local
       // blob (the wire row has none, and we don't want to drop cached bytes).
-      for (const r of audioRows) {
-        const remote = audioRecordingFromRow(r);
-        const existing = await localDb.audioRecordings.get(remote.id);
-        await localDb.audioRecordings.put({
-          ...remote,
-          blob: existing?.blob,
-        });
+      if (audioRows.length > 0) {
+        const mapped = audioRows.map(audioRecordingFromRow);
+        const existing = await localDb.audioRecordings.bulkGet(mapped.map((r) => r.id));
+        const merged = mapped.map((r, i) => ({ ...r, blob: existing[i]?.blob }));
+        await localDb.audioRecordings.bulkPut(merged);
       }
       trackRows(audioRows);
 

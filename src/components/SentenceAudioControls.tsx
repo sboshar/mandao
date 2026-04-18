@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuid } from 'uuid';
 import * as repo from '../db/repo';
-import { localDb } from '../db/localDb';
 import type { AudioRecording } from '../db/schema';
-import { supabase } from '../lib/supabase';
 import { speakChinese, stopSpeaking } from '../services/audio';
 import {
   isAudioRecordingSupported,
@@ -41,7 +39,7 @@ const RecordDot = (
 );
 
 const DownloadingSpinner = (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
     <path d="M12 2v4" />
     <path d="M12 18v4" />
     <path d="M4.93 4.93l2.83 2.83" />
@@ -78,7 +76,6 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   const [pendingName, setPendingName] = useState('');
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  // id of the recording we're currently fetching from Storage (shows a spinner).
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const canRecord = isAudioRecordingSupported();
 
@@ -119,27 +116,6 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     setPlayingId((cur) => (cur === 'default' ? null : cur));
   };
 
-  /**
-   * Fetch a missing blob from Storage via a short-lived signed URL, cache
-   * it back into Dexie, and return the fresh Blob. Null on failure.
-   */
-  const downloadBlob = async (rec: AudioRecording): Promise<Blob | null> => {
-    if (!rec.storagePath) return null;
-    const { data, error: urlErr } = await supabase.storage
-      .from('audio-recordings')
-      .createSignedUrl(rec.storagePath, 3600);
-    if (urlErr || !data?.signedUrl) return null;
-    try {
-      const resp = await fetch(data.signedUrl);
-      if (!resp.ok) return null;
-      const blob = await resp.blob();
-      await localDb.audioRecordings.update(rec.id, { blob });
-      return blob;
-    } catch {
-      return null;
-    }
-  };
-
   const playRecording = async (rec: AudioRecording) => {
     if (playingId === rec.id) { stopAll(); return; }
     if (downloadingId === rec.id) return;
@@ -149,16 +125,13 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     if (!blob) {
       setDownloadingId(rec.id);
       try {
-        const fetched = await downloadBlob(rec);
+        const fetched = await repo.fetchAudioBlob(rec.id);
         if (!fetched) {
           setError('Could not load this recording.');
           return;
         }
         blob = fetched;
-        // Keep local state in sync so future plays skip the fetch.
-        setRecordings((prev) =>
-          prev.map((r) => (r.id === rec.id ? { ...r, blob: fetched } : r)),
-        );
+        await refresh();
       } finally {
         setDownloadingId((cur) => (cur === rec.id ? null : cur));
       }

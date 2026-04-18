@@ -9,6 +9,7 @@
  */
 import * as local from './localRepo';
 import { localDb, type SyncOp } from './localDb';
+import { supabase } from '../lib/supabase';
 import { getDeviceId, scheduleSyncSoon } from './syncEngine';
 import {
   getUserId as getRemoteUserId,
@@ -354,7 +355,7 @@ export async function insertAudioRecording(rec: import('./schema').AudioRecordin
 }
 
 export async function updateAudioRecordingName(id: string, name: string) {
-  await local.updateAudioRecordingName(id, name);
+  await local.updateAudioRecording(id, { name, updatedAt: Date.now() });
   const rec = await local.getAudioRecording(id);
   if (rec) {
     await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
@@ -362,15 +363,12 @@ export async function updateAudioRecordingName(id: string, name: string) {
 }
 
 export async function deleteAudioRecording(id: string) {
-  // Coalesce a still-pending upsert for this id — saves a wasted upload
-  // when the user records and immediately deletes without going online.
+  // Coalesce any still-pending upsert for this id so record-then-delete
+  // offline doesn't waste an upload. Narrowed by the `op` index first.
   const pendingUpsert = await localDb.outbox
-    .filter(
-      (op) =>
-        op.op === 'upsertAudioRecording' &&
-        op.status === 'pending' &&
-        op.payload?.id === id,
-    )
+    .where('op')
+    .equals('upsertAudioRecording')
+    .filter((op) => op.status === 'pending' && op.payload?.id === id)
     .first();
   if (pendingUpsert?.id != null) {
     await localDb.outbox.delete(pendingUpsert.id);
@@ -381,6 +379,29 @@ export async function deleteAudioRecording(id: string) {
     op: 'deleteEntity',
     payload: { entity_type: 'audio_recording', entity_id: id },
   });
+}
+
+/**
+ * Lazy-fetch a recording's Blob via a short-lived signed URL and cache it
+ * back into Dexie so future plays skip the network. Returns null on failure
+ * (no row, no storagePath, or network error).
+ */
+export async function fetchAudioBlob(id: string): Promise<Blob | null> {
+  const rec = await local.getAudioRecording(id);
+  if (!rec?.storagePath) return null;
+  const { data, error } = await supabase.storage
+    .from('audio-recordings')
+    .createSignedUrl(rec.storagePath, 3600);
+  if (error || !data?.signedUrl) return null;
+  try {
+    const resp = await fetch(data.signedUrl);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    await local.updateAudioRecording(id, { blob });
+    return blob;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================
