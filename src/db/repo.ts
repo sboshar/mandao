@@ -324,23 +324,63 @@ export async function deleteAllUserData(): Promise<void> {
 }
 
 // ============================================================
-// Audio recordings — local-only for now (blobs don't sync)
+// Audio recordings — write local, sync metadata + Storage via outbox
 // ============================================================
 
 export async function getAudioRecordingsBySentence(sentenceId: string) {
   return local.getAudioRecordingsBySentence(sentenceId);
 }
 
+/**
+ * Build the outbox payload for an audio recording. The Blob intentionally
+ * stays in Dexie — the push handler reads it fresh at upload time so the
+ * outbox row stays tiny even if the upload retries.
+ */
+function audioUpsertPayload(rec: import('./schema').AudioRecording) {
+  return {
+    id: rec.id,
+    sentenceId: rec.sentenceId,
+    name: rec.name,
+    mimeType: rec.mimeType,
+    durationMs: rec.durationMs ?? null,
+    source: rec.source,
+    createdAt: rec.createdAt,
+  };
+}
+
 export async function insertAudioRecording(rec: import('./schema').AudioRecording) {
   await local.insertAudioRecording(rec);
+  await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
 }
 
 export async function updateAudioRecordingName(id: string, name: string) {
   await local.updateAudioRecordingName(id, name);
+  const rec = await local.getAudioRecording(id);
+  if (rec) {
+    await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
+  }
 }
 
 export async function deleteAudioRecording(id: string) {
+  // Coalesce a still-pending upsert for this id — saves a wasted upload
+  // when the user records and immediately deletes without going online.
+  const pendingUpsert = await localDb.outbox
+    .filter(
+      (op) =>
+        op.op === 'upsertAudioRecording' &&
+        op.status === 'pending' &&
+        op.payload?.id === id,
+    )
+    .first();
+  if (pendingUpsert?.id != null) {
+    await localDb.outbox.delete(pendingUpsert.id);
+  }
+
   await local.deleteAudioRecording(id);
+  await enqueue({
+    op: 'deleteEntity',
+    payload: { entity_type: 'audio_recording', entity_id: id },
+  });
 }
 
 // ============================================================

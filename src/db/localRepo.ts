@@ -413,8 +413,20 @@ export async function getAudioRecordingsBySentence(
     .sortBy('createdAt');
 }
 
+export async function getAudioRecording(id: string): Promise<AudioRecording | undefined> {
+  return localDb.audioRecordings.get(id);
+}
+
 export async function insertAudioRecording(rec: AudioRecording): Promise<void> {
   await localDb.audioRecordings.put(rec);
+}
+
+/** Partial update — used after push to persist the server-assigned storagePath. */
+export async function updateAudioRecording(
+  id: string,
+  patch: Partial<AudioRecording>,
+): Promise<void> {
+  await localDb.audioRecordings.update(id, patch);
 }
 
 export async function updateAudioRecordingName(id: string, name: string): Promise<void> {

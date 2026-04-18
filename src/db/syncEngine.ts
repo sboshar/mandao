@@ -20,6 +20,7 @@ import {
   srsCardFromRow,
   deckFromRow,
   reviewLogFromRow,
+  audioRecordingFromRow,
 } from './mappers';
 import { computeSafeUsn, groupConsecutiveRuns, type TableStats } from './syncHelpers';
 import { useSyncStore } from '../stores/syncStore';
@@ -139,6 +140,9 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
     case 'updateTags':
       await pushSequential(ops, pushUpdateTags);
       break;
+    case 'upsertAudioRecording':
+      await pushSequential(ops, pushUpsertAudioRecording);
+      break;
   }
 }
 
@@ -197,6 +201,102 @@ async function pushDeleteAllData(): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Pick a file extension for the Storage object name based on the Blob's
+ * MIME type. Path is `{user_id}/{id}.{ext}` — matching the server-side
+ * `audio_recordings_path_owner_prefix` CHECK constraint.
+ */
+function extensionFromMime(mime: string): string {
+  const base = mime.split(';')[0].trim().toLowerCase();
+  if (base.includes('webm')) return 'webm';
+  if (base.includes('mpeg')) return 'mp3';
+  if (base.includes('mp4')) return 'm4a';
+  if (base.includes('ogg')) return 'ogg';
+  if (base.includes('wav')) return 'wav';
+  if (base.includes('aac')) return 'aac';
+  return 'bin';
+}
+
+/**
+ * Push a locally-created audio recording.
+ * Steps: verify the parent sentence still exists, read the Blob fresh from
+ * Dexie, upload to Storage at a deterministic path (upsert:true so retries
+ * are safe), insert the metadata row, and cache the path locally so we can
+ * lazy-fetch the blob again if it's ever evicted.
+ *
+ * "Silently drop" paths (not a retry) cover races where the audio's parent
+ * sentence was deleted before the upload reached the server.
+ */
+async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
+  const payload = op.payload as {
+    id: string;
+    sentenceId: string;
+    name: string;
+    mimeType: string;
+    durationMs: number | null;
+    source: 'voice-input' | 'manual';
+    createdAt: number;
+  };
+
+  // The local row was just enqueued; if it's gone now, the user deleted it
+  // before we got online. deleteAudioRecording should have coalesced the
+  // pending upsert, but guard anyway.
+  const rec = await localDb.audioRecordings.get(payload.id);
+  if (!rec || !rec.blob) return;
+
+  // Parent sentence must still exist locally — its ingestBundle op was
+  // enqueued before this one, so if it's missing the user (or another
+  // device) deleted it. Drop the upload and the local recording.
+  const sentence = await localDb.sentences.get(payload.sentenceId);
+  if (!sentence) {
+    await localDb.audioRecordings.delete(payload.id);
+    return;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) throw new Error('Not authenticated');
+
+  const ext = extensionFromMime(payload.mimeType);
+  const storagePath = `${userId}/${payload.id}.${ext}`;
+
+  const { error: uploadErr } = await supabase.storage
+    .from('audio-recordings')
+    .upload(storagePath, rec.blob, {
+      contentType: payload.mimeType,
+      upsert: true,
+    });
+  if (uploadErr) throw new Error(uploadErr.message);
+
+  const { error: rowErr } = await supabase
+    .from('audio_recordings')
+    .upsert({
+      id: payload.id,
+      user_id: userId,
+      sentence_id: payload.sentenceId,
+      name: payload.name,
+      storage_path: storagePath,
+      mime_type: payload.mimeType,
+      duration_ms: payload.durationMs,
+      source: payload.source,
+      created_at: payload.createdAt,
+    });
+  if (rowErr) {
+    // FK violation: parent sentence was deleted remotely between our
+    // local check and the server write. Treat as silent-drop + cleanup.
+    if ((rowErr as { code?: string }).code === '23503') {
+      try {
+        await supabase.storage.from('audio-recordings').remove([storagePath]);
+      } catch {}
+      await localDb.audioRecordings.delete(payload.id);
+      return;
+    }
+    throw new Error(rowErr.message);
+  }
+
+  await localDb.audioRecordings.update(payload.id, { storagePath });
+}
+
 async function pushUpdateTags(op: SyncOp): Promise<void> {
   const { id, tags } = op.payload;
   // Uses RLS-protected direct update. The bump_sync_meta trigger
@@ -248,8 +348,10 @@ async function pullOnePage(): Promise<boolean> {
     decks: any[];
     srs_cards: any[];
     review_logs: any[];
+    audio_recordings?: any[];
     graves: any[];
   };
+  const audioRows = changes.audio_recordings ?? [];
 
   const stats: TableStats[] = [];
   let syncResult: { safeUsn: number; anyTruncated: boolean } | null = null;
@@ -273,6 +375,7 @@ async function pullOnePage(): Promise<boolean> {
       localDb.srsCards,
       localDb.decks,
       localDb.reviewLogs,
+      localDb.audioRecordings,
       localDb.syncMeta,
     ],
     async () => {
@@ -327,6 +430,18 @@ async function pullOnePage(): Promise<boolean> {
       }
       trackRows(changes.review_logs);
 
+      // Audio recordings: server wins for metadata, but preserve any local
+      // blob (the wire row has none, and we don't want to drop cached bytes).
+      for (const r of audioRows) {
+        const remote = audioRecordingFromRow(r);
+        const existing = await localDb.audioRecordings.get(remote.id);
+        await localDb.audioRecordings.put({
+          ...remote,
+          blob: existing?.blob,
+        });
+      }
+      trackRows(audioRows);
+
       for (const g of changes.graves) {
         const { entity_type, entity_id } = g;
         switch (entity_type) {
@@ -338,6 +453,7 @@ async function pullOnePage(): Promise<boolean> {
             }
             await localDb.srsCards.where('sentenceId').equals(entity_id).delete();
             await localDb.sentenceTokens.where('sentenceId').equals(entity_id).delete();
+            await localDb.audioRecordings.where('sentenceId').equals(entity_id).delete();
             await localDb.sentences.delete(entity_id);
             break;
           }
@@ -369,6 +485,11 @@ async function pullOnePage(): Promise<boolean> {
             break;
           case 'sentence_token':
             await localDb.sentenceTokens.delete(entity_id);
+            break;
+          case 'audio_recording':
+            // Row delete drops the local blob too; the server already wiped
+            // the Storage object via the delete trigger.
+            await localDb.audioRecordings.delete(entity_id);
             break;
         }
       }

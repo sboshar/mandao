@@ -187,3 +187,8 @@ button:active:not(:disabled) {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.08); }
 }
+
+/* Used by the SentenceAudioControls download spinner. */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
