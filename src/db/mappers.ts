@@ -20,6 +20,7 @@ export function meaningFromRow(r: any): Meaning {
     pinyinNumeric: r.pinyin_numeric, partOfSpeech: r.part_of_speech,
     englishShort: r.english_short, englishFull: r.english_full,
     type: r.type, level: r.level,
+    isTransliteration: r.is_transliteration ?? false,
     createdAt: r.created_at, updatedAt: r.updated_at ?? r.created_at,
     usn: r.usn,
   };

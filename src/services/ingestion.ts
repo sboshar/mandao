@@ -48,6 +48,12 @@ export interface TokenInput {
   pinyinNumeric: string;
   english: string;
   partOfSpeech: string;
+  /**
+   * True for phonetic loanwords (e.g. 汉堡 "hamburger"). When set, the parent
+   * Meaning is flagged so the UI can label it and readers know the character
+   * breakdown is phonetic, not semantic.
+   */
+  isTransliteration?: boolean;
   /** Per-character breakdowns from the LLM */
   characters?: CharacterInput[];
 }
@@ -193,6 +199,7 @@ function buildIngestPayload(
       pinyin_numeric: m.pinyinNumeric, part_of_speech: m.partOfSpeech,
       english_short: m.englishShort, english_full: m.englishFull,
       type: m.type, level: m.level,
+      is_transliteration: !!m.isTransliteration,
       created_at: m.createdAt, updated_at: m.updatedAt,
     })),
     meaning_links: acc.meaningLinks.map((l) => ({
@@ -255,6 +262,7 @@ async function findOrCreateMeaning(token: TokenInput, acc: IngestAccumulator): P
     englishFull: token.english,
     type: isCharacter ? 'character' : 'word',
     level: 0,
+    isTransliteration: !isCharacter && !!token.isTransliteration,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
