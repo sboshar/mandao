@@ -97,6 +97,15 @@ function MeaningContent() {
 
         <AudioButton text={meaning.headword} className="mt-2" />
         <div className="mt-2 text-sm" style={{ color: 'var(--text-secondary)' }}>{meaning.partOfSpeech}</div>
+        {meaning.isTransliteration && (
+          <div
+            className="mt-2 inline-block px-2 py-0.5 rounded text-xs"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+            title="Phonetic loanword: characters approximate a foreign word's sound rather than compose its meaning."
+          >
+            Phonetic loanword
+          </div>
+        )}
         <div className="mt-1 text-xl">
           <ClickableEnglish text={meaning.englishShort} />
         </div>
@@ -155,6 +164,11 @@ function MeaningContent() {
           <h3 className="text-sm font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
             Character Breakdown
           </h3>
+          {meaning.isTransliteration && (
+            <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
+              Phonetic — each character approximates a foreign sound; the glosses below are not the word's meaning.
+            </p>
+          )}
           <div className="flex gap-4 justify-center">
             {charBreakdown.map((item) => (
               <button

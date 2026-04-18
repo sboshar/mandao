@@ -34,6 +34,18 @@ describe('meaningFromRow', () => {
     };
     expect(meaningFromRow(row).updatedAt).toBe(1000);
   });
+
+  it('picks up is_transliteration and defaults missing column to false', () => {
+    const base = {
+      id: 'm1', headword: '汉堡', pinyin: 'hàn bǎo', pinyin_numeric: 'han4 bao3',
+      part_of_speech: 'noun', english_short: 'hamburger', english_full: 'hamburger',
+      type: 'word', level: 0, created_at: 1000, updated_at: 1000, usn: 1,
+    };
+    expect(meaningFromRow({ ...base, is_transliteration: true }).isTransliteration).toBe(true);
+    // Old rows from before the migration had no column; mapper must default to false
+    // so the UI never shows a false-positive "Phonetic loanword" badge.
+    expect(meaningFromRow(base).isTransliteration).toBe(false);
+  });
 });
 
 describe('meaningLinkFromRow', () => {

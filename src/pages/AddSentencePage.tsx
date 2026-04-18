@@ -38,6 +38,7 @@ interface TokenFormData {
   pinyinSandhi: string;
   english: string;
   partOfSpeech: string;
+  isTransliteration?: boolean;
   characters?: CharacterInput[];
 }
 
@@ -214,6 +215,7 @@ export function AddSentencePage() {
         pinyinSandhi: t.pinyinSandhi || '',
         english: t.english,
         partOfSpeech: t.partOfSpeech || '',
+        isTransliteration: !!t.isTransliteration,
         characters: t.characters?.map((c) => ({
           char: c.char,
           pinyinNumeric: c.pinyinNumeric,
@@ -244,6 +246,7 @@ export function AddSentencePage() {
         pinyinSandhi: t.pinyinSandhi || '',
         english: t.english,
         partOfSpeech: t.partOfSpeech || '',
+        isTransliteration: !!t.isTransliteration,
         characters: t.characters?.map((c) => ({
           char: c.char,
           pinyinNumeric: c.pinyinNumeric,
@@ -323,6 +326,7 @@ export function AddSentencePage() {
         pinyinSandhi: t.pinyinSandhi || '',
         english: t.english,
         partOfSpeech: t.partOfSpeech || '',
+        isTransliteration: !!t.isTransliteration,
         characters: t.characters?.map((c) => ({
           char: c.char,
           pinyinNumeric: c.pinyinNumeric,
@@ -400,6 +404,7 @@ export function AddSentencePage() {
         pinyinNumeric: t.pinyinNumeric,
         english: t.english,
         partOfSpeech: t.partOfSpeech || 'other',
+        isTransliteration: t.isTransliteration,
         characters: t.characters,
       }));
 
@@ -904,8 +909,22 @@ export function AddSentencePage() {
                 {/* Character breakdowns — always visible + editable for multi-char words */}
                 {t.characters && t.characters.length > 1 && (
                   <div className="mt-2 pt-2 border-t">
+                    <label className="flex items-center gap-2 mb-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!t.isTransliteration}
+                        onChange={(e) => {
+                          const newTokens = [...tokens];
+                          newTokens[i] = { ...newTokens[i], isTransliteration: e.target.checked };
+                          setTokens(newTokens);
+                        }}
+                      />
+                      Phonetic loanword (characters approximate a foreign sound, not meaning — e.g. 汉堡 = hamburger)
+                    </label>
                     <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                      Character breakdown (verify these are standalone meanings, not the whole word's meaning):
+                      {t.isTransliteration
+                        ? "Character breakdown (phonetic gloss — each character contributes sound, not literal meaning):"
+                        : "Character breakdown (verify these are standalone meanings, not the whole word's meaning):"}
                     </div>
                     <div className="space-y-2">
                       {t.characters.map((c, ci) => (

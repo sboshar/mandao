@@ -19,6 +19,12 @@ export interface Meaning {
   type: 'word' | 'character' | 'component';
   /** HSK level or custom difficulty 1-6, 0 = unassigned */
   level: number;
+  /**
+   * True when the headword is a phonetic loanword (e.g. 汉堡 = hamburger).
+   * The characters approximate a foreign word's sound; their literal meanings
+   * do not compose into the headword's meaning. Only meaningful on type='word'.
+   */
+  isTransliteration?: boolean;
   createdAt: number;
   updatedAt: number;
   usn?: number;

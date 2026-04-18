@@ -78,6 +78,7 @@ Then return this exact JSON structure:
       "pinyinSandhi": "pinyin with diacritics AFTER tone sandhi applied",
       "english": "meaning IN THIS CONTEXT (not all meanings)",
       "partOfSpeech": "one of: noun, verb, adj, adv, prep, conj, particle, measure, pronoun, number, other",
+      "isTransliteration": false,
       "characters": [
         {
           "char": "individual character",
@@ -102,6 +103,9 @@ Rules:
   - For multi-character tokens: give each character's OWN independent meaning — the semantic building block it contributes to the compound, NOT the compound's meaning repeated or paraphrased onto the character
   - Test: the character meaning should make sense if the character appeared in a DIFFERENT compound word. If the meaning only makes sense within this specific word, you are giving the word's meaning, not the character's meaning.
   - Think of it as etymology: what does each character bring to the table? The compound's meaning emerges from combining the characters' individual meanings.
+- isTransliteration: set true ONLY when the token is a phonetic loanword — the characters were chosen to approximate a foreign word's SOUND, and their normal literal meanings do not compose into the token's meaning. Examples: 汉堡 (hamburger), 咖啡 (coffee), 沙发 (sofa), 巧克力 (chocolate), 披萨 (pizza), 沙拉 (salad), 三明治 (sandwich), 可乐 (cola), 吉他 (guitar), 摩托 (motor), 麦克风 (microphone). Set false for native compounds (好吃, 作业, 电脑 "electric brain", etc.) and for semantic loans that translate meaning rather than sound.
+  - When isTransliteration is true, each character's "english" MUST be the phonetic gloss: "phonetic (sounds like '<syllable>')" — do NOT invent a literal meaning for that character in this word. The character's normal meanings still exist in isolation, but in this compound the character is contributing sound, not sense.
+  - Omit the field or set it to false when uncertain — false is the safe default.
 - Validation: before returning, verify that each token's pinyinSandhi has exactly as many syllables as characters in its surfaceForm. If not, you have accidentally merged pinyin from a neighboring token — fix it.
 - Return ONLY the JSON, nothing else`;
 }
@@ -119,6 +123,8 @@ export interface LLMTokenResponse {
   pinyinSandhi?: string;
   english: string;
   partOfSpeech: string;
+  /** True for phonetic loanwords (e.g. 汉堡 = hamburger) — characters contribute sound, not meaning. */
+  isTransliteration?: boolean;
   characters?: LLMCharacterResponse[];
 }
 
