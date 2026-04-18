@@ -158,8 +158,10 @@ export function AddSentencePage() {
     }
   }, [isTutorial, tutorialStep, step]);
 
-  // Step 1 → Step 2: Go to LLM prompt step.
+  // Step 1 → Step 2.
   // Instant indexed dedup check so a duplicate never triggers an LLM call.
+  // When AI is configured (and not in tutorial), skip the manual copy-paste
+  // screen and auto-analyze directly — that screen is pointless friction.
   const handleNext = async () => {
     const trimmed = chinese.trim();
     if (!trimmed) {
@@ -174,6 +176,10 @@ export function AddSentencePage() {
       }
     }
     setError('');
+    if (aiEnabled && !isTutorial) {
+      await handleAutoAnalyze();
+      return;
+    }
     setStep('llm');
   };
 
@@ -615,14 +621,33 @@ export function AddSentencePage() {
           </div>
           <button
             onClick={handleNext}
-            disabled={!chinese.trim()}
+            disabled={!chinese.trim() || analyzing}
             className={`w-full py-3 rounded-lg font-medium disabled:opacity-50 transition-colors ${
               isTutorial && tutorialStep === 1 ? 'ring-2 ring-offset-2' : ''
             }`}
             style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
           >
-            Next: Analyze with LLM
+            {analyzing
+              ? 'Analyzing...'
+              : aiEnabled && !isTutorial
+                ? 'Analyze with AI'
+                : 'Next: Analyze with LLM'}
           </button>
+          {aiEnabled && !isTutorial && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!chinese.trim()) return;
+                setError('');
+                setStep('llm');
+              }}
+              disabled={!chinese.trim() || analyzing}
+              className="w-full text-xs mt-1 underline disabled:opacity-50"
+              style={{ color: 'var(--text-tertiary)' }}
+            >
+              Or copy prompt manually
+            </button>
+          )}
         </div>
       )}
 
@@ -904,7 +929,7 @@ export function AddSentencePage() {
 
           <div className="flex gap-2">
             <button
-              onClick={() => setStep('llm')}
+              onClick={() => setStep('input')}
               className="flex-1 py-3 rounded-lg font-medium transition-colors"
               style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
             >
