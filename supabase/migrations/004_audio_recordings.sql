@@ -174,7 +174,6 @@ language plpgsql security invoker set search_path = public
 as $func$
 declare
   uid uuid := auth.uid();
-  v_result jsonb := '{}'::jsonb;
 begin
   set local statement_timeout = '10s';
 
@@ -182,7 +181,7 @@ begin
     raise exception 'Not authenticated';
   end if;
 
-  select jsonb_build_object(
+  return jsonb_build_object(
     'meanings', coalesce((
       select jsonb_agg(row_to_json(m))
       from (select * from meanings where user_id = uid and usn > last_usn order by usn limit max_rows) m
@@ -219,9 +218,7 @@ begin
       select jsonb_agg(row_to_json(g))
       from (select * from sync_graves where user_id = uid and usn > last_usn order by usn limit max_rows) g
     ), '[]'::jsonb)
-  ) into v_result;
-
-  return v_result;
+  );
 end;
 $func$;
 
