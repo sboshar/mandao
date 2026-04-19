@@ -24,6 +24,7 @@
 import { generateCompletion } from './aiProvider';
 import { generateAnalysisPrompt, parseLLMResponse, getExistingMeanings, type LLMResponse } from './llmPrompt';
 import { ingestSentence } from './ingestion';
+import { stripAnkiHtml } from './ankiApkg';
 import * as repo from '../db/repo';
 
 // ────────────────────────────────────────────────────────────
@@ -43,13 +44,14 @@ export type ErrorKind =
   | 'llm-parse'
   | 'duplicate'
   | 'no-fields'
+  | 'aborted'
   | 'other';
 
 export interface ImportIssue {
   sentence: string;
   reason: string;
   type: 'skipped' | 'failed';
-  errorKind: ErrorKind;
+  errorKind?: ErrorKind;
 }
 
 export interface ImportProgress {
@@ -164,11 +166,8 @@ Rules:
 // Row extraction
 // ────────────────────────────────────────────────────────────
 
-function stripHtml(s: string): string {
-  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
 interface ExtractedFields {
+  /** Always trimmed — downstream code should not re-normalize. */
   chinese: string;
   english: string;
   pinyin: string | null;
@@ -177,11 +176,14 @@ interface ExtractedFields {
 function extractFields(row: string, mapping: FieldMapping): ExtractedFields | null {
   const fields = row.split(mapping.separator);
 
-  const chinese = stripHtml(fields[mapping.chineseField] ?? '').trim();
+  const chinese = stripAnkiHtml(fields[mapping.chineseField] ?? '');
   if (!chinese) return null;
   if (!/[\u4e00-\u9fff\u3400-\u4dbf]/.test(chinese)) return null;
 
-  let english = '';
+  const pinyin = mapping.pinyinField !== null
+    ? stripAnkiHtml(fields[mapping.pinyinField] ?? '') || null
+    : null;
+
   if (mapping.englishField === mapping.chineseField) {
     const parts = chinese.split(/\s*[-=:：]\s*/);
     if (parts.length >= 2) {
@@ -190,16 +192,14 @@ function extractFields(row: string, mapping: FieldMapping): ExtractedFields | nu
       return {
         chinese: chinesePart?.trim() || chinese,
         english: englishPart?.trim() || '',
-        pinyin: mapping.pinyinField !== null ? stripHtml(fields[mapping.pinyinField] ?? '').trim() || null : null,
+        pinyin,
       };
     }
-  } else {
-    english = stripHtml(fields[mapping.englishField] ?? '').trim();
   }
 
-  const pinyin = mapping.pinyinField !== null
-    ? stripHtml(fields[mapping.pinyinField] ?? '').trim() || null
-    : null;
+  const english = mapping.englishField === mapping.chineseField
+    ? ''
+    : stripAnkiHtml(fields[mapping.englishField] ?? '');
 
   return { chinese, english, pinyin };
 }
@@ -256,32 +256,20 @@ async function withRetry<T>(
 // Bounded concurrency + circuit breaker
 // ────────────────────────────────────────────────────────────
 
-/**
- * Run `tasks` with at most `concurrency` in flight at once.
- *
- * `shouldAbort` is checked before dispatching each new task; in-flight tasks
- * continue to completion. This is how the circuit breaker drains cleanly
- * once rate limiting trips — we stop firing new calls but let pending ones
- * finish so their results are still reported.
- */
+/** Run `tasks` with at most `concurrency` in flight at once. */
 async function parallelMap<T, U>(
   tasks: T[],
   concurrency: number,
   run: (task: T, index: number) => Promise<U>,
-  shouldAbort?: () => boolean,
-): Promise<Array<U | { aborted: true }>> {
-  const results = new Array<U | { aborted: true }>(tasks.length);
-  const effectiveConcurrency = Math.max(1, Math.min(concurrency, tasks.length || 1));
+): Promise<U[]> {
+  const results = new Array<U>(tasks.length);
+  const width = Math.max(1, Math.min(concurrency, tasks.length || 1));
   let nextIndex = 0;
 
-  const workers = Array.from({ length: effectiveConcurrency }, async () => {
+  const workers = Array.from({ length: width }, async () => {
     while (true) {
       const i = nextIndex++;
       if (i >= tasks.length) return;
-      if (shouldAbort?.()) {
-        results[i] = { aborted: true };
-        continue;
-      }
       results[i] = await run(tasks[i], i);
     }
   });
@@ -325,9 +313,8 @@ type AnalysisResult = AnalysisSuccess | AnalysisFailure;
 
 async function analyzeOne(input: AnalysisInput, maxRetries: number): Promise<AnalysisResult> {
   try {
-    const chinese = input.fields.chinese.trim();
-    const existingMeanings = await getExistingMeanings(chinese);
-    const prompt = generateAnalysisPrompt(chinese, existingMeanings);
+    const existingMeanings = await getExistingMeanings(input.fields.chinese);
+    const prompt = generateAnalysisPrompt(input.fields.chinese, existingMeanings);
     const raw = await withRetry(() => generateCompletion(prompt), maxRetries);
     const parsed = parseLLMResponse(raw);
     return { kind: 'ok', index: input.index, fields: input.fields, parsed };
@@ -349,7 +336,7 @@ async function ingestOne(
   const { fields, parsed } = success;
   const finalEnglish = fields.english || parsed.english;
   await ingestSentence({
-    chinese: fields.chinese.trim(),
+    chinese: fields.chinese,
     english: finalEnglish,
     tokens: parsed.tokens.map((t) => ({
       surfaceForm: t.surfaceForm,
@@ -404,23 +391,27 @@ export async function importFromAnki(
     issues: [],
   };
 
+  const recordIssue = (issue: ImportIssue) => {
+    progress.issues.push(issue);
+    if (issue.type === 'skipped') progress.skipped++;
+    else progress.failed++;
+    progress.processed++;
+    onProgress({ ...progress });
+  };
+
   onProgress({ ...progress, currentSentence: 'Detecting field mapping…' });
 
   const mapping = await detectFieldMapping(rows);
 
-  // Stage A: extract fields from every row
   const plans: RowPlan[] = rows.map((rawRow, index) => ({
     index,
     rawRow,
     fields: extractFields(rawRow, mapping),
   }));
 
-  // Account for rows that had no extractable fields up front.
   for (const plan of plans) {
     if (!plan.fields) {
-      progress.skipped++;
-      progress.processed++;
-      progress.issues.push({
+      recordIssue({
         sentence: plan.rawRow.slice(0, 60),
         reason: 'Could not extract fields',
         type: 'skipped',
@@ -428,27 +419,23 @@ export async function importFromAnki(
       });
     }
   }
-  onProgress({ ...progress });
 
-  // Stage B: dedup against local Dexie. These reads are cheap and independent;
-  // running them in parallel lets us report the final skipped count before we
-  // even start spending LLM tokens.
+  // Dedup reads are cheap and independent; running them all in parallel lets
+  // us report the final skipped count before we start spending LLM tokens.
   onProgress({ ...progress, currentSentence: 'Checking for duplicates…' });
   const dedupChecks = await Promise.all(
     plans
       .filter((p): p is RowPlan & { fields: ExtractedFields } => !!p.fields)
-      .map(async (p) => {
-        const existing = await repo.getSentenceByChinese(p.fields.chinese.trim());
-        return { plan: p, isDuplicate: !!existing };
-      }),
+      .map(async (p) => ({
+        plan: p,
+        isDuplicate: !!(await repo.getSentenceByChinese(p.fields.chinese)),
+      })),
   );
 
   const toAnalyze: AnalysisInput[] = [];
   for (const { plan, isDuplicate } of dedupChecks) {
     if (isDuplicate) {
-      progress.skipped++;
-      progress.processed++;
-      progress.issues.push({
+      recordIssue({
         sentence: plan.fields.chinese,
         reason: 'Duplicate — already in app',
         type: 'skipped',
@@ -458,63 +445,44 @@ export async function importFromAnki(
       toAnalyze.push({ index: plan.index, fields: plan.fields });
     }
   }
-  onProgress({ ...progress });
 
-  // Stage C: parallel LLM analysis with per-call retry + circuit breaker.
   // `tripped` flips true once we hit RATE_LIMIT_TRIP_THRESHOLD consecutive
-  // rate-limit errors — after that, new tasks short-circuit to failures so
-  // the user doesn't wait for dozens more hopeless requests.
+  // rate-limit errors across completions — after that, new tasks short-circuit
+  // so the user doesn't wait for dozens more hopeless requests.
   let rateLimitStreak = 0;
   let tripped = false;
 
-  const analysisResults = await parallelMap(
-    toAnalyze,
-    concurrency,
-    async (task) => {
-      if (abortSignal?.aborted || tripped) {
-        const errorKind: ErrorKind = tripped ? 'rate-limit' : 'other';
-        return {
-          kind: 'err' as const,
-          index: task.index,
-          fields: task.fields,
-          errorKind,
-          message: tripped ? 'Skipped after sustained rate limiting' : 'Aborted',
-        };
-      }
-      const result = await analyzeOne(task, maxRetries);
-      // Running counter of consecutive rate-limit errors across completions —
-      // any success resets it. Simpler than a sliding window and good enough
-      // for the "provider is hard-refusing us" case.
-      if (result.kind === 'err' && result.errorKind === 'rate-limit') {
-        rateLimitStreak++;
-        if (rateLimitStreak >= RATE_LIMIT_TRIP_THRESHOLD) tripped = true;
-      } else {
-        rateLimitStreak = 0;
-      }
-      progress.currentSentence = task.fields.chinese;
-      onProgress({ ...progress });
-      return result;
-    },
-    () => abortSignal?.aborted === true,
-  );
+  const analysisResults = await parallelMap(toAnalyze, concurrency, async (task) => {
+    if (abortSignal?.aborted) {
+      return { kind: 'err' as const, index: task.index, fields: task.fields, errorKind: 'aborted' as ErrorKind, message: 'Aborted' };
+    }
+    if (tripped) {
+      return { kind: 'err' as const, index: task.index, fields: task.fields, errorKind: 'rate-limit' as ErrorKind, message: 'Skipped after sustained rate limiting' };
+    }
+    const result = await analyzeOne(task, maxRetries);
+    if (result.kind === 'err' && result.errorKind === 'rate-limit') {
+      rateLimitStreak++;
+      if (rateLimitStreak >= RATE_LIMIT_TRIP_THRESHOLD) tripped = true;
+    } else {
+      rateLimitStreak = 0;
+    }
+    progress.currentSentence = task.fields.chinese;
+    onProgress({ ...progress });
+    return result;
+  });
 
-  // Stage D: sequential ingest. `findOrCreateMeaning` dedups on
-  // (headword, pinyinNumeric, englishShort) via a read-then-write, which
-  // races if run in parallel, so we serialize this stage.
+  // Ingest runs serially: `findOrCreateMeaning` dedups via read-then-write,
+  // which races if run in parallel, so we keep this stage single-threaded.
   for (const result of analysisResults) {
     if (abortSignal?.aborted) break;
-    if ('aborted' in result) continue;
 
     if (result.kind === 'err') {
-      progress.failed++;
-      progress.processed++;
-      progress.issues.push({
+      recordIssue({
         sentence: result.fields.chinese,
         reason: result.message.slice(0, 150),
         type: 'failed',
         errorKind: result.errorKind,
       });
-      onProgress({ ...progress });
       continue;
     }
 
@@ -524,28 +492,18 @@ export async function importFromAnki(
     try {
       await ingestOne(result, ['anki-import']);
       progress.imported++;
+      progress.processed++;
+      onProgress({ ...progress });
     } catch (e: any) {
       const msg: string = e?.message || 'Unknown error';
-      if (msg === 'duplicate' || msg.includes('already exists')) {
-        progress.skipped++;
-        progress.issues.push({
-          sentence: result.fields.chinese,
-          reason: 'Duplicate — already in app',
-          type: 'skipped',
-          errorKind: 'duplicate',
-        });
-      } else {
-        progress.failed++;
-        progress.issues.push({
-          sentence: result.fields.chinese,
-          reason: msg.slice(0, 150),
-          type: 'failed',
-          errorKind: 'other',
-        });
-      }
+      const isDuplicate = msg === 'duplicate' || msg.includes('already exists');
+      recordIssue({
+        sentence: result.fields.chinese,
+        reason: isDuplicate ? 'Duplicate — already in app' : msg.slice(0, 150),
+        type: isDuplicate ? 'skipped' : 'failed',
+        errorKind: isDuplicate ? 'duplicate' : 'other',
+      });
     }
-    progress.processed++;
-    onProgress({ ...progress });
   }
 
   progress.currentSentence = '';
