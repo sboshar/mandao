@@ -708,46 +708,58 @@ export function AddSentencePage() {
               )}
 
               {/* Manual copy-paste flow */}
-              <details open={!aiEnabled || manualMode}>
-                <summary
-                  className="cursor-pointer text-sm font-medium py-1"
-                  style={{ color: 'var(--text-secondary)' }}
-                >
-                  {aiEnabled && !manualMode ? 'Or paste LLM response manually' : 'Copy prompt & paste LLM response'}
-                </summary>
-                <div className="mt-2 p-4 rounded-lg space-y-3 inset" style={{ border: '1px solid var(--border)' }}>
-                  <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    1. Copy the analysis prompt (the LLM will tokenize and analyze the sentence)
-                  </p>
-                  <button
-                    onClick={handleCopyPrompt}
-                    className="w-full py-2 rounded font-medium text-sm transition-colors"
-                    style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
-                  >
-                    {promptCopied ? 'Copied!' : 'Copy Prompt to Clipboard'}
-                  </button>
+              {(() => {
+                const body = (
+                  <div className="mt-2 p-4 rounded-lg space-y-3 inset" style={{ border: '1px solid var(--border)' }}>
+                    <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      1. Copy the analysis prompt (the LLM will tokenize and analyze the sentence)
+                    </p>
+                    <button
+                      onClick={handleCopyPrompt}
+                      className="w-full py-2 rounded font-medium text-sm transition-colors"
+                      style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+                    >
+                      {promptCopied ? 'Copied!' : 'Copy Prompt to Clipboard'}
+                    </button>
 
-                  <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    2. Paste it into ChatGPT / Claude / any LLM, then paste the response below
-                  </p>
-                  <textarea
-                    value={llmPasteValue}
-                    onChange={(e) => setLlmPasteValue(e.target.value)}
-                    placeholder="Paste the JSON response here..."
-                    rows={6}
-                    className="w-full px-3 py-2 rounded-lg text-sm font-mono"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                  />
-                  <button
-                    onClick={handleParseLLMResponse}
-                    disabled={!llmPasteValue.trim()}
-                    className="w-full py-2 rounded font-medium text-sm transition-colors disabled:opacity-50"
-                    style={{ background: 'var(--success)', color: 'var(--text-inverted)' }}
-                  >
-                    Parse &amp; Fill
-                  </button>
-                </div>
-              </details>
+                    <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      2. Paste it into ChatGPT / Claude / any LLM, then paste the response below
+                    </p>
+                    <textarea
+                      value={llmPasteValue}
+                      onChange={(e) => setLlmPasteValue(e.target.value)}
+                      placeholder="Paste the JSON response here..."
+                      rows={6}
+                      className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+                      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                    />
+                    <button
+                      onClick={handleParseLLMResponse}
+                      disabled={!llmPasteValue.trim()}
+                      className="w-full py-2 rounded font-medium text-sm transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--success)', color: 'var(--text-inverted)' }}
+                    >
+                      Parse &amp; Fill
+                    </button>
+                  </div>
+                );
+                // When AI is configured and the user hasn't explicitly chosen the manual
+                // path, keep the old collapsible affordance below the Auto-Analyze button.
+                // Otherwise render the content flat — the user has already committed to manual.
+                return aiEnabled && !manualMode ? (
+                  <details>
+                    <summary
+                      className="cursor-pointer text-sm font-medium py-1"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      Or paste LLM response manually
+                    </summary>
+                    {body}
+                  </details>
+                ) : (
+                  body
+                );
+              })()}
             </div>
           )}
 
