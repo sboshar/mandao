@@ -376,6 +376,10 @@ export function SpeakPage() {
           </>
         )}
       </div>
+
+      <p className="mt-8 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
+        Speech recognition isn't perfectly accurate and is often too lenient on tones.
+      </p>
     </div>
   );
 }

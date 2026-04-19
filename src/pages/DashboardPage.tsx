@@ -107,9 +107,9 @@ export function DashboardPage() {
             onClick={() => navigate('/speak')}
             className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
             style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}
-            title="Speaking practice"
+            title="Speaking practice (beta)"
           >
-            Speak
+            Speak ✦
           </button>
         </div>
         <button
