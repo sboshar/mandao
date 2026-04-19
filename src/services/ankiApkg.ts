@@ -9,9 +9,19 @@ import { generateCompletion } from './aiProvider';
 import { generateAnalysisPrompt, parseLLMResponse, getExistingMeanings } from './llmPrompt';
 import { ingestSentence } from './ingestion';
 import * as repo from '../db/repo';
-import type { ImportProgress, ProgressCallback } from './ankiImport';
+import {
+  type ImportProgress,
+  type ProgressCallback,
+  type ImportOptions,
+  type ErrorKind,
+  classifyError,
+  withRetry,
+  parallelMap,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_MAX_RETRIES,
+  RATE_LIMIT_TRIP_THRESHOLD,
+} from './ankiImport';
 import { v4 as uuid } from 'uuid';
-import type { AudioRecording } from '../db/schema';
 
 // Re-export types for convenience
 export type { ImportProgress, ProgressCallback };
@@ -307,6 +317,22 @@ export async function analyzeApkg(file: File): Promise<ApkgFieldInfo> {
 // Import .apkg (step 2: process with user-confirmed mapping)
 // ────────────────────────────────────────────────────────────
 
+interface ApkgNotePlan {
+  id: number;
+  fields: string[];
+  /** Pre-cleaned Chinese from the chosen field — `null` when no Chinese chars found. */
+  chinese: string | null;
+}
+
+interface ApkgAnalysisInput {
+  note: ApkgNotePlan;
+  chinese: string;
+}
+
+type ApkgAnalysisResult =
+  | { kind: 'ok'; note: ApkgNotePlan; chinese: string; parsed: import('./llmPrompt').LLMResponse }
+  | { kind: 'err'; note: ApkgNotePlan; chinese: string; errorKind: ErrorKind; message: string };
+
 export async function importFromApkg(
   file: File,
   onProgress: ProgressCallback,
@@ -315,7 +341,11 @@ export async function importFromApkg(
   selectedNoteIds?: Set<number>,
   audioFieldIndex?: number | null,
   audioSourceName?: string,
+  options: ImportOptions = {},
 ): Promise<ImportProgress> {
+  const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+
   const progress: ImportProgress = {
     total: 0,
     processed: 0,
@@ -326,12 +356,19 @@ export async function importFromApkg(
     issues: [],
   };
 
+  const recordIssue = (issue: { sentence: string; reason: string; type: 'skipped' | 'failed'; errorKind?: ErrorKind }) => {
+    progress.issues.push(issue);
+    if (issue.type === 'skipped') progress.skipped++;
+    else progress.failed++;
+    progress.processed++;
+    onProgress({ ...progress });
+  };
+
   onProgress({ ...progress, currentSentence: 'Reading .apkg file...' });
 
   const { db, tableNames, zip, media } = await openApkgDatabase(file);
-  const audioEnabled =
-    typeof audioFieldIndex === 'number' && audioFieldIndex >= 0;
-  const audioLabel = (audioSourceName?.trim() || 'anki');
+  const audioEnabled = typeof audioFieldIndex === 'number' && audioFieldIndex >= 0;
+  const audioLabel = audioSourceName?.trim() || 'anki';
 
   try {
     let colCreatedMs = Date.now();
@@ -348,16 +385,15 @@ export async function importFromApkg(
       throw new Error('No notes found in the .apkg file.');
     }
 
-    let notes = notesResult[0].values.map(row => ({
+    let rawNotes = notesResult[0].values.map((row) => ({
       id: Number(row[0]),
       fields: String(row[1]).split('\x1f'),
     }));
 
     if (selectedNoteIds && selectedNoteIds.size > 0) {
-      notes = notes.filter(n => selectedNoteIds.has(n.id));
+      rawNotes = rawNotes.filter((n) => selectedNoteIds.has(n.id));
     }
 
-    // 7. Get cards with scheduling data
     const cardsMap = new Map<number, AnkiCard>();
     if (tableNames.includes('cards')) {
       const cardsResult = db.exec(
@@ -377,54 +413,110 @@ export async function importFromApkg(
             due: Number(row[8]),
             data: String(row[9] || '{}'),
           };
-          // Keep one card per note (prefer review cards over new)
           const existing = cardsMap.get(card.nid);
-          if (!existing || card.type > existing.type) {
-            cardsMap.set(card.nid, card);
-          }
+          if (!existing || card.type > existing.type) cardsMap.set(card.nid, card);
         }
       }
     }
 
-    // 8. Determine Chinese field index
-    progress.total = notes.length;
+    progress.total = rawNotes.length;
     const chIdx = chineseFieldIndex ?? 0;
 
-    // 9. Process each note
-    for (let i = 0; i < notes.length; i++) {
+    // Stage 1: clean + dedup every note up front. Cheap, parallel-safe reads.
+    onProgress({ ...progress, currentSentence: 'Checking for duplicates…' });
+    const notes: ApkgNotePlan[] = rawNotes.map((n) => {
+      const rawChinese = n.fields[chIdx] ?? '';
+      const chinese = stripAnkiHtml(rawChinese).trim();
+      return {
+        ...n,
+        chinese: chinese && /[\u4e00-\u9fff\u3400-\u4dbf]/.test(chinese) ? chinese : null,
+      };
+    });
+
+    for (const note of notes) {
+      if (!note.chinese) {
+        recordIssue({
+          sentence: (note.fields[chIdx] ?? '').slice(0, 60) || '(empty)',
+          reason: 'No Chinese characters found',
+          type: 'skipped',
+          errorKind: 'no-fields',
+        });
+      }
+    }
+
+    const dedupChecks = await Promise.all(
+      notes
+        .filter((n): n is ApkgNotePlan & { chinese: string } => n.chinese !== null)
+        .map(async (n) => ({ note: n, isDuplicate: !!(await repo.getSentenceByChinese(n.chinese)) })),
+    );
+
+    const toAnalyze: ApkgAnalysisInput[] = [];
+    for (const { note, isDuplicate } of dedupChecks) {
+      if (isDuplicate) {
+        recordIssue({ sentence: note.chinese!, reason: 'Duplicate — already in app', type: 'skipped', errorKind: 'duplicate' });
+      } else {
+        toAnalyze.push({ note, chinese: note.chinese! });
+      }
+    }
+
+    // Stage 2: parallel LLM analysis, with retry + circuit breaker (same
+    // pattern as the text importer).
+    let rateLimitStreak = 0;
+    let tripped = false;
+
+    const analysisResults = await parallelMap<ApkgAnalysisInput, ApkgAnalysisResult>(
+      toAnalyze,
+      concurrency,
+      async (task) => {
+        if (abortSignal?.aborted) {
+          return { kind: 'err', note: task.note, chinese: task.chinese, errorKind: 'aborted', message: 'Aborted' };
+        }
+        if (tripped) {
+          return { kind: 'err', note: task.note, chinese: task.chinese, errorKind: 'rate-limit', message: 'Skipped after sustained rate limiting' };
+        }
+        try {
+          const existingMeanings = await getExistingMeanings(task.chinese);
+          const prompt = generateAnalysisPrompt(task.chinese, existingMeanings);
+          const raw = await withRetry(() => generateCompletion(prompt), maxRetries);
+          const parsed = parseLLMResponse(raw);
+          rateLimitStreak = 0;
+          progress.currentSentence = task.chinese;
+          onProgress({ ...progress });
+          return { kind: 'ok', note: task.note, chinese: task.chinese, parsed };
+        } catch (e: any) {
+          const errorKind = classifyError(e);
+          if (errorKind === 'rate-limit') {
+            rateLimitStreak++;
+            if (rateLimitStreak >= RATE_LIMIT_TRIP_THRESHOLD) tripped = true;
+          } else {
+            rateLimitStreak = 0;
+          }
+          return { kind: 'err', note: task.note, chinese: task.chinese, errorKind, message: e?.message || 'Unknown error' };
+        }
+      },
+    );
+
+    // Stage 3: sequential ingest + audio copy + Anki scheduling conversion.
+    // Audio blob extraction mutates the in-memory zip and ingestion's
+    // findOrCreateMeaning dedup races if parallel, so this stage stays serial.
+    for (const result of analysisResults) {
       if (abortSignal?.aborted) break;
 
-      const note = notes[i];
-      const fields = note.fields;
-
-      // Extract Chinese text
-      const rawChinese = fields[chIdx] ?? '';
-      const chinese = stripAnkiHtml(rawChinese).trim();
-
-      if (!chinese || !/[\u4e00-\u9fff\u3400-\u4dbf]/.test(chinese)) {
-        progress.skipped++;
-        progress.issues.push({ sentence: rawChinese.slice(0, 60) || '(empty)', reason: 'No Chinese characters found', type: 'skipped' });
-        progress.processed++;
-        onProgress({ ...progress });
+      if (result.kind === 'err') {
+        recordIssue({
+          sentence: result.chinese,
+          reason: result.message.slice(0, 150),
+          type: 'failed',
+          errorKind: result.errorKind,
+        });
         continue;
       }
 
+      const { note, chinese, parsed } = result;
       progress.currentSentence = chinese;
       onProgress({ ...progress });
 
       try {
-        // Check for duplicates
-        const existing = await repo.getSentenceByChinese(chinese);
-        if (existing) {
-          throw new Error('duplicate');
-        }
-
-        // Analyze via LLM
-        const existingMeanings = await getExistingMeanings(chinese);
-        const prompt = generateAnalysisPrompt(chinese, existingMeanings);
-        const raw = await generateCompletion(prompt);
-        const parsed = parseLLMResponse(raw);
-
         const sentenceId = await ingestSentence({
           chinese,
           english: parsed.english,
@@ -433,6 +525,7 @@ export async function importFromApkg(
             pinyinNumeric: t.pinyinNumeric,
             english: t.english,
             partOfSpeech: t.partOfSpeech || 'other',
+            isTransliteration: t.isTransliteration,
             characters: t.characters?.map((c) => ({
               char: c.char,
               pinyinNumeric: c.pinyinNumeric,
@@ -444,23 +537,18 @@ export async function importFromApkg(
           tags: ['anki-import'],
         });
 
-        // Import attached audio if the user picked an audio field.
         if (audioEnabled) {
-          const rawAudioField = fields[audioFieldIndex!] ?? '';
+          const rawAudioField = note.fields[audioFieldIndex!] ?? '';
           const soundRefs = extractSoundRefs(rawAudioField);
           for (const refName of soundRefs) {
             const resolved = resolveMediaBlob(zip, media, refName);
             if (!resolved) {
-              progress.issues.push({
-                sentence: chinese,
-                reason: `Audio file not found in deck: ${refName}`,
-                type: 'skipped',
-              });
+              progress.issues.push({ sentence: chinese, reason: `Audio file not found in deck: ${refName}`, type: 'skipped' });
               continue;
             }
             const mimeType = mimeFromAudioFilename(resolved.filename);
             const blob = await resolved.entry.async('blob');
-            const rec: AudioRecording = {
+            await repo.insertAudioRecording({
               id: uuid(),
               sentenceId,
               name: audioLabel,
@@ -468,16 +556,13 @@ export async function importFromApkg(
               mimeType,
               source: 'manual',
               createdAt: Date.now(),
-            };
-            await repo.insertAudioRecording(rec);
+            });
           }
         }
 
-        // Apply scheduling data from Anki card if available
         const ankiCard = cardsMap.get(note.id);
         if (ankiCard && ankiCard.reps > 0) {
           const scheduling = convertSm2ToFsrs(ankiCard, colCreatedMs);
-          // Update the SRS cards that were created during ingestion
           const srsCards = await repo.getSrsCardsBySentence(sentenceId);
           for (const srsCard of srsCards) {
             await repo.updateSrsCard(srsCard.id, {
@@ -495,18 +580,18 @@ export async function importFromApkg(
         }
 
         progress.imported++;
+        progress.processed++;
+        onProgress({ ...progress });
       } catch (e: any) {
-        if (e.message === 'duplicate' || e.message?.includes('already exists')) {
-          progress.skipped++;
-          progress.issues.push({ sentence: chinese, reason: 'Duplicate — already in app', type: 'skipped' });
-        } else {
-          progress.failed++;
-          progress.issues.push({ sentence: chinese, reason: e.message?.slice(0, 150) || 'Unknown error', type: 'failed' });
-        }
+        const msg: string = e?.message || 'Unknown error';
+        const isDuplicate = msg === 'duplicate' || msg.includes('already exists');
+        recordIssue({
+          sentence: chinese,
+          reason: isDuplicate ? 'Duplicate — already in app' : msg.slice(0, 150),
+          type: isDuplicate ? 'skipped' : 'failed',
+          errorKind: isDuplicate ? 'duplicate' : 'other',
+        });
       }
-
-      progress.processed++;
-      onProgress({ ...progress });
     }
   } finally {
     db.close();

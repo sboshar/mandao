@@ -58,10 +58,15 @@ export const PROVIDER_LABELS: Record<AIProvider, string> = {
 /** Popular models per provider. First entry is the default. */
 export const MODEL_OPTIONS: Record<AIProvider, { id: string; label: string }[]> = {
   gemini: [
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (stable, recommended)' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (recommended)' },
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (fastest, cheapest)' },
     { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (preview)' },
     { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite (preview)' },
+    { id: 'gemma-4-31b-it', label: 'Gemma 4 31B (open-weights, smartest)' },
+    { id: 'gemma-4-26b-a4b-it', label: 'Gemma 4 26B MoE (open-weights)' },
+    { id: 'gemma-3-27b-it', label: 'Gemma 3 27B (open-weights)' },
+    { id: 'gemma-3-12b-it', label: 'Gemma 3 12B (open-weights)' },
+    { id: 'gemma-3-4b-it', label: 'Gemma 3 4B (open-weights, fast)' },
   ],
   openai: [
     { id: 'gpt-4o-mini', label: 'GPT-4o Mini (cheap, fast)' },

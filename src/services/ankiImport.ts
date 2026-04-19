@@ -75,10 +75,10 @@ export interface ImportOptions {
   maxRetries?: number;
 }
 
-const DEFAULT_CONCURRENCY = 5;
-const DEFAULT_MAX_RETRIES = 3;
+export const DEFAULT_CONCURRENCY = 5;
+export const DEFAULT_MAX_RETRIES = 3;
 /** Trip the circuit breaker after this many in-flight rate-limit errors in a row. */
-const RATE_LIMIT_TRIP_THRESHOLD = 5;
+export const RATE_LIMIT_TRIP_THRESHOLD = 5;
 
 // ────────────────────────────────────────────────────────────
 // File parsing
@@ -233,7 +233,7 @@ function isTransient(kind: ErrorKind): boolean {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Retry only transient errors; return the final error's kind on exhaustion. */
-async function withRetry<T>(
+export async function withRetry<T>(
   fn: () => Promise<T>,
   maxAttempts: number,
 ): Promise<T> {
@@ -257,7 +257,7 @@ async function withRetry<T>(
 // ────────────────────────────────────────────────────────────
 
 /** Run `tasks` with at most `concurrency` in flight at once. */
-async function parallelMap<T, U>(
+export async function parallelMap<T, U>(
   tasks: T[],
   concurrency: number,
   run: (task: T, index: number) => Promise<U>,

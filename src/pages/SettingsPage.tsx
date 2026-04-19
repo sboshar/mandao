@@ -22,7 +22,7 @@ type Section = 'account' | 'srs' | 'display' | 'ai' | 'anki' | 'data';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'account', label: 'Account' },
-  { id: 'srs', label: 'SRS' },
+  { id: 'srs', label: 'Reviews' },
   { id: 'display', label: 'Display' },
   { id: 'ai', label: 'AI' },
   { id: 'anki', label: 'Anki' },
@@ -563,6 +563,21 @@ function AISection() {
                         style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                       />
                     )}
+                    {settings.provider === 'gemini' && (
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                        Rate limits vary by tier — see your{' '}
+                        <a
+                          href="https://aistudio.google.com/apikey"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                          style={{ color: 'var(--accent)' }}
+                        >
+                          AI Studio dashboard
+                        </a>
+                        .
+                      </p>
+                    )}
                   </div>
                 );
               })()}
@@ -602,6 +617,28 @@ function AISection() {
 // ────────────────────────────────────────────────────────────
 // Data Management
 // ────────────────────────────────────────────────────────────
+
+function ConcurrencyInput({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+        Parallel LLM calls
+      </label>
+      <input
+        type="number"
+        min={1}
+        max={10}
+        value={value}
+        onChange={(e) => onChange(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+        className="w-16 px-2 py-1 rounded text-sm text-center"
+        style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+      />
+      <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+        1 = sequential. Lower this if you hit rate limits.
+      </span>
+    </div>
+  );
+}
 
 function AnkiSection() {
   const [ankiExporting, setAnkiExporting] = useState(false);
@@ -694,6 +731,7 @@ function AnkiSection() {
       noteIds,
       audioIdx,
       audioLabel,
+      { concurrency: importConcurrency },
     ));
   };
 
@@ -792,26 +830,7 @@ function AnkiSection() {
             <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
               Accepts .apkg, .txt, .csv, or .tsv files. In Anki, use File &gt; Export to create a file.
             </p>
-            <div className="mt-3 flex items-center gap-2">
-              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                Parallel LLM calls
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={importConcurrency}
-                onChange={(e) => {
-                  const n = Math.max(1, Math.min(10, Number(e.target.value) || 1));
-                  setImportConcurrency(n);
-                }}
-                className="w-16 px-2 py-1 rounded text-sm text-center"
-                style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-              />
-              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                1 = sequential. Lower this if you hit rate limits.
-              </span>
-            </div>
+            <ConcurrencyInput value={importConcurrency} onChange={setImportConcurrency} />
           </div>
         )}
 
@@ -984,6 +1003,8 @@ function AnkiSection() {
               Click to toggle. Shift-click for range. Drag to select multiple.
             </p>
 
+            <ConcurrencyInput value={importConcurrency} onChange={setImportConcurrency} />
+
             {/* Actions */}
             <div className="flex gap-2">
               <button
@@ -1122,6 +1143,8 @@ function AnkiSection() {
                 </details>
               )}
             </div>
+
+            <ConcurrencyInput value={importConcurrency} onChange={setImportConcurrency} />
 
             <button
               onClick={() => { setAnkiProgress(null); setAnkiError(null); }}
