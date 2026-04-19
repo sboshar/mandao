@@ -9,13 +9,14 @@ import type { ReviewMode } from '../db/schema';
 
 type ModeOption = ReviewMode | 'all';
 
-const MODE_CYCLE: ModeOption[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'];
+const MODE_CYCLE: ModeOption[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type', 'speak'];
 const MODE_LABEL: Record<ModeOption, string> = {
   'all': 'All',
   'en-to-zh': 'EN→ZH',
   'zh-to-en': 'ZH→EN',
   'py-to-en-zh': 'PY→',
   'listen-type': 'Listen',
+  'speak': 'Speak',
 };
 
 export function DashboardPage() {
@@ -43,7 +44,7 @@ export function DashboardPage() {
   const states = breakdown?.byModeAndState[mode] ?? { newCount: 0, learningCount: 0, reviewCount: 0 };
   const dueForMode = states.newCount + states.learningCount + states.reviewCount;
   const totalAll = breakdown
-    ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh'] + (breakdown.byMode['listen-type'] ?? 0)
+    ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh'] + (breakdown.byMode['listen-type'] ?? 0) + (breakdown.byMode['speak'] ?? 0)
     : 0;
 
   const reviewParam = mode === 'all' ? 'both' : mode;
@@ -99,18 +100,14 @@ export function DashboardPage() {
                 background: mode === m ? 'var(--accent)' : 'var(--bg-inset)',
                 color: mode === m ? '#fff' : 'var(--text-tertiary)',
               }}
+              title={m === 'speak' ? 'Speaking practice (beta)' : undefined}
             >
               {MODE_LABEL[m]}
+              {m === 'speak' && (
+                <sup className="ml-0.5 text-[9px]" style={{ opacity: 0.8 }}>✦</sup>
+              )}
             </button>
           ))}
-          <button
-            onClick={() => navigate('/speak')}
-            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
-            style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}
-            title="Speaking practice (beta)"
-          >
-            Speak ✦
-          </button>
         </div>
         <button
           onClick={() => navigate(`/review?mode=${reviewParam}`)}

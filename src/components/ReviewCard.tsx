@@ -12,6 +12,17 @@ import { reviewCard, undoReview, type Grade } from '../services/srs';
 import { comparePinyin, type SyllableResult } from '../lib/pinyinCompare';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { speakChinese, stopSpeaking } from '../services/audio';
+import {
+  isSpeechRecognitionSupported,
+  stopRecognition,
+} from '../services/speechRecognition';
+import {
+  startStreamingRecognitionWithAudio,
+  playBlob,
+  type StreamingWithAudioHandle,
+} from '../services/audioRecording';
+import { compareCharacters, matchPercent, type CharResult } from '../lib/charCompare';
+import { lookupPinyinForChars } from '../lib/pinyinLookup';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
@@ -37,6 +48,18 @@ export function ReviewCard() {
   const [speedIndex, setSpeedIndex] = useState(2);
   const speechRate = SPEED_OPTIONS[speedIndex].value;
 
+  // Speak-mode state
+  const [isListening, setIsListening] = useState(false);
+  const [recognizedText, setRecognizedText] = useState<string | null>(null);
+  const [comparison, setComparison] = useState<CharResult[] | null>(null);
+  const [expectedPinyin, setExpectedPinyin] = useState<string[]>([]);
+  const [heardPinyin, setHeardPinyin] = useState<string[]>([]);
+  const [speakError, setSpeakError] = useState('');
+  const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
+  const recordingUrlRef = useRef<string | null>(null);
+  const streamHandleRef = useRef<StreamingWithAudioHandle | null>(null);
+  const speakSupported = isSpeechRecognitionSupported();
+
   const card = currentCard();
 
   useEffect(() => {
@@ -55,11 +78,45 @@ export function ReviewCard() {
     setRateError(null);
     setPinyinInput('');
     setPinyinResults(null);
+    // Reset speak-mode state
+    setIsListening(false);
+    setRecognizedText(null);
+    setComparison(null);
+    setExpectedPinyin([]);
+    setHeardPinyin([]);
+    setSpeakError('');
+    setRecordingBlob(null);
+    if (recordingUrlRef.current) {
+      URL.revokeObjectURL(recordingUrlRef.current);
+      recordingUrlRef.current = null;
+    }
+    // Abort any in-flight mic session from the previous card
+    if (streamHandleRef.current) {
+      try { streamHandleRef.current.cancel(); } catch {}
+      streamHandleRef.current = null;
+    }
+    stopRecognition();
     load();
     return () => { cancelled = true; };
   }, [card?.id]);
 
+  // Unmount cleanup for speak-mode mic/recording
+  useEffect(() => {
+    return () => {
+      if (streamHandleRef.current) {
+        try { streamHandleRef.current.cancel(); } catch {}
+        streamHandleRef.current = null;
+      }
+      stopRecognition();
+      if (recordingUrlRef.current) {
+        URL.revokeObjectURL(recordingUrlRef.current);
+        recordingUrlRef.current = null;
+      }
+    };
+  }, []);
+
   const isListenType = card?.reviewMode === 'listen-type';
+  const isSpeak = card?.reviewMode === 'speak';
   useEffect(() => {
     if (!isListenType || !sentence || !card) return;
     if (sentence.id !== card.sentenceId) return;
@@ -131,6 +188,79 @@ export function ReviewCard() {
     setSentence((prev) => prev ? { ...prev, tags: newTags } : prev);
   };
 
+  const resetSpeakResult = () => {
+    setRecognizedText(null);
+    setExpectedPinyin([]);
+    setHeardPinyin([]);
+    setComparison(null);
+    setSpeakError('');
+    setRecordingBlob(null);
+    if (recordingUrlRef.current) {
+      URL.revokeObjectURL(recordingUrlRef.current);
+      recordingUrlRef.current = null;
+    }
+  };
+
+  const finalizeSpeakText = async (text: string) => {
+    setRecognizedText(text);
+    if (sentence) {
+      const comp = compareCharacters(sentence.chinese, text);
+      setComparison(comp);
+      const expChars = comp.map((r) => r.char);
+      const heardChars = comp.map((r) => r.heard || '');
+      const [ep, hp] = await Promise.all([
+        lookupPinyinForChars(expChars),
+        lookupPinyinForChars(heardChars),
+      ]);
+      setExpectedPinyin(ep);
+      setHeardPinyin(hp);
+    }
+  };
+
+  const handleSpeakMic = async () => {
+    if (isListening) {
+      const handle = streamHandleRef.current;
+      streamHandleRef.current = null;
+      setIsListening(false);
+      if (handle) {
+        try {
+          const result = await handle.stop();
+          if (result.audio?.blob) {
+            if (recordingUrlRef.current) {
+              URL.revokeObjectURL(recordingUrlRef.current);
+              recordingUrlRef.current = null;
+            }
+            const blob = result.audio.blob;
+            setRecordingBlob(blob);
+            recordingUrlRef.current = URL.createObjectURL(blob);
+          }
+          await finalizeSpeakText(result.transcript);
+        } catch (e: any) {
+          if (e?.message !== 'Cancelled') {
+            setSpeakError(e?.message || 'Recognition failed');
+          }
+        }
+      }
+      return;
+    }
+
+    clearUndo();
+    resetSpeakResult();
+    try {
+      const handle = await startStreamingRecognitionWithAudio({
+        onInterim: (text) => setRecognizedText(text),
+      });
+      streamHandleRef.current = handle;
+      setIsListening(true);
+    } catch (e: any) {
+      setSpeakError(e?.message || 'Recognition failed');
+    }
+  };
+
+  const handlePlayRecording = () => {
+    if (recordingBlob) playBlob(recordingBlob);
+  };
+
   const handleRate = async (rating: Grade) => {
     setRateError(null);
     setPendingRating(rating);
@@ -150,12 +280,209 @@ export function ReviewCard() {
       <div className="text-sm text-center mb-4" style={{ color: 'var(--text-tertiary)' }}>
         {remaining()} cards remaining
         <span className="ml-2 text-xs">
-          ({card.reviewMode === 'en-to-zh' ? 'EN \u2192 ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY \u2192 EN+ZH' : card.reviewMode === 'listen-type' ? 'Listen & Type' : 'ZH \u2192 EN'})
+          ({card.reviewMode === 'en-to-zh' ? 'EN \u2192 ZH' : card.reviewMode === 'py-to-en-zh' ? 'PY \u2192 EN+ZH' : card.reviewMode === 'listen-type' ? 'Listen & Type' : card.reviewMode === 'speak' ? 'Speak' : 'ZH \u2192 EN'})
         </span>
       </div>
 
       {/* Card */}
       <div className="surface rounded-xl shadow-lg p-4 sm:p-8 min-h-[250px] sm:min-h-[300px] flex flex-col">
+        {isSpeak ? (
+          !speakSupported ? (
+            <div className="flex-1 flex items-center justify-center text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Speech recognition requires Chrome. Open this app in Chrome to use the Speak review mode.
+            </div>
+          ) : (
+            <>
+              {/* Sentence / comparison */}
+              <div className="flex-1 flex flex-col items-center justify-center">
+                {!comparison ? (
+                  <div className="text-center">
+                    <div className="text-3xl tracking-wider mb-3">{sentence.chinese}</div>
+                    <div className="mb-2">
+                      <PinyinDisplay
+                        pinyin={sentence.pinyinSandhi}
+                        basePinyin={sentence.pinyin}
+                        className="text-base"
+                      />
+                    </div>
+                    <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      {sentence.english}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center w-full">
+                    <div className="flex flex-wrap justify-center gap-1 mb-4">
+                      {comparison.map((r, i) => {
+                        const color = r.status === 'match' ? 'var(--success)' : 'var(--danger)';
+                        const isMismatch = r.status === 'mismatch';
+                        const isMissing = r.status === 'missing';
+                        return (
+                          <div key={i} className="flex flex-col items-center gap-0.5 min-w-[2.5rem]">
+                            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                              {expectedPinyin[i] || ''}
+                            </div>
+                            <div className="text-2xl" style={{ color }}>{r.char}</div>
+                            {(isMismatch || isMissing) && (
+                              <>
+                                <div className="w-full" style={{ borderTop: '1px solid var(--border)' }} />
+                                <div className="text-2xl" style={{ color: 'var(--danger)', opacity: isMissing ? 0.3 : 1 }}>
+                                  {r.heard || '\u2013'}
+                                </div>
+                                <div className="text-xs" style={{ color: 'var(--danger)', opacity: 0.7 }}>
+                                  {isMissing ? '' : heardPinyin[i] || ''}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {(() => {
+                      const pct = matchPercent(comparison);
+                      const passed = pct >= 80;
+                      return (
+                        <div className="mb-2">
+                          <span
+                            className="inline-block px-3 py-1 rounded-full text-sm font-medium"
+                            style={{
+                              background: passed
+                                ? 'color-mix(in srgb, var(--success) 15%, var(--bg-surface))'
+                                : 'color-mix(in srgb, var(--danger) 15%, var(--bg-surface))',
+                              color: passed ? 'var(--success)' : 'var(--danger)',
+                            }}
+                          >
+                            {pct}% match
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      {sentence.english}
+                    </div>
+                  </div>
+                )}
+
+                {speakError && (
+                  <div className="mt-3 p-2 rounded text-sm text-center" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>
+                    {speakError}
+                  </div>
+                )}
+
+                {recognizedText !== null && !comparison && (
+                  <div className="text-center mt-4 text-lg" style={{ color: 'var(--text-secondary)' }}>
+                    {recognizedText || '...'}
+                  </div>
+                )}
+              </div>
+
+              {/* Mic button */}
+              <div className="flex justify-center mt-4">
+                <button
+                  onClick={handleSpeakMic}
+                  className="w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: isListening ? 'var(--danger)' : 'var(--text-secondary)',
+                    animation: isListening ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                    cursor: 'pointer',
+                  }}
+                  title={isListening ? 'Stop' : 'Start speaking'}
+                >
+                  {isListening ? (
+                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  ) : (
+                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" x2="12" y1="19" y2="22" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+
+              {/* Audio controls row */}
+              <div className="flex gap-2 justify-center flex-wrap mt-4">
+                <SentenceAudioControls sentenceId={sentence.id} text={sentence.chinese} />
+                {recordingBlob && (
+                  <button
+                    onClick={handlePlayRecording}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                    style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+                    title="Play your recording"
+                  >
+                    ▶ Your recording
+                  </button>
+                )}
+                {comparison && (
+                  <button
+                    onClick={resetSpeakResult}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                    style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+
+              {rateError && (
+                <p className="mt-4 text-sm text-center" style={{ color: 'var(--danger)' }} role="alert">
+                  {rateError}
+                </p>
+              )}
+
+              {/* Rating buttons — appear once a comparison exists; user grades themselves */}
+              {comparison ? (
+                <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {([
+                    { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
+                    { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
+                    { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
+                    { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
+                  ]).map((btn) => {
+                    const isSelected = pendingRating === btn.rating;
+                    const isDisabled = pendingRating !== null || undoing;
+                    return (
+                      <button
+                        key={btn.rating}
+                        onClick={() => handleRate(btn.rating)}
+                        disabled={isDisabled}
+                        className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+                        style={{
+                          background: isSelected
+                            ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
+                            : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
+                          color: isSelected ? 'var(--text-inverted)' : btn.color,
+                          opacity: isDisabled && !isSelected ? 0.4 : 1,
+                        }}
+                      >
+                        {btn.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                undoInfo && (
+                  <button
+                    onClick={handleUndo}
+                    disabled={undoing || pendingRating !== null}
+                    className="mt-4 w-full py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                    style={{ color: 'var(--text-tertiary)' }}
+                  >
+                    {undoing ? 'Undoing...' : 'Undo last card'}
+                  </button>
+                )
+              )}
+
+              <p className="mt-4 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                Speech recognition isn't perfectly accurate and is often too lenient on tones.
+              </p>
+            </>
+          )
+        ) : (
+        <>
         {/* Front */}
         <div className="flex-1 flex flex-col items-center justify-center">
           {isListenType ? (
@@ -435,6 +762,8 @@ export function ReviewCard() {
               })}
             </div>
           </>
+        )}
+        </>
         )}
       </div>
     </div>

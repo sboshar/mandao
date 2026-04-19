@@ -140,7 +140,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     await repo.insertSentenceTokens(tokenRecords);
 
     const deckId = await repo.ensureDefaultDeck();
-    const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'];
+    const modes: ReviewMode[] = ['en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type', 'speak'];
     const cards: SrsCard[] = modes.map((mode) => ({
       id: uuid(),
       sentenceId,

@@ -9,7 +9,6 @@ import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
 import { StatsPage } from './pages/StatsPage';
-import { SpeakPage } from './pages/SpeakPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { LoginPage } from './pages/LoginPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
@@ -159,7 +158,6 @@ function App() {
           <Route path="/browse" element={<BrowsePage />} />
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/stats" element={<StatsPage />} />
-          <Route path="/speak" element={<SpeakPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/auth/callback" element={<Navigate to="/" replace />} />
           <Route path="/reset-password" element={<Navigate to="/" replace />} />
