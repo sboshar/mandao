@@ -61,16 +61,17 @@ export function ReviewCard() {
 
   const isListenType = card?.reviewMode === 'listen-type';
   useEffect(() => {
-    if (!isListenType || !sentence) return;
-    if (autoPlayed.current !== card?.id) {
-      autoPlayed.current = card!.id;
+    if (!isListenType || !sentence || !card) return;
+    if (sentence.id !== card.sentenceId) return;
+    if (autoPlayed.current !== card.id) {
+      autoPlayed.current = card.id;
       speakChinese(sentence.chinese, speechRate).catch(() => {});
     }
     if (pinyinInputRef.current) {
       pinyinInputRef.current.focus();
     }
     return () => { stopSpeaking(); };
-  }, [isListenType, sentence, card?.id]);
+  }, [isListenType, sentence, card?.id, card?.sentenceId]);
 
   const handleUndo = async () => {
     if (!undoInfo || undoing || pendingRating !== null) return;
