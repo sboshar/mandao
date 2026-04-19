@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
 import { getTokensForSentence, updateSentenceTags, getAllTags, deleteSentence, deleteAllData } from '../services/ingestion';
+import { sentenceMasteryFromCards, groupCardsBySentence } from '../services/srs';
 import { TokenSpan } from '../components/TokenSpan';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
@@ -15,6 +16,27 @@ import { TutorialBanner } from '../components/TutorialBanner';
 import type { SentenceToken, Meaning } from '../db/schema';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
+
+function MasteryPill({ score }: { score: number }) {
+  const pct = Math.round(score * 100);
+  const label = pct === 0 ? 'new' : pct < 30 ? 'weak' : pct < 70 ? 'learning' : 'known';
+  const fg = pct === 0
+    ? 'var(--text-tertiary)'
+    : pct < 30
+      ? 'var(--danger)'
+      : pct < 70
+        ? 'var(--accent)'
+        : 'var(--success, #22c55e)';
+  return (
+    <div
+      className="flex flex-col items-end shrink-0"
+      title={`Mastery ${pct}% — average stability across review modes`}
+    >
+      <span className="text-xs" style={{ color: fg }}>{label}</span>
+      <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{pct}%</span>
+    </div>
+  );
+}
 
 export function BrowsePage() {
   const navigate = useNavigate();
@@ -31,10 +53,20 @@ export function BrowsePage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [deleteAllInput, setDeleteAllInput] = useState('');
+  const [masteryByStc, setMasteryByStc] = useState<Map<string, number>>(new Map());
+  const [sortMode, setSortMode] = useState<'newest' | 'best-known' | 'least-known'>('newest');
 
   useEffect(() => {
     repo.getSentencesOrderByCreatedDesc().then(setSentences);
     getAllTags().then(setAllTags);
+    repo.getAllSrsCards().then((cards) => {
+      const grouped = groupCardsBySentence(cards);
+      const scores = new Map<string, number>();
+      for (const [sentenceId, cs] of grouped) {
+        scores.set(sentenceId, sentenceMasteryFromCards(cs));
+      }
+      setMasteryByStc(scores);
+    });
   }, []);
 
   const huaSentence = sentences.find((s) => s.chinese === '她花了很多钱买花。');
@@ -53,9 +85,18 @@ export function BrowsePage() {
     );
   };
 
-  const filteredSentences = filterTags.length > 0
-    ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
-    : sentences;
+  const filteredSentences = useMemo(() => {
+    const base = filterTags.length > 0
+      ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
+      : sentences;
+    if (sortMode === 'newest') return base;
+    const scored = [...base];
+    const mastery = (id: string) => masteryByStc.get(id) ?? 0;
+    scored.sort((a, b) => sortMode === 'best-known'
+      ? mastery(b.id) - mastery(a.id)
+      : mastery(a.id) - mastery(b.id));
+    return scored;
+  }, [sentences, filterTags, sortMode, masteryByStc]);
 
   const handleDelete = async (sentenceId: string) => {
     await deleteSentence(sentenceId);
@@ -126,6 +167,25 @@ export function BrowsePage() {
         <strong> shì</strong> pinyin to see all characters that share that sound.
       </TutorialBanner>
 
+      {sentences.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs mr-1" style={{ color: 'var(--text-tertiary)' }}>Sort:</span>
+          {(['newest', 'best-known', 'least-known'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setSortMode(mode)}
+              className="px-2 py-0.5 text-xs rounded-full transition-colors"
+              style={sortMode === mode
+                ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
+                : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+              }
+            >
+              {mode === 'newest' ? 'Newest' : mode === 'best-known' ? 'Best known' : 'Least known'}
+            </button>
+          ))}
+        </div>
+      )}
+
       {allTags.length > 0 && (
         <div className="mb-4">
           <button
@@ -194,9 +254,14 @@ export function BrowsePage() {
                   onClick={() => handleExpand(s.id)}
                   className="w-full text-left p-4 surface-hover transition-colors rounded-lg"
                 >
-                  <div className="text-lg">{s.chinese}</div>
-                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    <ClickableEnglish text={s.english} />
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-lg">{s.chinese}</div>
+                      <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        <ClickableEnglish text={s.english} />
+                      </div>
+                    </div>
+                    <MasteryPill score={masteryByStc.get(s.id) ?? 0} />
                   </div>
                 </button>
 

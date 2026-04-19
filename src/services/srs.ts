@@ -210,6 +210,39 @@ export async function getDueCounts(
   return { newCount, reviewCount, learningCount };
 }
 
+/**
+ * Per-sentence mastery score derived from its 4 SRS cards (one per review mode).
+ *
+ * We want a single number a user can sort on, with these properties:
+ *   - A sentence with all 4 cards still "new" (state=0) scores 0.
+ *   - A sentence that's fully mature across every mode scores near 1.
+ *   - Weak modes drag the overall score down — a user who can only read a
+ *     sentence shouldn't be counted as "knowing it" overall.
+ *
+ * Implementation: average the per-card `stability` squashed through
+ * tanh(stability / 30) so the curve saturates around ~30 days of retention
+ * (roughly when FSRS considers a card mature). New cards contribute 0.
+ */
+export function sentenceMasteryFromCards(cards: SrsCard[]): number {
+  if (cards.length === 0) return 0;
+  const total = cards.reduce((sum, c) => {
+    if (c.state === 0) return sum;
+    return sum + Math.tanh(c.stability / 30);
+  }, 0);
+  return total / cards.length;
+}
+
+/** Group all SrsCards by their sentenceId for bulk mastery scoring. */
+export function groupCardsBySentence(cards: SrsCard[]): Map<string, SrsCard[]> {
+  const map = new Map<string, SrsCard[]>();
+  for (const card of cards) {
+    const existing = map.get(card.sentenceId);
+    if (existing) existing.push(card);
+    else map.set(card.sentenceId, [card]);
+  }
+  return map;
+}
+
 export type ModeCounts = Record<ReviewMode, number>;
 
 export interface DueBreakdown {
