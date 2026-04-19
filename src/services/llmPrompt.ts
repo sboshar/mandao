@@ -17,21 +17,12 @@ export async function getExistingMeanings(
   chinese: string
 ): Promise<ExistingMeaning[]> {
   const chars = [...new Set(Array.from(chinese.replace(/\s/g, '')))];
-  const results: ExistingMeaning[] = [];
-
-  for (const ch of chars) {
-    const meanings = await repo.getMeaningsByHeadword(ch);
-
-    for (const m of meanings) {
-      results.push({
-        headword: m.headword,
-        pinyin: m.pinyin,
-        english: m.englishShort,
-      });
-    }
-  }
-
-  return results;
+  const perChar = await Promise.all(chars.map((ch) => repo.getMeaningsByHeadword(ch)));
+  return perChar.flat().map((m) => ({
+    headword: m.headword,
+    pinyin: m.pinyin,
+    english: m.englishShort,
+  }));
 }
 
 /**
