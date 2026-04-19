@@ -210,6 +210,46 @@ export async function getDueCounts(
   return { newCount, reviewCount, learningCount };
 }
 
+/** Per-card mastery — 0 for new, saturates near 1 around ~30 days of stability. */
+function cardMastery(card: SrsCard): number {
+  if (card.state === 0) return 0;
+  return Math.tanh(card.stability / 30);
+}
+
+/**
+ * Overall per-sentence mastery derived from its 4 SRS cards (one per review mode).
+ *
+ * Averages the per-card mastery across all modes, so weak modes drag the score
+ * down — "I can read it but can't produce it" shouldn't count as fully known.
+ * A sentence fresh across every mode scores 0; fully mature scores near 1.
+ */
+export function sentenceMasteryFromCards(cards: SrsCard[]): number {
+  if (cards.length === 0) return 0;
+  const total = cards.reduce((sum, c) => sum + cardMastery(c), 0);
+  return total / cards.length;
+}
+
+/**
+ * Mastery for a single review mode — useful when the user wants to drill one
+ * direction (e.g. sort by "least known EN→ZH"). Returns 0 if no card exists
+ * for the given mode, since having no card is equivalent to having a new one.
+ */
+export function sentenceMasteryForMode(cards: SrsCard[], mode: ReviewMode): number {
+  const card = cards.find((c) => c.reviewMode === mode);
+  return card ? cardMastery(card) : 0;
+}
+
+/** Group all SrsCards by their sentenceId for bulk mastery scoring. */
+export function groupCardsBySentence(cards: SrsCard[]): Map<string, SrsCard[]> {
+  const map = new Map<string, SrsCard[]>();
+  for (const card of cards) {
+    const existing = map.get(card.sentenceId);
+    if (existing) existing.push(card);
+    else map.set(card.sentenceId, [card]);
+  }
+  return map;
+}
+
 export type ModeCounts = Record<ReviewMode, number>;
 
 export interface DueBreakdown {

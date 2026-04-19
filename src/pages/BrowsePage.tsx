@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
 import { getTokensForSentence, updateSentenceTags, getAllTags, deleteSentence, deleteAllData } from '../services/ingestion';
+import { sentenceMasteryFromCards, sentenceMasteryForMode, groupCardsBySentence } from '../services/srs';
+import type { ReviewMode } from '../db/schema';
 import { TokenSpan } from '../components/TokenSpan';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
@@ -12,9 +14,50 @@ import { SentenceAudioControls } from '../components/SentenceAudioControls';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TutorialBanner } from '../components/TutorialBanner';
-import type { SentenceToken, Meaning } from '../db/schema';
+import type { SentenceToken, Meaning, SrsCard } from '../db/schema';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
+
+const SORT_DIMENSION_LABELS: Record<ReviewMode, string> = {
+  'en-to-zh': 'EN→ZH',
+  'zh-to-en': 'ZH→EN',
+  'py-to-en-zh': 'PY→EN+ZH',
+  'listen-type': 'Listen',
+};
+
+function MasteryPill({ score, dimensionLabel }: { score: number; dimensionLabel: string | null }) {
+  const pct = Math.round(score * 100);
+  const tier = pct === 0 ? 'new' : pct < 30 ? 'weak' : pct < 70 ? 'learning' : 'known';
+  const color = pct === 0
+    ? 'var(--text-tertiary)'
+    : pct < 30
+      ? 'var(--danger)'
+      : pct < 70
+        ? 'var(--accent)'
+        : 'var(--success, #22c55e)';
+  const tooltip = dimensionLabel
+    ? `${dimensionLabel} mastery: ${pct}% (${tier})`
+    : `Overall mastery: ${pct}% (${tier}) — averaged across all review modes`;
+  return (
+    <div className="flex flex-col items-end gap-1 shrink-0 w-14" title={tooltip}>
+      <div className="flex items-baseline gap-1">
+        <span className="text-xs font-semibold tabular-nums" style={{ color }}>{pct}</span>
+        <span className="text-[9px] font-medium" style={{ color: 'var(--text-tertiary)' }}>%</span>
+      </div>
+      <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: 'var(--bg-inset)' }}>
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${Math.max(pct, pct > 0 ? 4 : 0)}%`, background: color }}
+        />
+      </div>
+      {dimensionLabel && (
+        <span className="text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+          {dimensionLabel}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function BrowsePage() {
   const navigate = useNavigate();
@@ -31,11 +74,23 @@ export function BrowsePage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [deleteAllInput, setDeleteAllInput] = useState('');
+  const [cardsBySentence, setCardsBySentence] = useState<Map<string, SrsCard[]>>(new Map());
+  const [sortMode, setSortMode] = useState<'newest' | 'best-known' | 'least-known'>('newest');
+  const [sortDimension, setSortDimension] = useState<'overall' | ReviewMode>('overall');
 
   useEffect(() => {
     repo.getSentencesOrderByCreatedDesc().then(setSentences);
     getAllTags().then(setAllTags);
+    repo.getAllSrsCards().then((cards) => setCardsBySentence(groupCardsBySentence(cards)));
   }, []);
+
+  const masteryOf = (sentenceId: string): number => {
+    const cs = cardsBySentence.get(sentenceId);
+    if (!cs) return 0;
+    return sortDimension === 'overall'
+      ? sentenceMasteryFromCards(cs)
+      : sentenceMasteryForMode(cs, sortDimension);
+  };
 
   const huaSentence = sentences.find((s) => s.chinese === '她花了很多钱买花。');
 
@@ -53,9 +108,17 @@ export function BrowsePage() {
     );
   };
 
-  const filteredSentences = filterTags.length > 0
-    ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
-    : sentences;
+  const filteredSentences = useMemo(() => {
+    const base = filterTags.length > 0
+      ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
+      : sentences;
+    if (sortMode === 'newest') return base;
+    const scored = [...base];
+    scored.sort((a, b) => sortMode === 'best-known'
+      ? masteryOf(b.id) - masteryOf(a.id)
+      : masteryOf(a.id) - masteryOf(b.id));
+    return scored;
+  }, [sentences, filterTags, sortMode, sortDimension, cardsBySentence]);
 
   const handleDelete = async (sentenceId: string) => {
     await deleteSentence(sentenceId);
@@ -126,6 +189,51 @@ export function BrowsePage() {
         <strong> shì</strong> pinyin to see all characters that share that sound.
       </TutorialBanner>
 
+      {sentences.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <div
+            className="inline-flex p-0.5 rounded-full"
+            style={{ background: 'var(--bg-inset)' }}
+            role="tablist"
+            aria-label="Sort sentences"
+          >
+            {(['newest', 'least-known', 'best-known'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setSortMode(mode)}
+                role="tab"
+                aria-selected={sortMode === mode}
+                className="px-3 py-1 text-xs font-medium rounded-full transition-all"
+                style={sortMode === mode
+                  ? { background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' }
+                  : { background: 'transparent', color: 'var(--text-tertiary)' }
+                }
+              >
+                {mode === 'newest' ? 'Newest' : mode === 'least-known' ? 'Least known' : 'Best known'}
+              </button>
+            ))}
+          </div>
+
+          {sortMode !== 'newest' && (
+            <div className="flex flex-wrap items-center gap-1">
+              {(['overall', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'] as const).map((dim) => (
+                <button
+                  key={dim}
+                  onClick={() => setSortDimension(dim)}
+                  className="px-2.5 py-0.5 text-[11px] rounded-full transition-colors"
+                  style={sortDimension === dim
+                    ? { background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }
+                    : { background: 'transparent', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }
+                  }
+                >
+                  {dim === 'overall' ? 'Overall' : SORT_DIMENSION_LABELS[dim]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {allTags.length > 0 && (
         <div className="mb-4">
           <button
@@ -194,9 +302,17 @@ export function BrowsePage() {
                   onClick={() => handleExpand(s.id)}
                   className="w-full text-left p-4 surface-hover transition-colors rounded-lg"
                 >
-                  <div className="text-lg">{s.chinese}</div>
-                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    <ClickableEnglish text={s.english} />
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-lg">{s.chinese}</div>
+                      <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        <ClickableEnglish text={s.english} />
+                      </div>
+                    </div>
+                    <MasteryPill
+                      score={masteryOf(s.id)}
+                      dimensionLabel={sortDimension === 'overall' ? null : SORT_DIMENSION_LABELS[sortDimension]}
+                    />
                   </div>
                 </button>
 
