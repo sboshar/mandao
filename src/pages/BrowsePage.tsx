@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router';
 import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
 import { getTokensForSentence, updateSentenceTags, getAllTags, deleteSentence, deleteAllData } from '../services/ingestion';
-import { sentenceMasteryFromCards, groupCardsBySentence } from '../services/srs';
+import { sentenceMasteryFromCards, sentenceMasteryForMode, groupCardsBySentence } from '../services/srs';
+import type { ReviewMode } from '../db/schema';
 import { TokenSpan } from '../components/TokenSpan';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { MeaningCard } from '../components/MeaningCard';
@@ -13,11 +14,18 @@ import { SentenceAudioControls } from '../components/SentenceAudioControls';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TutorialBanner } from '../components/TutorialBanner';
-import type { SentenceToken, Meaning } from '../db/schema';
+import type { SentenceToken, Meaning, SrsCard } from '../db/schema';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
-function MasteryPill({ score }: { score: number }) {
+const SORT_DIMENSION_LABELS: Record<ReviewMode, string> = {
+  'en-to-zh': 'EN→ZH',
+  'zh-to-en': 'ZH→EN',
+  'py-to-en-zh': 'PY→EN+ZH',
+  'listen-type': 'Listen',
+};
+
+function MasteryPill({ score, dimensionLabel }: { score: number; dimensionLabel: string | null }) {
   const pct = Math.round(score * 100);
   const label = pct === 0 ? 'new' : pct < 30 ? 'weak' : pct < 70 ? 'learning' : 'known';
   const fg = pct === 0
@@ -27,13 +35,15 @@ function MasteryPill({ score }: { score: number }) {
       : pct < 70
         ? 'var(--accent)'
         : 'var(--success, #22c55e)';
+  const tooltip = dimensionLabel
+    ? `${dimensionLabel} mastery ${pct}%`
+    : `Overall mastery ${pct}% — average stability across review modes`;
   return (
-    <div
-      className="flex flex-col items-end shrink-0"
-      title={`Mastery ${pct}% — average stability across review modes`}
-    >
+    <div className="flex flex-col items-end shrink-0" title={tooltip}>
       <span className="text-xs" style={{ color: fg }}>{label}</span>
-      <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{pct}%</span>
+      <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+        {dimensionLabel ? `${dimensionLabel} ` : ''}{pct}%
+      </span>
     </div>
   );
 }
@@ -53,21 +63,23 @@ export function BrowsePage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [deleteAllInput, setDeleteAllInput] = useState('');
-  const [masteryByStc, setMasteryByStc] = useState<Map<string, number>>(new Map());
+  const [cardsBySentence, setCardsBySentence] = useState<Map<string, SrsCard[]>>(new Map());
   const [sortMode, setSortMode] = useState<'newest' | 'best-known' | 'least-known'>('newest');
+  const [sortDimension, setSortDimension] = useState<'overall' | ReviewMode>('overall');
 
   useEffect(() => {
     repo.getSentencesOrderByCreatedDesc().then(setSentences);
     getAllTags().then(setAllTags);
-    repo.getAllSrsCards().then((cards) => {
-      const grouped = groupCardsBySentence(cards);
-      const scores = new Map<string, number>();
-      for (const [sentenceId, cs] of grouped) {
-        scores.set(sentenceId, sentenceMasteryFromCards(cs));
-      }
-      setMasteryByStc(scores);
-    });
+    repo.getAllSrsCards().then((cards) => setCardsBySentence(groupCardsBySentence(cards)));
   }, []);
+
+  const masteryOf = (sentenceId: string): number => {
+    const cs = cardsBySentence.get(sentenceId);
+    if (!cs) return 0;
+    return sortDimension === 'overall'
+      ? sentenceMasteryFromCards(cs)
+      : sentenceMasteryForMode(cs, sortDimension);
+  };
 
   const huaSentence = sentences.find((s) => s.chinese === '她花了很多钱买花。');
 
@@ -91,12 +103,11 @@ export function BrowsePage() {
       : sentences;
     if (sortMode === 'newest') return base;
     const scored = [...base];
-    const mastery = (id: string) => masteryByStc.get(id) ?? 0;
     scored.sort((a, b) => sortMode === 'best-known'
-      ? mastery(b.id) - mastery(a.id)
-      : mastery(a.id) - mastery(b.id));
+      ? masteryOf(b.id) - masteryOf(a.id)
+      : masteryOf(a.id) - masteryOf(b.id));
     return scored;
-  }, [sentences, filterTags, sortMode, masteryByStc]);
+  }, [sentences, filterTags, sortMode, sortDimension, cardsBySentence]);
 
   const handleDelete = async (sentenceId: string) => {
     await deleteSentence(sentenceId);
@@ -168,21 +179,41 @@ export function BrowsePage() {
       </TutorialBanner>
 
       {sentences.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs mr-1" style={{ color: 'var(--text-tertiary)' }}>Sort:</span>
-          {(['newest', 'best-known', 'least-known'] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setSortMode(mode)}
-              className="px-2 py-0.5 text-xs rounded-full transition-colors"
-              style={sortMode === mode
-                ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
-                : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
-              }
-            >
-              {mode === 'newest' ? 'Newest' : mode === 'best-known' ? 'Best known' : 'Least known'}
-            </button>
-          ))}
+        <div className="mb-3 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs mr-1" style={{ color: 'var(--text-tertiary)' }}>Sort:</span>
+            {(['newest', 'best-known', 'least-known'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setSortMode(mode)}
+                className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                style={sortMode === mode
+                  ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
+                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                }
+              >
+                {mode === 'newest' ? 'Newest' : mode === 'best-known' ? 'Best known' : 'Least known'}
+              </button>
+            ))}
+          </div>
+          {sortMode !== 'newest' && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs mr-1" style={{ color: 'var(--text-tertiary)' }}>Mode:</span>
+              {(['overall', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'] as const).map((dim) => (
+                <button
+                  key={dim}
+                  onClick={() => setSortDimension(dim)}
+                  className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                  style={sortDimension === dim
+                    ? { background: 'color-mix(in srgb, var(--accent) 20%, var(--bg-surface))', color: 'var(--accent)' }
+                    : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                  }
+                >
+                  {dim === 'overall' ? 'Overall' : SORT_DIMENSION_LABELS[dim]}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -261,7 +292,10 @@ export function BrowsePage() {
                         <ClickableEnglish text={s.english} />
                       </div>
                     </div>
-                    <MasteryPill score={masteryByStc.get(s.id) ?? 0} />
+                    <MasteryPill
+                      score={masteryOf(s.id)}
+                      dimensionLabel={sortDimension === 'overall' ? null : SORT_DIMENSION_LABELS[sortDimension]}
+                    />
                   </div>
                 </button>
 

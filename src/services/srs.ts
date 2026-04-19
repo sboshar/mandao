@@ -210,26 +210,33 @@ export async function getDueCounts(
   return { newCount, reviewCount, learningCount };
 }
 
+/** Per-card mastery — 0 for new, saturates near 1 around ~30 days of stability. */
+function cardMastery(card: SrsCard): number {
+  if (card.state === 0) return 0;
+  return Math.tanh(card.stability / 30);
+}
+
 /**
- * Per-sentence mastery score derived from its 4 SRS cards (one per review mode).
+ * Overall per-sentence mastery derived from its 4 SRS cards (one per review mode).
  *
- * We want a single number a user can sort on, with these properties:
- *   - A sentence with all 4 cards still "new" (state=0) scores 0.
- *   - A sentence that's fully mature across every mode scores near 1.
- *   - Weak modes drag the overall score down — a user who can only read a
- *     sentence shouldn't be counted as "knowing it" overall.
- *
- * Implementation: average the per-card `stability` squashed through
- * tanh(stability / 30) so the curve saturates around ~30 days of retention
- * (roughly when FSRS considers a card mature). New cards contribute 0.
+ * Averages the per-card mastery across all modes, so weak modes drag the score
+ * down — "I can read it but can't produce it" shouldn't count as fully known.
+ * A sentence fresh across every mode scores 0; fully mature scores near 1.
  */
 export function sentenceMasteryFromCards(cards: SrsCard[]): number {
   if (cards.length === 0) return 0;
-  const total = cards.reduce((sum, c) => {
-    if (c.state === 0) return sum;
-    return sum + Math.tanh(c.stability / 30);
-  }, 0);
+  const total = cards.reduce((sum, c) => sum + cardMastery(c), 0);
   return total / cards.length;
+}
+
+/**
+ * Mastery for a single review mode — useful when the user wants to drill one
+ * direction (e.g. sort by "least known EN→ZH"). Returns 0 if no card exists
+ * for the given mode, since having no card is equivalent to having a new one.
+ */
+export function sentenceMasteryForMode(cards: SrsCard[], mode: ReviewMode): number {
+  const card = cards.find((c) => c.reviewMode === mode);
+  return card ? cardMastery(card) : 0;
 }
 
 /** Group all SrsCards by their sentenceId for bulk mastery scoring. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sentenceMasteryFromCards, groupCardsBySentence } from './srs';
+import { sentenceMasteryFromCards, sentenceMasteryForMode, groupCardsBySentence } from './srs';
 import type { SrsCard, ReviewMode } from '../db/schema';
 
 function card(overrides: Partial<SrsCard>): SrsCard {
@@ -49,6 +49,23 @@ describe('sentenceMasteryFromCards', () => {
     const cards = [1, 2, 3, 4].map(() => card({ state: 2, stability: 365 }));
     const score = sentenceMasteryFromCards(cards);
     expect(score).toBeGreaterThan(0.95);
+  });
+});
+
+describe('sentenceMasteryForMode', () => {
+  it('scores 0 when no card exists for the mode', () => {
+    const cards = [card({ reviewMode: 'zh-to-en', state: 2, stability: 100 })];
+    expect(sentenceMasteryForMode(cards, 'en-to-zh')).toBe(0);
+  });
+
+  it('ignores other modes — surfaces asymmetric mastery', () => {
+    const cards: SrsCard[] = [
+      card({ reviewMode: 'zh-to-en', state: 2, stability: 365 }),
+      card({ reviewMode: 'en-to-zh', state: 0, stability: 0 }),
+    ];
+    // The whole-sentence overall would be meh (0.5ish) but EN→ZH alone is 0
+    expect(sentenceMasteryForMode(cards, 'en-to-zh')).toBe(0);
+    expect(sentenceMasteryForMode(cards, 'zh-to-en')).toBeGreaterThan(0.95);
   });
 });
 
