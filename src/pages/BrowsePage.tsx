@@ -27,8 +27,8 @@ const SORT_DIMENSION_LABELS: Record<ReviewMode, string> = {
 
 function MasteryPill({ score, dimensionLabel }: { score: number; dimensionLabel: string | null }) {
   const pct = Math.round(score * 100);
-  const label = pct === 0 ? 'new' : pct < 30 ? 'weak' : pct < 70 ? 'learning' : 'known';
-  const fg = pct === 0
+  const tier = pct === 0 ? 'new' : pct < 30 ? 'weak' : pct < 70 ? 'learning' : 'known';
+  const color = pct === 0
     ? 'var(--text-tertiary)'
     : pct < 30
       ? 'var(--danger)'
@@ -36,14 +36,25 @@ function MasteryPill({ score, dimensionLabel }: { score: number; dimensionLabel:
         ? 'var(--accent)'
         : 'var(--success, #22c55e)';
   const tooltip = dimensionLabel
-    ? `${dimensionLabel} mastery ${pct}%`
-    : `Overall mastery ${pct}% — average stability across review modes`;
+    ? `${dimensionLabel} mastery: ${pct}% (${tier})`
+    : `Overall mastery: ${pct}% (${tier}) — averaged across all review modes`;
   return (
-    <div className="flex flex-col items-end shrink-0" title={tooltip}>
-      <span className="text-xs" style={{ color: fg }}>{label}</span>
-      <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-        {dimensionLabel ? `${dimensionLabel} ` : ''}{pct}%
-      </span>
+    <div className="flex flex-col items-end gap-1 shrink-0 w-14" title={tooltip}>
+      <div className="flex items-baseline gap-1">
+        <span className="text-xs font-semibold tabular-nums" style={{ color }}>{pct}</span>
+        <span className="text-[9px] font-medium" style={{ color: 'var(--text-tertiary)' }}>%</span>
+      </div>
+      <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: 'var(--bg-inset)' }}>
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${Math.max(pct, pct > 0 ? 4 : 0)}%`, background: color }}
+        />
+      </div>
+      {dimensionLabel && (
+        <span className="text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+          {dimensionLabel}
+        </span>
+      )}
     </div>
   );
 }
@@ -179,34 +190,40 @@ export function BrowsePage() {
       </TutorialBanner>
 
       {sentences.length > 0 && (
-        <div className="mb-3 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs mr-1" style={{ color: 'var(--text-tertiary)' }}>Sort:</span>
-            {(['newest', 'best-known', 'least-known'] as const).map((mode) => (
+        <div className="mb-4 space-y-2">
+          <div
+            className="inline-flex p-0.5 rounded-full"
+            style={{ background: 'var(--bg-inset)' }}
+            role="tablist"
+            aria-label="Sort sentences"
+          >
+            {(['newest', 'least-known', 'best-known'] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setSortMode(mode)}
-                className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                role="tab"
+                aria-selected={sortMode === mode}
+                className="px-3 py-1 text-xs font-medium rounded-full transition-all"
                 style={sortMode === mode
-                  ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
-                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                  ? { background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 1px 2px rgba(0,0,0,0.08)' }
+                  : { background: 'transparent', color: 'var(--text-tertiary)' }
                 }
               >
-                {mode === 'newest' ? 'Newest' : mode === 'best-known' ? 'Best known' : 'Least known'}
+                {mode === 'newest' ? 'Newest' : mode === 'least-known' ? 'Least known' : 'Best known'}
               </button>
             ))}
           </div>
+
           {sortMode !== 'newest' && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs mr-1" style={{ color: 'var(--text-tertiary)' }}>Mode:</span>
+            <div className="flex flex-wrap items-center gap-1">
               {(['overall', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'] as const).map((dim) => (
                 <button
                   key={dim}
                   onClick={() => setSortDimension(dim)}
-                  className="px-2 py-0.5 text-xs rounded-full transition-colors"
+                  className="px-2.5 py-0.5 text-[11px] rounded-full transition-colors"
                   style={sortDimension === dim
-                    ? { background: 'color-mix(in srgb, var(--accent) 20%, var(--bg-surface))', color: 'var(--accent)' }
-                    : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+                    ? { background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }
+                    : { background: 'transparent', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }
                   }
                 >
                   {dim === 'overall' ? 'Overall' : SORT_DIMENSION_LABELS[dim]}
