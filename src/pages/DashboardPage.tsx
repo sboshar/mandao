@@ -100,12 +100,8 @@ export function DashboardPage() {
                 background: mode === m ? 'var(--accent)' : 'var(--bg-inset)',
                 color: mode === m ? '#fff' : 'var(--text-tertiary)',
               }}
-              title={m === 'speak' ? 'Speaking practice (beta)' : undefined}
             >
               {MODE_LABEL[m]}
-              {m === 'speak' && (
-                <sup className="ml-0.5 text-[9px]" style={{ opacity: 0.8 }}>✦</sup>
-              )}
             </button>
           ))}
         </div>
