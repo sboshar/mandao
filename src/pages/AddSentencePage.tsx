@@ -57,6 +57,8 @@ export function AddSentencePage() {
   const [saving, setSaving] = useState(false);
   const [llmPasteValue, setLlmPasteValue] = useState('');
   const [promptCopied, setPromptCopied] = useState(false);
+  /** True when the user explicitly chose the copy-prompt-manually path from the input step. */
+  const [manualMode, setManualMode] = useState(false);
   const [usePinyinIME, setUsePinyinIME] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
@@ -644,6 +646,7 @@ export function AddSentencePage() {
               onClick={() => {
                 if (!chinese.trim()) return;
                 setError('');
+                setManualMode(true);
                 setStep('llm');
               }}
               disabled={!chinese.trim() || analyzing}
@@ -692,8 +695,8 @@ export function AddSentencePage() {
                 </div>
               )}
 
-              {/* Auto-analyze (when AI is configured) */}
-              {aiEnabled && (
+              {/* Auto-analyze (when AI is configured and user didn't explicitly choose manual) */}
+              {aiEnabled && !manualMode && (
                 <button
                   onClick={handleAutoAnalyze}
                   disabled={analyzing}
@@ -705,12 +708,12 @@ export function AddSentencePage() {
               )}
 
               {/* Manual copy-paste flow */}
-              <details open={!aiEnabled}>
+              <details open={!aiEnabled || manualMode}>
                 <summary
                   className="cursor-pointer text-sm font-medium py-1"
                   style={{ color: 'var(--text-secondary)' }}
                 >
-                  {aiEnabled ? 'Or paste LLM response manually' : 'Copy prompt & paste LLM response'}
+                  {aiEnabled && !manualMode ? 'Or paste LLM response manually' : 'Copy prompt & paste LLM response'}
                 </summary>
                 <div className="mt-2 p-4 rounded-lg space-y-3 inset" style={{ border: '1px solid var(--border)' }}>
                   <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
@@ -749,7 +752,10 @@ export function AddSentencePage() {
           )}
 
           <button
-            onClick={() => setStep('input')}
+            onClick={() => {
+              setManualMode(false);
+              setStep('input');
+            }}
             className="w-full py-2 rounded-lg font-medium text-sm transition-colors"
             style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
           >
