@@ -617,6 +617,7 @@ function AnkiSection() {
   const [audioField, setAudioField] = useState<number | null>(null);
   const [audioName, setAudioName] = useState('anki');
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
+  const [importConcurrency, setImportConcurrency] = useState(5);
   const lastClickedIdx = useRef<number | null>(null);
   const dragSelectMode = useRef<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -666,7 +667,13 @@ function AnkiSection() {
       }
       setApkgAnalyzing(false);
     } else {
-      await runImport(() => importFromAnki(file, (p) => setAnkiProgress({ ...p }), abortRef.current!.signal));
+      await runImport(() => importFromAnki(
+        file,
+        (p) => setAnkiProgress({ ...p }),
+        abortRef.current!.signal,
+        undefined,
+        { concurrency: importConcurrency },
+      ));
     }
   };
 
@@ -785,6 +792,26 @@ function AnkiSection() {
             <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
               Accepts .apkg, .txt, .csv, or .tsv files. In Anki, use File &gt; Export to create a file.
             </p>
+            <div className="mt-3 flex items-center gap-2">
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Parallel LLM calls
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={importConcurrency}
+                onChange={(e) => {
+                  const n = Math.max(1, Math.min(10, Number(e.target.value) || 1));
+                  setImportConcurrency(n);
+                }}
+                className="w-16 px-2 py-1 rounded text-sm text-center"
+                style={{ background: 'var(--bg-inset)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+              />
+              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                1 = sequential. Lower this if you hit rate limits.
+              </span>
+            </div>
           </div>
         )}
 
@@ -1031,6 +1058,14 @@ function AnkiSection() {
         {/* Summary after completion */}
         {!ankiImporting && ankiProgress && (
           <div className="space-y-3">
+            {ankiProgress.rateLimited && (
+              <div
+                className="p-3 rounded-lg text-sm"
+                style={{ background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-surface))', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
+              >
+                Paused after repeated rate-limit errors from your AI provider. Re-run the import (duplicates are skipped) or lower Parallel LLM calls and try again.
+              </div>
+            )}
             <div className="p-3 rounded-lg" style={{ background: 'var(--bg-inset)' }}>
               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 Import complete
