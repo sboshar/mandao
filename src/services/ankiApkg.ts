@@ -31,7 +31,7 @@ function getSql() {
   return sqlPromise;
 }
 
-export function stripAnkiHtml(html: string): string {
+function stripAnkiHtml(html: string): string {
   return html
     .replace(/\[sound:[^\]]+\]/g, '')
     .replace(/<img[^>]*>/g, '')
