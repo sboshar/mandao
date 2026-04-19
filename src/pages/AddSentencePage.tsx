@@ -732,6 +732,10 @@ export function AddSentencePage() {
                     onChange={(e) => setLlmPasteValue(e.target.value)}
                     placeholder="Paste the JSON response here..."
                     rows={6}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    spellCheck={false}
                     className="w-full px-3 py-2 rounded-lg text-sm font-mono"
                     style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                   />
