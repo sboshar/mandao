@@ -89,7 +89,7 @@ export function DashboardPage() {
             <span style={{ color: 'var(--state-review)' }}>{states.reviewCount} review</span>
           </div>
         </div>
-        <div className="flex gap-1 mb-3">
+        <div className="flex gap-1 mb-3 flex-wrap">
           {MODE_CYCLE.map((m) => (
             <button
               key={m}
@@ -103,6 +103,14 @@ export function DashboardPage() {
               {MODE_LABEL[m]}
             </button>
           ))}
+          <button
+            onClick={() => navigate('/speak')}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}
+            title="Speaking practice"
+          >
+            Speak
+          </button>
         </div>
         <button
           onClick={() => navigate(`/review?mode=${reviewParam}`)}
@@ -146,28 +154,6 @@ export function DashboardPage() {
             {btn.label}
           </button>
         ))}
-        <div className="relative">
-          <button
-            onClick={() => navigate('/speak')}
-            className="w-full py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors"
-            style={{
-              background: 'transparent',
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border-strong)',
-            }}
-          >
-            Speak
-          </button>
-          <span className="absolute -top-3 -right-3 cursor-default group/beta" style={{ fontSize: '1.5rem', lineHeight: 1 }}>
-            ✦
-            <span
-              className="hidden group-hover/beta:block absolute bottom-full right-0 mb-1 px-2 py-1 rounded text-xs whitespace-nowrap z-10"
-              style={{ background: 'var(--text-primary)', color: 'var(--bg-surface)' }}
-            >
-              This feature is in beta
-            </span>
-          </span>
-        </div>
       </div>
     </div>
   );
