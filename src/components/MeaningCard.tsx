@@ -194,7 +194,7 @@ type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
 const SRS_STATE_LABELS = ['New', 'Learning', 'Review', 'Relearning'] as const;
 const SRS_STATE_COLORS = ['var(--state-new, #3b82f6)', 'var(--state-learning, #f97316)', 'var(--state-review, #22c55e)', 'var(--state-relearning, #a855f7)'];
-const SRS_MODE_LABELS: Record<string, string> = { 'en-to-zh': 'EN\u2192ZH', 'zh-to-en': 'ZH\u2192EN', 'py-to-en-zh': 'PY\u2192EN+ZH', 'listen-type': 'Listen' };
+const SRS_MODE_LABELS: Record<string, string> = { 'en-to-zh': 'EN\u2192ZH', 'zh-to-en': 'ZH\u2192EN', 'py-to-en-zh': 'PY\u2192EN+ZH', 'listen-type': 'Listen', 'speak': 'Speak' };
 
 function formatDue(due: number): string {
   const diff = due - Date.now();

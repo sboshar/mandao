@@ -125,7 +125,7 @@ export interface CardFace {
   showAudio: boolean;
 }
 
-export type ReviewMode = 'en-to-zh' | 'zh-to-en' | 'py-to-en-zh' | 'listen-type';
+export type ReviewMode = 'en-to-zh' | 'zh-to-en' | 'py-to-en-zh' | 'listen-type' | 'speak';
 
 // ============================================================
 // SRS types

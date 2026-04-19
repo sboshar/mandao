@@ -9,13 +9,14 @@ import type { ReviewMode } from '../db/schema';
 
 type ModeOption = ReviewMode | 'all';
 
-const MODE_CYCLE: ModeOption[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'];
+const MODE_CYCLE: ModeOption[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type', 'speak'];
 const MODE_LABEL: Record<ModeOption, string> = {
   'all': 'All',
   'en-to-zh': 'EN→ZH',
   'zh-to-en': 'ZH→EN',
   'py-to-en-zh': 'PY→',
   'listen-type': 'Listen',
+  'speak': 'Speak',
 };
 
 export function DashboardPage() {
@@ -43,7 +44,7 @@ export function DashboardPage() {
   const states = breakdown?.byModeAndState[mode] ?? { newCount: 0, learningCount: 0, reviewCount: 0 };
   const dueForMode = states.newCount + states.learningCount + states.reviewCount;
   const totalAll = breakdown
-    ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh'] + (breakdown.byMode['listen-type'] ?? 0)
+    ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh'] + (breakdown.byMode['listen-type'] ?? 0) + (breakdown.byMode['speak'] ?? 0)
     : 0;
 
   const reviewParam = mode === 'all' ? 'both' : mode;
@@ -89,7 +90,7 @@ export function DashboardPage() {
             <span style={{ color: 'var(--state-review)' }}>{states.reviewCount} review</span>
           </div>
         </div>
-        <div className="flex gap-1 mb-3">
+        <div className="flex gap-1 mb-3 flex-wrap">
           {MODE_CYCLE.map((m) => (
             <button
               key={m}
@@ -146,28 +147,6 @@ export function DashboardPage() {
             {btn.label}
           </button>
         ))}
-        <div className="relative">
-          <button
-            onClick={() => navigate('/speak')}
-            className="w-full py-2 min-h-[44px] rounded-lg text-sm font-medium transition-colors"
-            style={{
-              background: 'transparent',
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border-strong)',
-            }}
-          >
-            Speak
-          </button>
-          <span className="absolute -top-3 -right-3 cursor-default group/beta" style={{ fontSize: '1.5rem', lineHeight: 1 }}>
-            ✦
-            <span
-              className="hidden group-hover/beta:block absolute bottom-full right-0 mb-1 px-2 py-1 rounded text-xs whitespace-nowrap z-10"
-              style={{ background: 'var(--text-primary)', color: 'var(--bg-surface)' }}
-            >
-              This feature is in beta
-            </span>
-          </span>
-        </div>
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ const SORT_DIMENSION_LABELS: Record<ReviewMode, string> = {
   'zh-to-en': 'ZH→EN',
   'py-to-en-zh': 'PY→EN+ZH',
   'listen-type': 'Listen',
+  'speak': 'Speak',
 };
 
 function MasteryPill({ score, dimensionLabel }: { score: number; dimensionLabel: string | null }) {
@@ -216,7 +217,7 @@ export function BrowsePage() {
 
           {sortMode !== 'newest' && (
             <div className="flex flex-wrap items-center gap-1">
-              {(['overall', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type'] as const).map((dim) => (
+              {(['overall', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type', 'speak'] as const).map((dim) => (
                 <button
                   key={dim}
                   onClick={() => setSortDimension(dim)}
