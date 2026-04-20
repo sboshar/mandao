@@ -29,9 +29,11 @@ export function collapsePinyin(s: string): string {
 }
 
 /**
- * Strip 不/一 tone-sandhi so the LLM's post-sandhi slip-ups still match
- * the citation-form CEDICT entry. Does NOT try to undo 3rd-tone sandhi
- * (that would require context we don't have here).
+ * Tentatively undo 不/一 tone-sandhi. Can't tell from pinyin alone
+ * whether a `yi4` syllable is the character 一 (sandhi target) or 易
+ * (citation form). The caller should accept a match against EITHER
+ * the raw value or the de-sandhied value — this gives us the 不是
+ * `bu2 shi4` rescue without false-flagging 容易 `rong2 yi4`.
  */
 function deSandhi(value: string): string {
   return value
@@ -69,10 +71,12 @@ export function checkPinyin(
     };
   }
 
-  const normalized = collapsePinyin(deSandhi(normalizePinyin(llmValue)));
-  const matches = entries.some(
-    (e) => collapsePinyin(e.pinyin) === normalized,
-  );
+  const raw = collapsePinyin(normalizePinyin(llmValue));
+  const desan = collapsePinyin(deSandhi(normalizePinyin(llmValue)));
+  const matches = entries.some((e) => {
+    const c = collapsePinyin(e.pinyin);
+    return c === raw || c === desan;
+  });
   if (matches) {
     return { flag: null, cedictSuggestions };
   }

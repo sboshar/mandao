@@ -58,6 +58,31 @@ describe('checkPinyin — observation only', () => {
       const r = checkPinyin('一定', 'yi2 ding4');
       expect(r.flag).toBeNull();
     });
+
+    // Regression: earlier deSandhi blindly rewrote any yi4/yi2/bu2 syllable.
+    // For words where the second char is NOT 一/不 (like 容易, 意思), that
+    // mangled the correct citation form and false-flagged. Accept-either
+    // semantics fixes it: raw form matches CEDICT, desan form is ignored.
+
+    it('does not false-flag 容易 (rong2 yi4) — 易 is tone 4, not 一 sandhi', () => {
+      const r = checkPinyin('容易', 'rong2 yi4');
+      expect(r.flag).toBeNull();
+    });
+
+    it('does not false-flag 意思 (yi4 si5) — 意 is tone 4, not 一 sandhi', () => {
+      const r = checkPinyin('意思', 'yi4 si5');
+      expect(r.flag).toBeNull();
+    });
+
+    it('does not false-flag 翻译 (fan1 yi4) — 译 is tone 4, not 一 sandhi', () => {
+      const r = checkPinyin('翻译', 'fan1 yi4');
+      expect(r.flag).toBeNull();
+    });
+
+    it('does not false-flag 怀疑 (huai2 yi2) — 疑 is tone 2, not 一 sandhi', () => {
+      const r = checkPinyin('怀疑', 'huai2 yi2');
+      expect(r.flag).toBeNull();
+    });
   });
 
   it('lowercase-normalizes so Wo3 matches wo3', () => {
