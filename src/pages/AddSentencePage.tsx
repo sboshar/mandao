@@ -783,14 +783,28 @@ export function AddSentencePage() {
             <div className="p-3 rounded-lg text-xs space-y-1"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               <div style={{ color: 'var(--text-primary)' }}>
-                Pinyin adjusted for {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'}:
+                Pinyin review for {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'}:
               </div>
-              {ingestFlags.slice(0, 5).map((f, i) => (
-                <div key={i} className="font-mono">
-                  {f.headword}: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{f.llmValue}</span> → {f.chosenValue}
-                  {' '}<span style={{ opacity: 0.6 }}>({f.kind})</span>
-                </div>
-              ))}
+              {ingestFlags.slice(0, 5).map((f, i) => {
+                const corrected =
+                  f.kind === 'auto-corrected' || f.kind === 'polyphone-coerced';
+                return (
+                  <div key={i} className="font-mono">
+                    {f.headword}:{' '}
+                    {corrected ? (
+                      <>
+                        <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{f.llmValue}</span>
+                        {' → '}
+                        {f.chosenValue}
+                      </>
+                    ) : (
+                      <>{f.chosenValue}</>
+                    )}
+                    {' '}
+                    <span style={{ opacity: 0.6 }}>({f.kind})</span>
+                  </div>
+                );
+              })}
               {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
             </div>
           )}
