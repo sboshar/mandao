@@ -7,6 +7,8 @@ import {
   type AIProvider,
 } from '../stores/aiSettingsStore';
 import { useAuthStore } from '../stores/authStore';
+import { useSyncStore } from '../stores/syncStore';
+import { runSync } from '../db/syncEngine';
 import { useThemeStore } from '../stores/themeStore';
 import { useFSRSSettingsStore } from '../stores/fsrsSettingsStore';
 import { generateCompletion } from '../services/aiProvider';
@@ -160,6 +162,30 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 
 function AccountSection() {
   const { user, signOut } = useAuthStore();
+  const pendingCount = useSyncStore((s) => s.pendingCount);
+  const syncStatus = useSyncStore((s) => s.status);
+  const [confirming, setConfirming] = useState(false);
+  const [syncingNow, setSyncingNow] = useState(false);
+
+  // If nothing is pending, sign out immediately — no need to confirm.
+  // Otherwise, surface the unsynced-data warning so the user can sync
+  // first or knowingly discard the local changes.
+  const handleSignOutClick = async () => {
+    if (pendingCount === 0) {
+      await signOut();
+      return;
+    }
+    setConfirming(true);
+  };
+
+  const handleTrySync = async () => {
+    setSyncingNow(true);
+    try {
+      await runSync();
+    } finally {
+      setSyncingNow(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -194,13 +220,57 @@ function AccountSection() {
         </div>
       </SectionCard>
 
-      <button
-        onClick={signOut}
-        className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
-        style={{ background: 'var(--bg-inset)', color: 'var(--danger, #e53e3e)' }}
-      >
-        Sign out
-      </button>
+      {!confirming ? (
+        <button
+          onClick={handleSignOutClick}
+          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
+          style={{ background: 'var(--bg-inset)', color: 'var(--danger, #e53e3e)' }}
+        >
+          Sign out
+        </button>
+      ) : (
+        <div
+          className="p-4 rounded-lg space-y-3"
+          style={{
+            background: 'var(--bg-inset)',
+            border: '1px solid var(--danger, #e53e3e)',
+          }}
+        >
+          <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            <strong>{pendingCount}</strong> change{pendingCount === 1 ? '' : 's'} haven't synced to the
+            server yet. Signing out clears local data and these changes will be lost.
+          </div>
+          {syncStatus === 'error' && (
+            <div className="text-xs" style={{ color: 'var(--danger, #e53e3e)' }}>
+              Last sync attempt failed. Try syncing again or check your connection.
+            </div>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={handleTrySync}
+              disabled={syncingNow}
+              className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+            >
+              {syncingNow ? 'Syncing…' : 'Try syncing now'}
+            </button>
+            <button
+              onClick={signOut}
+              className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: 'var(--bg-surface)', color: 'var(--danger, #e53e3e)', border: '1px solid var(--border)' }}
+            >
+              Sign out anyway
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: 'transparent', color: 'var(--text-secondary)' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
