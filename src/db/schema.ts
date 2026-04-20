@@ -7,9 +7,11 @@ export interface Meaning {
   id: string;
   /** The Chinese characters: e.g. "好" or "好吃" */
   headword: string;
-  /** Pinyin with tone diacritics (base tones): e.g. "hǎo chī" */
-  pinyin: string;
-  /** Pinyin with tone numbers: e.g. "hao3 chi1" */
+  /**
+   * Pinyin with tone numbers — the canonical form.
+   * Example: "hao3 chi1". Derive the diacritic display via
+   * getMeaningPinyin() / numericStringToDiacritic().
+   */
   pinyinNumeric: string;
   partOfSpeech: string;
   /** Core English meaning: e.g. "delicious" */

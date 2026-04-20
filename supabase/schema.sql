@@ -14,7 +14,6 @@ create table meanings (
   id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
   headword text not null,
-  pinyin text not null,
   pinyin_numeric text not null,
   part_of_speech text not null default '',
   english_short text not null,

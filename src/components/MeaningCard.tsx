@@ -17,6 +17,7 @@ import { ClickableEnglish } from './ClickableEnglish';
 import { EnglishCard } from './EnglishCard';
 import { getTokensForSentence } from '../services/ingestion';
 import { TutorialBanner } from './TutorialBanner';
+import { getMeaningPinyin } from '../lib/meaningPinyin';
 import { useTutorialStore } from '../stores/tutorialStore';
 import type { SentenceToken } from '../db/schema';
 
@@ -65,7 +66,7 @@ function MeaningContent() {
 
   if (!meaning) return null;
 
-  const pinyinSyllables = meaning.pinyin.split(/\s+/);
+  const pinyinSyllables = getMeaningPinyin(meaning).split(/\s+/);
   const pinyinNumericSyllables = meaning.pinyinNumeric.split(/\s+/);
   const headwordChars = Array.from(meaning.headword);
 
@@ -151,7 +152,7 @@ function MeaningContent() {
                 onClick={() => push({ type: 'meaning', id: m.id })}
                 className="block w-full text-left p-2 rounded transition-colors surface-hover"
               >
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{m.pinyin}</span>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{getMeaningPinyin(m)}</span>
                 <span className="ml-2">{m.englishShort}</span>
               </button>
             ))}
@@ -178,7 +179,7 @@ function MeaningContent() {
               >
                 <span className="text-3xl">{item.childMeaning.headword}</span>
                 <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  {item.childMeaning.pinyin}
+                  {getMeaningPinyin(item.childMeaning)}
                 </span>
                 <span className="text-xs">{item.childMeaning.englishShort}</span>
               </button>
@@ -251,7 +252,7 @@ function SentenceContent() {
               key={t.id}
               meaningId={t.meaningId}
               surfaceForm={t.surfaceForm}
-              pinyin={t.meaning.pinyin}
+              pinyin={getMeaningPinyin(t.meaning)}
               pinyinNumeric={t.meaning.pinyinNumeric}
 
               showPinyin

@@ -15,6 +15,7 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { TutorialBanner } from '../components/TutorialBanner';
 import type { SentenceToken, Meaning, SrsCard } from '../db/schema';
+import { getMeaningPinyin } from '../lib/meaningPinyin';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
@@ -337,7 +338,7 @@ export function BrowsePage() {
                           key={t.id}
                           meaningId={t.meaningId}
                           surfaceForm={t.surfaceForm}
-                          pinyin={t.meaning.pinyin}
+                          pinyin={getMeaningPinyin(t.meaning)}
                           pinyinNumeric={t.meaning.pinyinNumeric}
 
                           showPinyin

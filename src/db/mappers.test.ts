@@ -13,12 +13,14 @@ import {
 describe('meaningFromRow', () => {
   it('maps snake_case to camelCase', () => {
     const row = {
-      id: 'm1', headword: '好', pinyin: 'hǎo', pinyin_numeric: 'hao3',
+      id: 'm1', headword: '好', pinyin_numeric: 'hao3',
       part_of_speech: 'adj', english_short: 'good', english_full: 'good; well',
       type: 'word', level: 1, created_at: 1000, updated_at: 2000, usn: 5,
     };
     const result = meaningFromRow(row);
     expect(result.pinyinNumeric).toBe('hao3');
+    // Diacritic field was dropped — never mapped even when legacy rows include it.
+    expect(result).not.toHaveProperty('pinyin');
     expect(result.partOfSpeech).toBe('adj');
     expect(result.englishShort).toBe('good');
     expect(result.englishFull).toBe('good; well');
@@ -28,7 +30,7 @@ describe('meaningFromRow', () => {
 
   it('falls back updatedAt to created_at when updated_at is null', () => {
     const row = {
-      id: 'm1', headword: '好', pinyin: 'hǎo', pinyin_numeric: 'hao3',
+      id: 'm1', headword: '好', pinyin_numeric: 'hao3',
       part_of_speech: 'adj', english_short: 'good', english_full: 'good; well',
       type: 'word', level: 1, created_at: 1000, updated_at: null, usn: 0,
     };
@@ -37,7 +39,7 @@ describe('meaningFromRow', () => {
 
   it('picks up is_transliteration and defaults missing column to false', () => {
     const base = {
-      id: 'm1', headword: '汉堡', pinyin: 'hàn bǎo', pinyin_numeric: 'han4 bao3',
+      id: 'm1', headword: '汉堡', pinyin_numeric: 'han4 bao3',
       part_of_speech: 'noun', english_short: 'hamburger', english_full: 'hamburger',
       type: 'word', level: 0, created_at: 1000, updated_at: 1000, usn: 1,
     };

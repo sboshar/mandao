@@ -5,6 +5,7 @@
  * The LLM handles: segmentation, English translation, pinyin, tone sandhi, character breakdowns, POS.
  */
 import * as repo from '../db/repo';
+import { getMeaningPinyin } from '../lib/meaningPinyin';
 
 export interface ExistingMeaning {
   headword: string;
@@ -25,7 +26,7 @@ export async function getExistingMeanings(
     for (const m of meanings) {
       results.push({
         headword: m.headword,
-        pinyin: m.pinyin,
+        pinyin: getMeaningPinyin(m),
         english: m.englishShort,
       });
     }

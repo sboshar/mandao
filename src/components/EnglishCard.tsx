@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigationStore } from '../stores/navigationStore';
 import * as repo from '../db/repo';
 import type { Meaning } from '../db/schema';
+import { getMeaningPinyin } from '../lib/meaningPinyin';
 
 function getStemmedForms(word: string): Set<string> {
   const forms = new Set<string>([word]);
@@ -91,7 +92,7 @@ export function EnglishCard() {
               >
                 <span className="text-3xl">{m.headword}</span>
                 <div className="flex-1">
-                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{m.pinyin}</div>
+                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{getMeaningPinyin(m)}</div>
                   <div className="text-sm">
                     {m.englishShort}
                     {m.partOfSpeech && (

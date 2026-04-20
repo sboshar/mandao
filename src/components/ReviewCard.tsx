@@ -23,6 +23,7 @@ import {
 } from '../services/audioRecording';
 import { compareCharacters, matchPercent, type CharResult } from '../lib/charCompare';
 import { lookupPinyinForChars } from '../lib/pinyinLookup';
+import { getMeaningPinyin } from '../lib/meaningPinyin';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
 
@@ -649,7 +650,7 @@ export function ReviewCard() {
                       key={t.id}
                       meaningId={t.meaningId}
                       surfaceForm={t.surfaceForm}
-                      pinyin={t.meaning.pinyin}
+                      pinyin={getMeaningPinyin(t.meaning)}
                       pinyinNumeric={t.meaning.pinyinNumeric}
 
                       showPinyin={!isPyToEnZh}
@@ -716,7 +717,7 @@ export function ReviewCard() {
                       key={t.id}
                       meaningId={t.meaningId}
                       surfaceForm={t.surfaceForm}
-                      pinyin={t.meaning.pinyin}
+                      pinyin={getMeaningPinyin(t.meaning)}
                       pinyinNumeric={t.meaning.pinyinNumeric}
 
                       showPinyin
