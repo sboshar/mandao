@@ -7,7 +7,7 @@ import {
   getExistingMeanings,
 } from '../services/llmPrompt';
 import { processLLMTokens } from '../services/processLLMTokens';
-import type { ResolvePinyinFlag } from '../lib/resolvePinyin';
+import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
@@ -67,7 +67,7 @@ export function AddSentencePage() {
   /** Chars the analyzer dropped — nonzero until user re-analyzes or adds them manually. */
   const [missingChars, setMissingChars] = useState<string[]>([]);
   const [reanalyzing, setReanalyzing] = useState(false);
-  const [ingestFlags, setIngestFlags] = useState<ResolvePinyinFlag[]>([]);
+  const [ingestFlags, setIngestFlags] = useState<CheckPinyinFlag[]>([]);
   const [rawLLMResponse, setRawLLMResponse] = useState<string | null>(null);
   const [showRawLLM, setShowRawLLM] = useState(false);
   const aiEnabled = isAIConfigured();
@@ -237,27 +237,12 @@ export function AddSentencePage() {
     setError('');
     setAnalyzing(true);
     try {
-      const t0 = performance.now();
       const existingMeanings = await getExistingMeanings(chinese.trim());
-      const t1 = performance.now();
       const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
-      const t2 = performance.now();
       const raw = await generateCompletion(prompt);
-      const t3 = performance.now();
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      const t4 = performance.now();
       applyAnalysis(parsed);
-      const t5 = performance.now();
-      console.log(
-        `[analyze] existing-meanings: ${(t1 - t0).toFixed(0)}ms | ` +
-          `prompt-build (incl. CEDICT sweep): ${(t2 - t1).toFixed(0)}ms | ` +
-          `llm: ${(t3 - t2).toFixed(0)}ms | ` +
-          `parse: ${(t4 - t3).toFixed(0)}ms | ` +
-          `policy: ${(t5 - t4).toFixed(0)}ms | ` +
-          `total: ${(t5 - t0).toFixed(0)}ms | ` +
-          `prompt-chars: ${prompt.length}`,
-      );
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -309,6 +294,17 @@ export function AddSentencePage() {
       const cov = computeTokenCoverage(chinese.trim(), newTokens);
       setMissingChars(cov.missing.map((m) => m.surfaceForm));
     }
+  };
+
+  /** Accept a CEDICT suggestion for all tokens with the given headword.
+   *  Updates pinyinNumeric inline and drops the now-resolved flag. */
+  const applyCedictSuggestion = (headword: string, suggestion: string) => {
+    setTokens((prev) =>
+      prev.map((t) =>
+        t.surfaceForm === headword ? { ...t, pinyinNumeric: suggestion } : t,
+      ),
+    );
+    setIngestFlags((prev) => prev.filter((f) => f.headword !== headword));
   };
 
   const updateCharacter = (tokenIndex: number, charIndex: number, field: string, value: string) => {
@@ -404,21 +400,26 @@ export function AddSentencePage() {
       }));
 
       // Flags record what the LLM originally emitted vs what finally
-      // landed on the Meaning row. Recompute storedPinyin from the
-      // final tokenInputs (in case the user hand-edited after seeing
-      // the flag), and drop any flag whose headword no longer appears
-      // in the tokens (user deleted or retokenized that word).
-      const finalPinyinByHeadword = new Map<string, string>();
-      for (const t of tokenInputs) finalPinyinByHeadword.set(t.surfaceForm, t.pinyinNumeric);
-      const flagsForSave = ingestFlags
-        .filter((f) => finalPinyinByHeadword.has(f.headword))
-        .map((f) => ({
-          headword: f.headword,
-          storedPinyin: finalPinyinByHeadword.get(f.headword)!,
-          llmValue: f.llmValue,
-          flagKind: f.kind,
-          cedictSuggestions: f.cedictSuggestions,
-        }));
+      // Recompute flags from the final tokenInputs so user edits on the
+      // review screen (manual edits, apply-CEDICT clicks, token removal)
+      // are reflected in the persisted flags. Original LLM value comes
+      // from ingestFlags snapshot; if the user added tokens that weren't
+      // in the LLM response, llmValue equals the current pinyin.
+      const llmValueByHeadword = new Map<string, string>();
+      for (const f of ingestFlags) llmValueByHeadword.set(f.headword, f.llmValue);
+      const flagsForSave = tokenInputs
+        .map((t) => {
+          const check = checkPinyin(t.surfaceForm, t.pinyinNumeric);
+          if (!check.flag) return null;
+          return {
+            headword: t.surfaceForm,
+            storedPinyin: t.pinyinNumeric,
+            llmValue: llmValueByHeadword.get(t.surfaceForm) ?? t.pinyinNumeric,
+            flagKind: check.flag.kind,
+            cedictSuggestions: check.cedictSuggestions,
+          };
+        })
+        .filter((f): f is NonNullable<typeof f> => f !== null);
 
       let createdSentenceId: string | null = null;
       try {
@@ -802,31 +803,38 @@ export function AddSentencePage() {
           </div>
 
           {ingestFlags.length > 0 && (
-            <div className="p-3 rounded-lg text-xs space-y-1"
+            <div className="p-3 rounded-lg text-xs space-y-2"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               <div style={{ color: 'var(--text-primary)' }}>
-                Pinyin review for {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'}:
+                {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'} disagree with CC-CEDICT — review below.
               </div>
-              {ingestFlags.slice(0, 5).map((f, i) => {
-                const corrected =
-                  f.kind === 'auto-corrected' || f.kind === 'polyphone-coerced';
-                return (
-                  <div key={i} className="font-mono">
-                    {f.headword}:{' '}
-                    {corrected ? (
-                      <>
-                        <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{f.llmValue}</span>
-                        {' → '}
-                        {f.chosenValue}
-                      </>
-                    ) : (
-                      <>{f.chosenValue}</>
-                    )}
-                    {' '}
-                    <span style={{ opacity: 0.6 }}>({f.kind})</span>
-                  </div>
-                );
-              })}
+              {ingestFlags.slice(0, 5).map((f, i) => (
+                <div key={i} className="font-mono flex flex-wrap items-center gap-1">
+                  <span style={{ color: 'var(--text-primary)' }}>{f.headword}:</span>
+                  <span>{f.llmValue || '(empty)'}</span>
+                  {f.cedictSuggestions.length > 0 && (
+                    <>
+                      <span style={{ opacity: 0.6 }}>→ CEDICT:</span>
+                      {f.cedictSuggestions.map((sugg) => (
+                        <button
+                          key={sugg}
+                          type="button"
+                          onClick={() => applyCedictSuggestion(f.headword, sugg)}
+                          className="px-1.5 py-0.5 rounded transition-colors"
+                          style={{
+                            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+                            color: 'var(--accent)',
+                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                          }}
+                        >
+                          {sugg}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  <span style={{ opacity: 0.5 }}>({f.kind})</span>
+                </div>
+              ))}
               {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
             </div>
           )}

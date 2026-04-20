@@ -75,7 +75,7 @@ export interface SentenceInput {
   tokens: TokenInput[];
   source?: string;
   tags?: string[];
-  /** Audit trail of resolvePinyin overrides at ingest time. Optional. */
+  /** Audit trail of checkPinyin disagreements at ingest time. Optional. */
   flags?: IngestFlag[];
 }
 

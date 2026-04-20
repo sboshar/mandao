@@ -23,7 +23,7 @@ export interface ResegmentedToken<T extends Resegmentable> {
  *   [哥, 哥, 来, 了]
  * and CEDICT has 哥哥 as one entry, return
  *   [哥哥 (sources: 哥 + 哥), 来, 了]
- * so downstream resolvePinyin sees the compound headword and applies
+ * so downstream checkPinyin sees the compound headword and compares
  * the compound's canonical reading.
  *
  * Uses greedy left-to-right longest-match against CEDICT. Multi-character

@@ -1,5 +1,5 @@
 import { resegmentWithCedict, type Resegmentable } from '../lib/resegment';
-import { resolvePinyin, type ResolvePinyinFlag } from '../lib/resolvePinyin';
+import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
 import { lookup as cedictLookup } from '../lib/cedict';
 import type { LLMResponse, LLMTokenResponse } from './llmPrompt';
 
@@ -7,18 +7,13 @@ interface LLMTokenResegInput extends Resegmentable {
   original: LLMTokenResponse;
 }
 
-/**
- * Shape matching what the ingest path expects downstream. Mirrors
- * LLMTokenResponse but with guaranteed string pinyinNumeric after
- * resolution.
- */
 export interface ProcessedToken extends LLMTokenResponse {
   pinyinNumeric: string;
 }
 
 export interface ProcessResult {
   tokens: ProcessedToken[];
-  flags: ResolvePinyinFlag[];
+  flags: CheckPinyinFlag[];
 }
 
 function cedictGloss(surfaceForm: string): string | null {
@@ -29,14 +24,17 @@ function cedictGloss(surfaceForm: string): string | null {
 }
 
 /**
- * Apply the write-time policy to an LLM response:
- *   1. Re-merge mis-segmented compound tokens using CEDICT longest-match.
- *   2. For each token, run resolvePinyin: CEDICT overrides for
- *      single-reading headwords; coerce close polyphone misses; flag
- *      novel readings and CEDICT-unknown words.
- *   3. For merged compounds, prefer CEDICT's gloss over the first
- *      constituent character's english (which would otherwise be e.g.
- *      "elder brother" for a merged 哥哥 rather than "older brother").
+ * Apply the observation-only pipeline to an LLM response:
+ *   1. Re-merge mis-segmented compounds using CEDICT longest-match.
+ *      (Structural fix — the LLM got segmentation wrong; not an opinion.)
+ *   2. For merged compounds, concatenate the source tokens' LLM pinyin
+ *      into the compound's pinyinNumeric. Common outcome: ge1+ge1 for
+ *      哥哥. checkPinyin will flag this as cedict-disagreement and the
+ *      review UI lets the user one-click accept CEDICT's reading.
+ *   3. Use CEDICT's gloss as the merged compound's english — the LLM
+ *      only produced character-level english, so this is the only
+ *      available source.
+ *   4. Run checkPinyin per token. Collect flags. Never mutate values.
  */
 export function processLLMTokens(response: LLMResponse): ProcessResult {
   const input: LLMTokenResegInput[] = response.tokens.map((t) => ({
@@ -48,14 +46,17 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
   const resegmented = resegmentWithCedict(input);
 
   const tokens: ProcessedToken[] = [];
-  const flags: ResolvePinyinFlag[] = [];
+  const flags: CheckPinyinFlag[] = [];
 
   for (const seg of resegmented) {
-    const firstSource = seg.sources[0]?.original;
     const isMerged = seg.sources.length > 1;
-    const llmPinyin = seg.pinyinNumeric || firstSource?.pinyinNumeric || '';
+    const firstSource = seg.sources[0]?.original;
 
-    const result = resolvePinyin(seg.surfaceForm, llmPinyin);
+    const pinyinNumeric = isMerged
+      ? seg.sources.map((s) => s.pinyinNumeric).filter(Boolean).join(' ')
+      : firstSource?.pinyinNumeric ?? '';
+
+    const result = checkPinyin(seg.surfaceForm, pinyinNumeric);
     if (result.flag) flags.push(result.flag);
 
     const base: LLMTokenResponse = firstSource ?? ({} as LLMTokenResponse);
@@ -64,11 +65,8 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
     tokens.push({
       ...base,
       surfaceForm: seg.surfaceForm,
-      pinyinNumeric: result.pinyinNumeric,
+      pinyinNumeric,
       english: englishOverride ?? base.english ?? '',
-      // Character-level breakdown from the first source can't describe
-      // the compound accurately; clear it so the user re-populates from
-      // the compound's canonical definition.
       characters: isMerged ? undefined : base.characters,
     });
   }

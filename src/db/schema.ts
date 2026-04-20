@@ -187,8 +187,6 @@ export interface ReviewLog {
 }
 
 export type MeaningFlagKind =
-  | 'auto-corrected'
-  | 'polyphone-coerced'
   | 'cedict-disagreement'
   | 'cedict-unknown'
   | 'user-report';

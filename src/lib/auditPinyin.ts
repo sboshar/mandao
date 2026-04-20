@@ -1,7 +1,7 @@
 import * as repo from '../db/repo';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { loadCedict, lookup } from './cedict';
-import { collapsePinyin } from './resolvePinyin';
+import { collapsePinyin } from './checkPinyin';
 import { localDb } from '../db/localDb';
 import { supabase } from './supabase';
 import type { Meaning } from '../db/schema';
