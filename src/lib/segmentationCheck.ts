@@ -1,4 +1,4 @@
-import { lookup } from './cedict';
+import { lookup, firstGloss, MAX_CEDICT_COMPOUND_LEN } from './cedict';
 
 export interface SegmentationFlag {
   kind: 'segmentation-disagreement';
@@ -19,27 +19,11 @@ export interface SegmentationInput {
   pinyinNumeric: string;
 }
 
-const MAX_COMPOUND_LEN = 4;
-
-function cedictEnglish(headword: string): string {
-  const entries = lookup(headword);
-  if (entries.length === 0) return '';
-  const first = entries[0].english.split('/').filter(Boolean)[0];
-  return (first ?? '').trim();
-}
-
 /**
- * Scan a token list for runs of consecutive single-character tokens
- * whose concatenation matches a CEDICT compound entry. Emit one flag
- * per longest mergeable run so the review UI can offer a "Merge" action.
- *
- * The scan is greedy left-to-right: at each position, try the longest
- * compound that hits CEDICT (up to MAX_COMPOUND_LEN chars). If found,
- * emit a flag and skip past the run. Otherwise advance by one token.
- *
- * Skips multi-character tokens entirely — the LLM already committed
- * to those as compounds, and second-guessing them is outside this
- * helper's scope.
+ * Greedy left-to-right scan for runs of consecutive single-character
+ * tokens whose concatenation hits a CEDICT compound. Emits one flag
+ * per longest match; skips past the matched run. Multi-char tokens
+ * are passed over — the LLM already committed to those as compounds.
  */
 export function scanSegmentation(
   tokens: SegmentationInput[],
@@ -54,10 +38,11 @@ export function scanSegmentation(
     }
 
     let bestEnd = i;
+    let bestEntries = lookup(tokens[i].surfaceForm);
     let bestSurface = '';
     for (
       let j = i + 1;
-      j < tokens.length && j - i < MAX_COMPOUND_LEN;
+      j < tokens.length && j - i < MAX_CEDICT_COMPOUND_LEN;
       j++
     ) {
       if (tokens[j].surfaceForm.length !== 1) break;
@@ -65,16 +50,17 @@ export function scanSegmentation(
         .slice(i, j + 1)
         .map((t) => t.surfaceForm)
         .join('');
-      if (lookup(candidate).length > 0) {
+      const entries = lookup(candidate);
+      if (entries.length > 0) {
         bestEnd = j;
         bestSurface = candidate;
+        bestEntries = entries;
       }
     }
 
     if (bestEnd > i) {
       const indices = [];
       for (let k = i; k <= bestEnd; k++) indices.push(k);
-      const entries = lookup(bestSurface);
       flags.push({
         kind: 'segmentation-disagreement',
         headword: bestSurface,
@@ -83,9 +69,9 @@ export function scanSegmentation(
           .map((t) => t.pinyinNumeric)
           .filter(Boolean)
           .join(' '),
-        cedictSuggestions: entries.map((e) => e.pinyin.toLowerCase()),
+        cedictSuggestions: bestEntries.map((e) => e.pinyin.toLowerCase()),
         tokenIndices: indices,
-        cedictEnglish: cedictEnglish(bestSurface),
+        cedictEnglish: firstGloss(bestSurface),
       });
       i = bestEnd + 1;
     } else {

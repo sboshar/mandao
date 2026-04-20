@@ -29,6 +29,19 @@ function parseLine(line: string): DictEntry | null {
   };
 }
 
+/** Longest multi-character compound in CEDICT worth scanning for. */
+export const MAX_CEDICT_COMPOUND_LEN = 4;
+
+/** First English gloss for a headword ("older brother" from "/older brother/CL:個/").
+ *  Empty string when the headword isn't in CEDICT or has no gloss. */
+export function firstGloss(headword: string): string {
+  if (!simplifiedTrie) return '';
+  const entries = lookup(headword);
+  if (entries.length === 0) return '';
+  const gloss = entries[0].english.split('/').filter(Boolean)[0];
+  return (gloss ?? '').trim();
+}
+
 export async function loadCedict(): Promise<void> {
   if (loaded) return;
   if (loading) return loading;

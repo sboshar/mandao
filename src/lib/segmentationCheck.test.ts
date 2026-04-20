@@ -85,4 +85,19 @@ describe('scanSegmentation', () => {
     expect(flags[1].headword).toBe('爸爸');
     expect(flags[1].tokenIndices).toEqual([3, 4]);
   });
+
+  it('after merging the first run, re-scan correctly finds the second', () => {
+    // Simulates the post-merge state: first run (哥+哥) is now one 哥哥
+    // token. Re-scanning should still flag the remaining 爸+爸 run.
+    const afterMerge = [
+      T('哥哥', 'ge1 ge5'),
+      T('很', 'hen3'),
+      T('爸', 'ba4'),
+      T('爸', 'ba4'),
+    ];
+    const flags = scanSegmentation(afterMerge);
+    expect(flags).toHaveLength(1);
+    expect(flags[0].headword).toBe('爸爸');
+    expect(flags[0].tokenIndices).toEqual([2, 3]);
+  });
 });

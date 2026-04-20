@@ -8,7 +8,7 @@ import {
 } from '../services/llmPrompt';
 import { processLLMTokens } from '../services/processLLMTokens';
 import { checkPinyin } from '../lib/checkPinyin';
-import { scanSegmentation } from '../lib/segmentationCheck';
+import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
 import type { IngestFlag } from '../services/processLLMTokens';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
@@ -309,33 +309,32 @@ export function AddSentencePage() {
     setIngestFlags((prev) => prev.filter((f) => f.headword !== headword));
   };
 
-  /** Collapse the given token indices into one token with the CEDICT
-   *  compound's surface form, pinyin, and gloss. After merge, flag
-   *  indices shift — simplest is to drop all segmentation flags and
-   *  let the next render recompute if needed (we don't recompute here,
-   *  so subsequent mis-segmentations surface at save time). */
-  const mergeTokensIntoCompound = (
-    indices: number[],
-    compoundSurface: string,
-    compoundPinyin: string,
-    compoundEnglish: string,
-  ) => {
-    if (indices.length < 2) return;
-    const sorted = [...indices].sort((a, b) => a - b);
+  /** Collapse the tokens referenced by a segmentation flag into one
+   *  compound token with CEDICT's reading + gloss. Other segmentation
+   *  flags stay valid — their tokenIndices are computed against the
+   *  old array so we recompute them from the new token shape. */
+  const mergeTokensIntoCompound = (flag: SegmentationFlag) => {
+    if (flag.tokenIndices.length < 2) return;
+    const sorted = [...flag.tokenIndices].sort((a, b) => a - b);
     const first = sorted[0];
     const last = sorted[sorted.length - 1];
     setTokens((prev) => {
       const merged: TokenFormData = {
-        surfaceForm: compoundSurface,
-        pinyinNumeric: compoundPinyin,
+        surfaceForm: flag.headword,
+        pinyinNumeric: flag.cedictSuggestions[0] ?? '',
         pinyinSandhi: '',
-        english: compoundEnglish,
+        english: flag.cedictEnglish,
         partOfSpeech: prev[first]?.partOfSpeech ?? '',
         isTransliteration: false,
       };
-      return [...prev.slice(0, first), merged, ...prev.slice(last + 1)];
+      const next = [...prev.slice(0, first), merged, ...prev.slice(last + 1)];
+      const freshSeg = scanSegmentation(next);
+      setIngestFlags((prevFlags) => [
+        ...prevFlags.filter((f) => f.kind !== 'segmentation-disagreement'),
+        ...freshSeg,
+      ]);
+      return next;
     });
-    setIngestFlags((prev) => prev.filter((f) => f.kind !== 'segmentation-disagreement'));
   };
 
   const updateCharacter = (tokenIndex: number, charIndex: number, field: string, value: string) => {
@@ -858,14 +857,7 @@ export function AddSentencePage() {
                       <span>{f.headword} [{firstSuggestion}]</span>
                       <button
                         type="button"
-                        onClick={() =>
-                          mergeTokensIntoCompound(
-                            f.tokenIndices,
-                            f.headword,
-                            firstSuggestion,
-                            f.cedictEnglish,
-                          )
-                        }
+                        onClick={() => mergeTokensIntoCompound(f)}
                         className="px-1.5 py-0.5 rounded transition-colors"
                         style={{
                           background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
