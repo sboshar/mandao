@@ -45,80 +45,88 @@ export async function generateAnalysisPrompt(
   missingChars?: string[],
 ): Promise<string> {
   const retrySection = missingChars && missingChars.length > 0
-    ? `\nIMPORTANT: A previous analysis of this sentence omitted these characters: ${missingChars.join(' ')}. Include them as tokens this time. Every Hanzi character in the sentence must appear in exactly one token's surfaceForm.\n`
+    ? `\nPrevious attempt omitted: ${missingChars.join(' ')}. Every Hanzi character must appear in exactly one token's surfaceForm.\n`
     : '';
+
   let existingSection = '';
   if (existingMeanings && existingMeanings.length > 0) {
     const lines = existingMeanings
       .map((m) => `  ${m.headword} [${m.pinyin}] = "${m.english}"`)
       .join('\n');
     existingSection = `
-Reference Meanings (use these EXACT strings for character-level English when they fit):
+User's existing meanings (reuse the exact english string when it fits this context):
 ${lines}
-
-If a character has multiple reference meanings listed, pick the one that fits this context. Use the exact English string from the list. Only assign a new meaning if none of the reference meanings apply.
 `;
   }
 
   const cedictHits = await gatherCedictHits(chinese);
   const cedictSection = formatCedictBlock(cedictHits);
 
-  return `Tokenize and analyze this Chinese sentence. Return ONLY a JSON object (no markdown, no explanation, no code fences).
+  return `Tokenize and analyze a Chinese sentence. Return ONLY the JSON object below — no markdown, no prose, no code fences.
 
 Sentence: ${chinese}
 ${retrySection}${existingSection}${cedictSection}
-First, segment the sentence into words (tokens). Use linguistically correct word boundaries — for example, 作业 is one word meaning "homework", not two separate characters. Segment the way a native speaker would identify distinct words. When CC-CEDICT above lists a multi-character compound that appears in the sentence, segment it as one token rather than separate character tokens.
+# Output schema
 
-Then return this exact JSON structure:
 {
-  "chinese": "${chinese}",
-  "english": "natural English translation",
-  "pinyinSandhi": "full sentence pinyin with tone sandhi applied using diacritics",
+  "chinese": string,              // the input sentence verbatim
+  "english": string,              // natural English translation
+  "pinyinSandhi": string,         // whole-sentence pinyin, diacritics, sandhi applied
   "tokens": [
     {
-      "surfaceForm": "the Chinese word/character as segmented",
-      "pinyinNumeric": "pinyin with tone numbers BEFORE sandhi e.g. hao3",
-      "pinyinSandhi": "pinyin with diacritics AFTER tone sandhi applied",
-      "english": "meaning IN THIS CONTEXT (not all meanings)",
-      "partOfSpeech": "one of: noun, verb, adj, adv, prep, conj, particle, measure, pronoun, number, other",
-      "isTransliteration": false,
-      "characters": [
-        {
-          "char": "individual character",
-          "pinyinNumeric": "tone number pinyin for this character e.g. cheng2",
-          "pinyinSandhi": "pinyin with diacritics after sandhi",
-          "english": "meaning of this character IN THE CONTEXT OF THIS WORD"
-        }
+      "surfaceForm": string,      // one word or character as segmented
+      "pinyinNumeric": string,    // CITATION form, lowercase ASCII + tone digits 1-5
+      "pinyinSandhi": string,     // same syllables with diacritics, sandhi applied
+      "english": string,          // THIS token's meaning in THIS sentence
+      "partOfSpeech": "noun"|"verb"|"adj"|"adv"|"prep"|"conj"|"particle"|"measure"|"pronoun"|"number"|"other",
+      "isTransliteration": boolean,
+      "characters": [             // present on EVERY token (including single-char)
+        { "char": string, "pinyinNumeric": string, "pinyinSandhi": string, "english": string }
       ]
     }
   ]
 }
 
-Rules:
-- Segment into linguistically correct words. Do NOT split compound words into individual characters (e.g. 作业 = one token, 正在 = one token). Do NOT merge separate words.
-- Exclude punctuation tokens (。，！？ etc.) — only include content words.
-- For pinyinNumeric: lowercase ASCII letters + tone digits 1-5 (5 = neutral), space-separated (e.g. "xiu1 xi5"). NEVER emit diacritics (no "kè3", no "wǒ"), NEVER mix capitals/spaces/punctuation (no "Ke3", no "sui 1"). Do NOT apply tone sandhi in this field — use the citation form, e.g. "bu4 shi4" not "bu2 shi4", "yi1 ge4" not "yi2 ge4". Tone sandhi belongs in pinyinSandhi only.
-- When CC-CEDICT lists a reading for this word, use it EXACTLY for pinyinNumeric. If CEDICT has a compound entry for a multi-character token, use the compound's reading — do NOT combine character readings. Examples:
-    ✅ 哥哥 → "ge1 ge5"  (CEDICT compound [ge1 ge5])
-    ❌ 哥哥 → "ge1 ge1"  (mechanical combination of character readings)
-    ✅ 休息 → "xiu1 xi5"  (CEDICT compound [xiu1 xi5] — second syllable neutral)
-    ❌ 休息 → "xiu1 xi1" or "xiu1 xi2"  (not in CEDICT)
-    ✅ 早上 → "zao3 shang5"  (compound has neutral tone)
-    ❌ 早上 → "zao3 shang4"  (character-level reading, wrong in context)
-- For polyphones (CEDICT lists multiple readings), pick the reading that fits this sentence's context. For example 行 in 银行 → "hang2"; 行 in 行走 → "xing2".
-- For pinyinSandhi: apply all tone sandhi rules (3rd tone sandhi, 不 sandhi, 一 sandhi) and write with diacritics. Each token's pinyinSandhi must contain ONLY the syllables for that token's characters — never include syllables from neighboring tokens. For example, 作业 should be "zuòyè" (2 syllables for 2 characters), NOT "zuò zuòyè".
-- For english: give the CONTEXTUAL meaning only, not all possible meanings
-- For particles like 了 or 的, give their grammatical function as the english (e.g. "completion particle", "possessive particle")
-- For the "characters" array: include it for ALL tokens, even single-character ones
-  - For single-character tokens: the characters array has one entry matching the token
-  - For multi-character tokens: give each character's OWN independent meaning — the semantic building block it contributes to the compound, NOT the compound's meaning repeated or paraphrased onto the character
-  - Test: the character meaning should make sense if the character appeared in a DIFFERENT compound word. If the meaning only makes sense within this specific word, you are giving the word's meaning, not the character's meaning.
-  - Think of it as etymology: what does each character bring to the table? The compound's meaning emerges from combining the characters' individual meanings.
-- isTransliteration: set true ONLY when the token is a phonetic loanword — the characters were chosen to approximate a foreign word's SOUND, and their normal literal meanings do not compose into the token's meaning. Examples: 汉堡 (hamburger), 咖啡 (coffee), 沙发 (sofa), 巧克力 (chocolate), 披萨 (pizza), 沙拉 (salad), 三明治 (sandwich), 可乐 (cola), 吉他 (guitar), 摩托 (motor), 麦克风 (microphone). Set false for native compounds (好吃, 作业, 电脑 "electric brain", etc.) and for semantic loans that translate meaning rather than sound.
-  - When isTransliteration is true, each character's "english" MUST be the phonetic gloss: "phonetic (sounds like '<syllable>')" — do NOT invent a literal meaning for that character in this word. The character's normal meanings still exist in isolation, but in this compound the character is contributing sound, not sense.
-  - Omit the field or set it to false when uncertain — false is the safe default.
-- Validation: before returning, verify that each token's pinyinSandhi has exactly as many syllables as characters in its surfaceForm. If not, you have accidentally merged pinyin from a neighboring token — fix it.
-- Return ONLY the JSON, nothing else`;
+# Rules
+
+## pinyinNumeric (most important — get this right)
+- Lowercase ASCII + tone digits 1–5. 5 = neutral. Space between syllables.
+- Citation form only. Do NOT apply sandhi: "bu4 shi4" NOT "bu2 shi4"; "yi1 ge4" NOT "yi2 ge4". Sandhi belongs in pinyinSandhi.
+- When CEDICT above lists a reading for the whole token, copy it verbatim.
+- For multi-character compounds in CEDICT, use the compound's reading — NOT character readings combined:
+    哥哥 → ge1 ge5       (not ge1 ge1)
+    休息 → xiu1 xi5      (not xiu1 xi1)
+    早上 → zao3 shang5   (not zao3 shang4)
+    不客气 → bu4 ke4 qi5 (not bu4 ke4 qi4)
+- For polyphones (multiple CEDICT entries), pick the reading that fits this sentence's context:
+    行: 银行 → hang2; 行走 → xing2
+    为: 为了 → wei4; 以为 → wei2
+
+## Segmentation
+- Linguistically correct word boundaries. CEDICT compounds above are one token.
+- Do NOT split compounds (作业 is one token, not two). Do NOT merge separate words.
+- Skip punctuation (。，！？).
+
+## pinyinSandhi
+- Apply all sandhi (3rd-tone, 不, 一). Use diacritics.
+- Exactly one syllable per character. Never pull syllables from neighboring tokens.
+
+## characters array
+- Required on every token.
+- Each entry's english is THAT CHARACTER's contribution, not the compound's meaning.
+- Test: the gloss should still make sense if the character appeared in a different compound.
+
+## isTransliteration
+- True only for phonetic loanwords: 汉堡 (hamburger), 咖啡 (coffee), 沙发 (sofa), 巧克力 (chocolate).
+- When true, each character's english must be: phonetic (sounds like '<syllable>').
+- Default false. Native compounds (好吃, 电脑) are false.
+
+## english (token-level)
+- Contextual meaning only. For particles (了, 的), give the grammatical function ("completion particle", "possessive particle").
+
+Before returning, verify each token's pinyinSandhi syllable count equals its surfaceForm character count.
+
+Return ONLY the JSON.`;
 }
 
 export interface LLMCharacterResponse {
