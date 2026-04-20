@@ -848,10 +848,12 @@ export function AddSentencePage() {
                   {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and CC-CEDICT
                 </div>
                 <div style={{ color: 'var(--text-tertiary)' }}>
-                  Both sources are usually right, but they differ on polyphone readings, neutral tones,
-                  segmentation, and coverage. Apply a CEDICT suggestion when you're unsure — keep the AI's
-                  value if you know it's a valid variant, dialect, or neologism. You can also edit any
-                  field manually in the tokens below.
+                  Neither source is always right. They commonly differ on polyphone readings, neutral tones,
+                  segmentation, and coverage — and especially on <strong>written vs. colloquial</strong> usage
+                  (CEDICT tends toward the written/citation form; the AI may give what's actually spoken).
+                  <strong> Verify online before accepting</strong> — a quick Pleco or Wiktionary check settles
+                  most cases. Then apply the CEDICT suggestion, keep the AI's value, or edit any field
+                  manually in the tokens below.
                 </div>
               </div>
 
