@@ -13,12 +13,12 @@
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
-import type { FailedOpSummary } from '../stores/syncStore';
+import type { FailedOp } from '../stores/syncStore';
 
 /** Sync error that preserves the Postgres code so the outbox can tell
  *  permanent (CHECK violation, missing column) apart from transient
  *  (network, rate limit). */
-class SyncError extends Error {
+export class SyncError extends Error {
   code?: string;
   constructor(message: string, code?: string) {
     super(message);
@@ -26,7 +26,10 @@ class SyncError extends Error {
   }
 }
 
-function syncErrorFrom(e: { message?: string; code?: string } | null | undefined, fallback = 'Unknown sync error'): SyncError {
+export function syncErrorFrom(
+  e: { message?: string; code?: string } | null | undefined,
+  fallback = 'Unknown sync error',
+): SyncError {
   return new SyncError(e?.message ?? fallback, e?.code);
 }
 
@@ -37,7 +40,7 @@ function syncErrorFrom(e: { message?: string; code?: string } | null | undefined
  *            function signature mismatch, insufficient_privilege)
  *    58xxx — system_error (server-side internal errors)
  */
-function isPermanentSyncError(e: unknown): boolean {
+export function isPermanentSyncError(e: unknown): boolean {
   if (!(e instanceof SyncError) || !e.code) return false;
   return /^(23|42|58)/.test(e.code);
 }
@@ -130,42 +133,45 @@ async function pushOutbox(): Promise<void> {
       }
     }
   } finally {
-    if (succeeded.length > 0) {
-      await localDb.outbox.bulkDelete(succeeded);
-    }
-    for (const { id, error } of failed) {
-      const permanent = isPermanentSyncError(error);
-      const message = (error as Error)?.message ?? String(error);
-      const code = error instanceof SyncError ? error.code : undefined;
-      await localDb.outbox
-        .where('id')
-        .equals(id)
-        .modify((op: SyncOp) => {
-          op.lastError = message;
-          op.lastErrorCode = code;
-          if (permanent) {
-            // Retrying can't fix a CHECK violation / missing column.
-            // Mark failed now; user sees it in the banner + can resync
-            // manually after the schema catches up.
-            op.status = 'failed';
-            op.attempts = MAX_ATTEMPTS;
-          } else {
-            op.attempts += 1;
-            op.status = op.attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
-          }
-        });
-    }
-    const handled = new Set([
-      ...succeeded,
-      ...failed.map((f) => f.id),
-    ]);
-    const unaccounted = ids.filter((id) => !handled.has(id));
-    if (unaccounted.length > 0) {
-      await localDb.outbox
-        .where('id')
-        .anyOf(unaccounted)
-        .modify({ status: 'pending' });
-    }
+    // Atomic: succeeded deletes + failed updates + unaccounted resets
+    // all commit together, so a tab crash mid-finally leaves a
+    // consistent outbox.
+    await localDb.transaction('rw', localDb.outbox, async () => {
+      if (succeeded.length > 0) {
+        await localDb.outbox.bulkDelete(succeeded);
+      }
+      for (const { id, error } of failed) {
+        const permanent = isPermanentSyncError(error);
+        const message = (error as Error)?.message ?? String(error);
+        const code = error instanceof SyncError ? error.code : undefined;
+        await localDb.outbox
+          .where('id')
+          .equals(id)
+          .modify((op: SyncOp) => {
+            op.lastError = message;
+            op.lastErrorCode = code;
+            if (permanent) {
+              // Retrying can't fix a CHECK violation / missing column.
+              op.status = 'failed';
+              op.attempts = MAX_ATTEMPTS;
+            } else {
+              op.attempts += 1;
+              op.status = op.attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
+            }
+          });
+      }
+      const handled = new Set([
+        ...succeeded,
+        ...failed.map((f) => f.id),
+      ]);
+      const unaccounted = ids.filter((id) => !handled.has(id));
+      if (unaccounted.length > 0) {
+        await localDb.outbox
+          .where('id')
+          .anyOf(unaccounted)
+          .modify({ status: 'pending' });
+      }
+    });
   }
 }
 
@@ -362,7 +368,7 @@ async function pullOnePage(): Promise<boolean> {
     last_usn: lastUsn,
     max_rows: PULL_PAGE_SIZE,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw syncErrorFrom(error);
   if (!data) return false;
 
   const changes = data as {
@@ -556,21 +562,20 @@ export async function runSync(): Promise<void> {
     const stuck = stuckRows.length;
     store.setPendingCount(remaining + stuck);
 
-    const samples: FailedOpSummary[] = stuckRows
-      .slice(-5)
-      .map((op) => ({
-        opType: op.op,
-        error: op.lastError ?? 'Unknown error',
-        code: op.lastErrorCode,
-      }));
+    // Cap samples — banner only needs enough for the details toggle.
+    const samples: FailedOp[] = stuckRows.slice(-5).map((op) => ({
+      op: op.op,
+      lastError: op.lastError,
+      lastErrorCode: op.lastErrorCode,
+    }));
     store.setFailed(stuck, samples);
 
     store.setLastSyncedAt(Date.now());
-    if (stuck > 0) {
-      store.setError(`${stuck} operation(s) failed permanently`);
-    } else {
+    if (stuck === 0) {
       store.setStatus('synced');
     }
+    // When stuck > 0, setFailed already set status='error' + errorMessage,
+    // so a separate setError(...) call would duplicate the signal.
   } catch (e: any) {
     console.error('Sync failed:', e);
     store.setError(e.message || 'Sync failed');

@@ -1,24 +1,24 @@
 import { useState } from 'react';
 import { useSyncStore } from '../stores/syncStore';
 import { runSync } from '../db/syncEngine';
+import type { SyncOpType } from '../db/localDb';
+
+const OP_LABELS: Record<SyncOpType, string> = {
+  reviewCard: 'card review',
+  ingestBundle: 'new sentence',
+  deleteEntity: 'delete',
+  deleteAllData: 'clear all data',
+  updateTags: 'tag update',
+  upsertAudioRecording: 'audio upload',
+};
 
 export function SyncErrorBanner() {
   const failedCount = useSyncStore((s) => s.failedCount);
   const failedOps = useSyncStore((s) => s.failedOps);
   const status = useSyncStore((s) => s.status);
   const [expanded, setExpanded] = useState(false);
-  const [retrying, setRetrying] = useState(false);
 
   if (failedCount === 0) return null;
-
-  const handleRetry = async () => {
-    setRetrying(true);
-    try {
-      await runSync();
-    } finally {
-      setRetrying(false);
-    }
-  };
 
   return (
     <div
@@ -37,8 +37,8 @@ export function SyncErrorBanner() {
         </span>
         <button
           type="button"
-          onClick={handleRetry}
-          disabled={retrying || status === 'syncing'}
+          onClick={() => runSync()}
+          disabled={status === 'syncing'}
           className="px-2 py-0.5 rounded transition-colors disabled:opacity-50"
           style={{
             background: 'var(--bg-surface)',
@@ -46,7 +46,7 @@ export function SyncErrorBanner() {
             border: '1px solid var(--border)',
           }}
         >
-          {retrying || status === 'syncing' ? 'Retrying…' : 'Retry'}
+          {status === 'syncing' ? 'Retrying…' : 'Retry'}
         </button>
         <button
           type="button"
@@ -60,9 +60,10 @@ export function SyncErrorBanner() {
       {expanded && failedOps.length > 0 && (
         <ul className="mt-2 space-y-1">
           {failedOps.map((op, i) => (
-            <li key={i} className="font-mono" style={{ color: 'var(--text-secondary)' }}>
-              <strong>{op.opType}</strong>
-              {op.code && <> ({op.code})</>}: {op.error}
+            <li key={i} style={{ color: 'var(--text-secondary)' }}>
+              <strong>{OP_LABELS[op.op]}</strong>
+              {op.lastErrorCode && <> <span className="font-mono">({op.lastErrorCode})</span></>}
+              : <span className="font-mono">{op.lastError ?? 'Unknown error'}</span>
             </li>
           ))}
         </ul>
