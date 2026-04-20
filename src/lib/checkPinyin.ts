@@ -1,8 +1,9 @@
 import { lookup } from './cedict';
-import type { MeaningFlagKind } from '../db/schema';
 
 export interface CheckPinyinFlag {
-  kind: MeaningFlagKind;
+  /** Narrowed to the kinds checkPinyin actually produces. Lets the
+   *  IngestFlag union discriminate against SegmentationFlag cleanly. */
+  kind: 'cedict-disagreement' | 'cedict-unknown';
   headword: string;
   /** What the pipeline saw when producing this flag. Not necessarily the
    *  value that ends up persisted — user may edit on the review screen. */
