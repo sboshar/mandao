@@ -886,9 +886,7 @@ export function AddSentencePage() {
                         <span className="font-mono">{f.headword}</span> ({renderPinyin(firstSuggestion)})
                         as one word
                         {f.cedictEnglish ? ` meaning "${f.cedictEnglish}"` : ''}.
-                        {!pinyinMatches && (
-                          <> Merging also fixes the pinyin (e.g. neutral tone on the second syllable).</>
-                        )}
+                        {!pinyinMatches && <> Merging also fixes the pinyin.</>}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <button
