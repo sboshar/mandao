@@ -56,19 +56,16 @@ describe('processLLMTokens — observation only', () => {
     expect(r.flags[0].cedictSuggestions).toContain('xiu1 xi5');
   });
 
-  it('re-merges split 哥+哥 into compound and concatenates pinyin', () => {
+  it('trusts LLM segmentation: split 哥+哥 passes through as two tokens', () => {
+    // Segmentation is the LLM's call; we don't silently re-merge.
+    // 哥 has a single CEDICT entry [ge1], so each token matches and no
+    // flag fires. If the LLM got segmentation wrong, the prompt is where
+    // we fix that — not by second-guessing here.
     const r = processLLMTokens(
       response([token('哥', 'ge1', 'elder brother'), token('哥', 'ge1', 'elder brother')]),
     );
-    expect(r.tokens).toHaveLength(1);
-    expect(r.tokens[0].surfaceForm).toBe('哥哥');
-    expect(r.tokens[0].pinyinNumeric).toBe('ge1 ge1');
-    // Merged compound got a CEDICT gloss for english
-    expect(r.tokens[0].english).toMatch(/brother/i);
-    // And a flag surfaces CEDICT's correct reading
-    const flag = r.flags[0];
-    expect(flag.kind).toBe('cedict-disagreement');
-    expect(flag.cedictSuggestions).toContain('ge1 ge5');
+    expect(r.tokens).toHaveLength(2);
+    expect(r.flags).toHaveLength(0);
   });
 
   it('accepts 不是 bu2 shi4 via de-sandhi — no flag', () => {

@@ -59,8 +59,7 @@ export function formatCedictBlock(hits: CedictHit[]): string {
     const gloss = (h.entries[0].english.split('/')[0] || '').trim();
     return `  ${h.sub}  [${pinyins}]${gloss ? '  /' + gloss + '/' : ''}`;
   });
-  return `\nReference readings from CC-CEDICT (authoritative for pronunciation.
-Compound readings override character readings.):
+  return `\nCC-CEDICT readings for substrings of this sentence. Emit each compound (length ≥ 2) as a SINGLE token with the listed pinyin — never split it into character tokens, never recompute the reading from characters:
 ${lines.join('\n')}
 `;
 }

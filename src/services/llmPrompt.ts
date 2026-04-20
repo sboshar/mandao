@@ -66,6 +66,16 @@ ${lines}
 
 Sentence: ${chinese}
 ${retrySection}${existingSection}${cedictSection}
+# Critical rules — read before anything else
+
+1. **CEDICT compounds above are one token.** Any multi-character compound listed in the CEDICT block MUST be emitted as a single token with that exact pinyin. Do not split the compound into individual character tokens. Do not build the compound reading by concatenating character readings.
+
+2. **Reduplication always merges.** For any repeated character pattern XX where CEDICT has XX as a compound (哥哥, 看看, 试试, 慢慢, 爸爸), emit ONE token with the CEDICT compound reading — never two separate X tokens.
+    ❌ WRONG:  [{"surfaceForm":"哥","pinyinNumeric":"ge1"}, {"surfaceForm":"哥","pinyinNumeric":"ge1"}]
+    ✅ RIGHT:  [{"surfaceForm":"哥哥","pinyinNumeric":"ge1 ge5"}]
+
+3. **pinyinNumeric is citation form, no sandhi.** "bu4 shi4" not "bu2 shi4". "yi1 ge4" not "yi2 ge4". Sandhi belongs in pinyinSandhi only.
+
 # Output schema
 
 {
@@ -103,7 +113,8 @@ ${retrySection}${existingSection}${cedictSection}
     为: 为了 → wei4; 以为 → wei2
 
 ## Segmentation
-- Linguistically correct word boundaries. CEDICT compounds above are one token.
+- Linguistically correct word boundaries. Segment as a native speaker would identify distinct words.
+- CEDICT compounds above are one token (see critical rule 1). Reduplication always merges (see critical rule 2).
 - Do NOT split compounds (作业 is one token, not two). Do NOT merge separate words.
 - Skip punctuation (。，！？).
 

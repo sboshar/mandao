@@ -83,6 +83,6 @@ describe('formatCedictBlock', () => {
     const block = formatCedictBlock(hits);
     expect(block).toContain('哥哥');
     expect(block).toContain('ge1 ge5');
-    expect(block).toContain('Compound readings override');
+    expect(block).toContain('SINGLE token');
   });
 });
