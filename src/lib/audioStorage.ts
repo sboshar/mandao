@@ -1,6 +1,9 @@
 import { supabase } from './supabase';
 
-const BUCKET = 'audio-recordings';
+export const AUDIO_BUCKET = 'audio-recordings';
+
+/** Supabase Storage caps each remove() request at 1000 keys. */
+const REMOVE_BATCH_SIZE = 1000;
 
 /**
  * Delete storage objects best-effort. Called after a successful local +
@@ -16,10 +19,13 @@ export async function removeStorageObjects(
 ): Promise<void> {
   const real = paths.filter((p): p is string => !!p);
   if (real.length === 0) return;
-  try {
-    const { error } = await supabase.storage.from(BUCKET).remove(real);
-    if (error) console.warn('removeStorageObjects failed', error);
-  } catch (e) {
-    console.warn('removeStorageObjects threw', e);
+  for (let i = 0; i < real.length; i += REMOVE_BATCH_SIZE) {
+    const chunk = real.slice(i, i + REMOVE_BATCH_SIZE);
+    try {
+      const { error } = await supabase.storage.from(AUDIO_BUCKET).remove(chunk);
+      if (error) console.warn('removeStorageObjects failed', error);
+    } catch (e) {
+      console.warn('removeStorageObjects threw', e);
+    }
   }
 }
