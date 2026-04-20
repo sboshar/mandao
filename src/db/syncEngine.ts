@@ -13,6 +13,34 @@
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
+import type { FailedOpSummary } from '../stores/syncStore';
+
+/** Sync error that preserves the Postgres code so the outbox can tell
+ *  permanent (CHECK violation, missing column) apart from transient
+ *  (network, rate limit). */
+class SyncError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function syncErrorFrom(e: { message?: string; code?: string } | null | undefined, fallback = 'Unknown sync error'): SyncError {
+  return new SyncError(e?.message ?? fallback, e?.code);
+}
+
+/** Postgres error families that are permanent — retrying can't fix them
+ *  without a code / schema change:
+ *    23xxx — integrity_constraint_violation (CHECK, NOT NULL, FK, unique)
+ *    42xxx — syntax_error_or_access_rule_violation (missing column,
+ *            function signature mismatch, insufficient_privilege)
+ *    58xxx — system_error (server-side internal errors)
+ */
+function isPermanentSyncError(e: unknown): boolean {
+  if (!(e instanceof SyncError) || !e.code) return false;
+  return /^(23|42|58)/.test(e.code);
+}
 import {
   meaningFromRow,
   meaningLinkFromRow,
@@ -80,7 +108,7 @@ async function pushOutbox(): Promise<void> {
   const runs = groupConsecutiveRuns(pending);
 
   const succeeded: number[] = [];
-  const failed: number[] = [];
+  const failed: { id: number; error: unknown }[] = [];
 
   try {
     for (let i = 0; i < runs.length; i++) {
@@ -94,7 +122,7 @@ async function pushOutbox(): Promise<void> {
           failed.push(...e.failed);
         } else {
           console.error(`Sync push failed for ${ops[0].op}:`, e);
-          failed.push(...ops.map((o) => o.id!));
+          for (const op of ops) failed.push({ id: op.id!, error: e });
         }
         // Stop processing further runs to preserve causal ordering.
         // Remaining un-attempted ops stay inflight → reset in finally.
@@ -105,16 +133,32 @@ async function pushOutbox(): Promise<void> {
     if (succeeded.length > 0) {
       await localDb.outbox.bulkDelete(succeeded);
     }
-    if (failed.length > 0) {
+    for (const { id, error } of failed) {
+      const permanent = isPermanentSyncError(error);
+      const message = (error as Error)?.message ?? String(error);
+      const code = error instanceof SyncError ? error.code : undefined;
       await localDb.outbox
         .where('id')
-        .anyOf(failed)
+        .equals(id)
         .modify((op: SyncOp) => {
-          op.status = op.attempts + 1 >= MAX_ATTEMPTS ? 'failed' : 'pending';
-          op.attempts += 1;
+          op.lastError = message;
+          op.lastErrorCode = code;
+          if (permanent) {
+            // Retrying can't fix a CHECK violation / missing column.
+            // Mark failed now; user sees it in the banner + can resync
+            // manually after the schema catches up.
+            op.status = 'failed';
+            op.attempts = MAX_ATTEMPTS;
+          } else {
+            op.attempts += 1;
+            op.status = op.attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
+          }
         });
     }
-    const handled = new Set([...succeeded, ...failed]);
+    const handled = new Set([
+      ...succeeded,
+      ...failed.map((f) => f.id),
+    ]);
     const unaccounted = ids.filter((id) => !handled.has(id));
     if (unaccounted.length > 0) {
       await localDb.outbox
@@ -161,8 +205,8 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
  */
 class PartialBatchError extends Error {
   succeeded: number[];
-  failed: number[];
-  constructor(succeeded: number[], failed: number[]) {
+  failed: { id: number; error: unknown }[];
+  constructor(succeeded: number[], failed: { id: number; error: unknown }[]) {
     super('Partial batch failure');
     this.succeeded = succeeded;
     this.failed = failed;
@@ -174,13 +218,13 @@ async function pushSequential(
   fn: (op: SyncOp) => Promise<void>,
 ): Promise<void> {
   const ok: number[] = [];
-  const bad: number[] = [];
+  const bad: { id: number; error: unknown }[] = [];
   for (const op of ops) {
     try {
       await fn(op);
       ok.push(op.id!);
-    } catch {
-      bad.push(op.id!);
+    } catch (e) {
+      bad.push({ id: op.id!, error: e });
     }
   }
   if (bad.length > 0) throw new PartialBatchError(ok, bad);
@@ -189,24 +233,24 @@ async function pushSequential(
 async function pushReviewOps(ops: SyncOp[]): Promise<void> {
   const payload = ops.map((o) => o.payload);
   const { error } = await supabase.rpc('apply_review_ops', { ops: payload });
-  if (error) throw new Error(error.message);
+  if (error) throw syncErrorFrom(error);
 }
 
 
 async function pushIngestBundle(op: SyncOp): Promise<void> {
   const { error } = await supabase.rpc('apply_ingest_bundle', { bundle: op.payload });
-  if (error) throw new Error(error.message);
+  if (error) throw syncErrorFrom(error);
 }
 
 async function pushDeleteOps(ops: SyncOp[]): Promise<void> {
   const payload = ops.map((o) => o.payload);
   const { error } = await supabase.rpc('apply_delete_ops', { ops: payload });
-  if (error) throw new Error(error.message);
+  if (error) throw syncErrorFrom(error);
 }
 
 async function pushDeleteAllData(): Promise<void> {
   const { error } = await supabase.rpc('delete_all_user_data');
-  if (error) throw new Error(error.message);
+  if (error) throw syncErrorFrom(error);
 }
 
 /**
@@ -250,7 +294,7 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
         contentType: payload.mimeType,
         upsert: true,
       });
-    if (uploadErr) throw new Error(uploadErr.message);
+    if (uploadErr) throw syncErrorFrom(uploadErr);
   }
 
   const { error: rowErr } = await supabase
@@ -270,7 +314,7 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
       await localDb.audioRecordings.delete(payload.id);
       return;
     }
-    throw new Error(rowErr.message);
+    throw syncErrorFrom(rowErr);
   }
 
   if (isFirstUpload) {
@@ -284,13 +328,13 @@ async function pushUpdateTags(op: SyncOp): Promise<void> {
   // auto-sets usn + updated_at on the server side.
   // Explicit user_id filter for defense-in-depth alongside RLS.
   const userId = (await supabase.auth.getSession()).data.session?.user?.id;
-  if (!userId) throw new Error('Not authenticated');
+  if (!userId) throw new SyncError('Not authenticated');
   const { error } = await supabase
     .from('sentences')
     .update({ tags })
     .eq('id', id)
     .eq('user_id', userId);
-  if (error) throw new Error(error.message);
+  if (error) throw syncErrorFrom(error);
 }
 
 // ============================================================
@@ -508,8 +552,19 @@ export async function runSync(): Promise<void> {
     await pullChanges();
 
     const remaining = await localDb.outbox.where('status').equals('pending').count();
-    const stuck = await localDb.outbox.where('status').equals('failed').count();
+    const stuckRows = await localDb.outbox.where('status').equals('failed').toArray();
+    const stuck = stuckRows.length;
     store.setPendingCount(remaining + stuck);
+
+    const samples: FailedOpSummary[] = stuckRows
+      .slice(-5)
+      .map((op) => ({
+        opType: op.op,
+        error: op.lastError ?? 'Unknown error',
+        code: op.lastErrorCode,
+      }));
+    store.setFailed(stuck, samples);
+
     store.setLastSyncedAt(Date.now());
     if (stuck > 0) {
       store.setError(`${stuck} operation(s) failed permanently`);

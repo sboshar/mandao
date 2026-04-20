@@ -33,6 +33,14 @@ export interface SyncOp {
   createdAt: number;
   deviceId: string;
   opId: string;
+  /** Server-reported error message from the most recent attempt.
+   *  Populated when status transitions to 'failed' — either after
+   *  MAX_ATTEMPTS or immediately on a permanent Postgres error. */
+  lastError?: string;
+  /** Postgres error code from the last attempt (if any). Permanent
+   *  families 23xxx/42xxx/58xxx mark the op 'failed' on the first hit
+   *  instead of burning retries. */
+  lastErrorCode?: string;
 }
 
 class MandaoDb extends Dexie {

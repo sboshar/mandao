@@ -15,6 +15,7 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { IntroModal } from './components/IntroModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { SyncIndicator } from './components/SyncIndicator';
+import { SyncErrorBanner } from './components/SyncErrorBanner';
 import { useTutorialStore } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
 import './stores/themeStore';
@@ -144,6 +145,7 @@ function App() {
           <ThemeToggle />
         </div>
         <div className="h-10" />
+        <SyncErrorBanner />
         {step === 0 && <IntroModal onDone={advance} />}
         <Routes>
           <Route
