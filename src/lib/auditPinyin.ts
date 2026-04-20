@@ -1,6 +1,8 @@
 import * as repo from '../db/repo';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { loadCedict, lookup } from './cedict';
+import { localDb } from '../db/localDb';
+import { supabase } from './supabase';
 import type { Meaning } from '../db/schema';
 
 export interface AuditRow {
@@ -76,6 +78,88 @@ export async function auditPinyin(): Promise<AuditReport> {
     diacriticMismatches,
     cedictMismatches,
   };
+}
+
+export interface RepairSummary {
+  scanned: number;
+  repaired: Array<{ headword: string; before: string; after: string }>;
+  skipped: Array<{ headword: string; stored: string; reason: string }>;
+}
+
+/**
+ * Overwrite pinyinNumeric on every CEDICT-mismatched Meaning with the
+ * first CEDICT entry for that headword. Updates Dexie + Supabase
+ * directly (no outbox op — this is a test-data cleanup helper, not a
+ * normal edit path). Rows whose headword isn't in CEDICT are skipped.
+ *
+ * Call from DevTools:
+ *   await window.__repairPinyin()
+ */
+export async function repairFlaggedPinyin(): Promise<RepairSummary> {
+  const report = await auditPinyin();
+  const repaired: RepairSummary['repaired'] = [];
+  const skipped: RepairSummary['skipped'] = [];
+
+  for (const row of report.cedictMismatches) {
+    if (row.cedictEntries.length === 0) {
+      skipped.push({
+        headword: row.headword,
+        stored: row.pinyinNumeric,
+        reason: 'headword not in CEDICT',
+      });
+      continue;
+    }
+    const canonical = row.cedictEntries[0].toLowerCase();
+    if (canonical === row.pinyinNumeric.toLowerCase()) continue;
+
+    await localDb.meanings.update(row.id, {
+      pinyinNumeric: canonical,
+      updatedAt: Date.now(),
+    });
+    const { error } = await supabase
+      .from('meanings')
+      .update({ pinyin_numeric: canonical, updated_at: Date.now() })
+      .eq('id', row.id);
+    if (error) {
+      skipped.push({
+        headword: row.headword,
+        stored: row.pinyinNumeric,
+        reason: `supabase update failed: ${error.message}`,
+      });
+      continue;
+    }
+
+    repaired.push({
+      headword: row.headword,
+      before: row.pinyinNumeric,
+      after: canonical,
+    });
+  }
+
+  return { scanned: report.cedictMismatches.length, repaired, skipped };
+}
+
+/**
+ * Console wrapper for repairFlaggedPinyin. Call from DevTools:
+ *   await window.__repairPinyin()
+ */
+export async function runRepairInConsole(): Promise<RepairSummary> {
+  const summary = await repairFlaggedPinyin();
+  console.log(
+    `Scanned ${summary.scanned} flagged rows — ` +
+      `${summary.repaired.length} repaired, ${summary.skipped.length} skipped`,
+  );
+  if (summary.repaired.length > 0) {
+    console.group('Repaired');
+    console.table(summary.repaired);
+    console.groupEnd();
+  }
+  if (summary.skipped.length > 0) {
+    console.group('Skipped');
+    console.table(summary.skipped);
+    console.groupEnd();
+  }
+  return summary;
 }
 
 /**
