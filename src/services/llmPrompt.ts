@@ -6,6 +6,7 @@
  */
 import * as repo from '../db/repo';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
+import { gatherCedictHits, formatCedictBlock } from '../lib/cedictSweep';
 
 export interface ExistingMeaning {
   headword: string;
@@ -38,13 +39,18 @@ export async function getExistingMeanings(
 /**
  * Generate LLM prompt that tokenizes and analyzes a Chinese sentence.
  * The LLM handles both segmentation into words and filling in definitions.
+ *
+ * Async because we sweep CC-CEDICT for every relevant substring and
+ * include those readings as authoritative references in the prompt.
+ * The write-time pipeline overrides LLM pinyin with CEDICT anyway, but
+ * grounding the prompt up-front produces fewer overrides + fewer flags.
  */
-export function generateAnalysisPrompt(
+export async function generateAnalysisPrompt(
   chinese: string,
   existingMeanings?: ExistingMeaning[],
   /** Characters the previous response omitted — tells the model to include them this time. */
   missingChars?: string[],
-): string {
+): Promise<string> {
   const retrySection = missingChars && missingChars.length > 0
     ? `\nIMPORTANT: A previous analysis of this sentence omitted these characters: ${missingChars.join(' ')}. Include them as tokens this time. Every Hanzi character in the sentence must appear in exactly one token's surfaceForm.\n`
     : '';
@@ -61,11 +67,14 @@ If a character has multiple reference meanings listed, pick the one that fits th
 `;
   }
 
+  const cedictHits = await gatherCedictHits(chinese);
+  const cedictSection = formatCedictBlock(cedictHits);
+
   return `Tokenize and analyze this Chinese sentence. Return ONLY a JSON object (no markdown, no explanation, no code fences).
 
 Sentence: ${chinese}
-${retrySection}${existingSection}
-First, segment the sentence into words (tokens). Use linguistically correct word boundaries — for example, 作业 is one word meaning "homework", not two separate characters. Segment the way a native speaker would identify distinct words.
+${retrySection}${existingSection}${cedictSection}
+First, segment the sentence into words (tokens). Use linguistically correct word boundaries — for example, 作业 is one word meaning "homework", not two separate characters. Segment the way a native speaker would identify distinct words. When CC-CEDICT above lists a multi-character compound that appears in the sentence, segment it as one token rather than separate character tokens.
 
 Then return this exact JSON structure:
 {
@@ -95,7 +104,15 @@ Then return this exact JSON structure:
 Rules:
 - Segment into linguistically correct words. Do NOT split compound words into individual characters (e.g. 作业 = one token, 正在 = one token). Do NOT merge separate words.
 - Exclude punctuation tokens (。，！？ etc.) — only include content words.
-- For pinyinNumeric: use tone numbers 1-5 (5 = neutral), separate syllables within a word by spaces (e.g. "cha4 bu4 duo1"). When a character has multiple accepted pronunciations, prefer the most common colloquial spoken form
+- For pinyinNumeric: lowercase ASCII letters + tone digits 1-5 (5 = neutral), space-separated (e.g. "xiu1 xi5"). NEVER emit diacritics (no "kè3", no "wǒ"), NEVER mix capitals/spaces/punctuation (no "Ke3", no "sui 1"). Do NOT apply tone sandhi in this field — use the citation form, e.g. "bu4 shi4" not "bu2 shi4", "yi1 ge4" not "yi2 ge4". Tone sandhi belongs in pinyinSandhi only.
+- When CC-CEDICT lists a reading for this word, use it EXACTLY for pinyinNumeric. If CEDICT has a compound entry for a multi-character token, use the compound's reading — do NOT combine character readings. Examples:
+    ✅ 哥哥 → "ge1 ge5"  (CEDICT compound [ge1 ge5])
+    ❌ 哥哥 → "ge1 ge1"  (mechanical combination of character readings)
+    ✅ 休息 → "xiu1 xi5"  (CEDICT compound [xiu1 xi5] — second syllable neutral)
+    ❌ 休息 → "xiu1 xi1" or "xiu1 xi2"  (not in CEDICT)
+    ✅ 早上 → "zao3 shang5"  (compound has neutral tone)
+    ❌ 早上 → "zao3 shang4"  (character-level reading, wrong in context)
+- For polyphones (CEDICT lists multiple readings), pick the reading that fits this sentence's context. For example 行 in 银行 → "hang2"; 行 in 行走 → "xing2".
 - For pinyinSandhi: apply all tone sandhi rules (3rd tone sandhi, 不 sandhi, 一 sandhi) and write with diacritics. Each token's pinyinSandhi must contain ONLY the syllables for that token's characters — never include syllables from neighboring tokens. For example, 作业 should be "zuòyè" (2 syllables for 2 characters), NOT "zuò zuòyè".
 - For english: give the CONTEXTUAL meaning only, not all possible meanings
 - For particles like 了 or 的, give their grammatical function as the english (e.g. "completion particle", "possessive particle")

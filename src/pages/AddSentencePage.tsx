@@ -6,6 +6,8 @@ import {
   parseLLMResponse,
   getExistingMeanings,
 } from '../services/llmPrompt';
+import { processLLMTokens } from '../services/processLLMTokens';
+import type { ResolvePinyinFlag } from '../lib/resolvePinyin';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
@@ -65,6 +67,7 @@ export function AddSentencePage() {
   /** Chars the analyzer dropped — nonzero until user re-analyzes or adds them manually. */
   const [missingChars, setMissingChars] = useState<string[]>([]);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [ingestFlags, setIngestFlags] = useState<ResolvePinyinFlag[]>([]);
   const aiEnabled = isAIConfigured();
   const [listening, setListening] = useState(false);
   const speechSupported = isSpeechRecognitionSupported();
@@ -194,7 +197,7 @@ export function AddSentencePage() {
   const handleCopyPrompt = async () => {
     setError('');
     const existingMeanings = await getExistingMeanings(chinese.trim());
-    const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings);
+    const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
     await navigator.clipboard.writeText(prompt);
     setPromptCopied(true);
     setTimeout(() => setPromptCopied(false), 2000);
@@ -206,12 +209,29 @@ export function AddSentencePage() {
     setAnalyzing(true);
     try {
       const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings);
-      const raw = await generateCompletion(prompt);
-      const parsed = parseLLMResponse(raw);
+
+      // One LLM call with a bounded retry if the first response contains
+      // any diacritic-in-numeric or format-violation tokens. Second failure
+      // still persists (with flags) rather than blocking the user.
+      let parsed = parseLLMResponse(
+        await generateCompletion(
+          await generateAnalysisPrompt(chinese.trim(), existingMeanings),
+        ),
+      );
+      let processed = processLLMTokens(parsed);
+      if (processed.hasFormatViolation) {
+        const retryPrompt =
+          (await generateAnalysisPrompt(chinese.trim(), existingMeanings)) +
+          '\n\nREMINDER: pinyinNumeric MUST be lowercase ASCII + tone digits only. No diacritics. Example: "ke3" not "kè3"; "wo3" not "wǒ"; "xiu1 xi5" not "xiu1xī". Do NOT apply sandhi in pinyinNumeric.';
+        parsed = parseLLMResponse(await generateCompletion(retryPrompt));
+        processed = processLLMTokens(parsed);
+      }
+
       if (parsed.english) setEnglish(parsed.english);
 
-      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
+      setIngestFlags(processed.flags);
+
+      const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
         surfaceForm: t.surfaceForm,
         pinyinNumeric: t.pinyinNumeric,
         pinyinSandhi: t.pinyinSandhi || '',
@@ -240,9 +260,12 @@ export function AddSentencePage() {
   const handleParseLLMResponse = () => {
     try {
       const parsed = parseLLMResponse(llmPasteValue);
-      if (parsed.english) setEnglish(parsed.english);
+      const processed = processLLMTokens(parsed);
 
-      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
+      if (parsed.english) setEnglish(parsed.english);
+      setIngestFlags(processed.flags);
+
+      const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
         surfaceForm: t.surfaceForm,
         pinyinNumeric: t.pinyinNumeric,
         pinyinSandhi: t.pinyinSandhi || '',
@@ -317,12 +340,15 @@ export function AddSentencePage() {
     setReanalyzing(true);
     try {
       const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
+      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
       const raw = await generateCompletion(prompt);
       const parsed = parseLLMResponse(raw);
-      if (parsed.english) setEnglish(parsed.english);
+      const processed = processLLMTokens(parsed);
 
-      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
+      if (parsed.english) setEnglish(parsed.english);
+      setIngestFlags(processed.flags);
+
+      const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
         surfaceForm: t.surfaceForm,
         pinyinNumeric: t.pinyinNumeric,
         pinyinSandhi: t.pinyinSandhi || '',
@@ -417,6 +443,13 @@ export function AddSentencePage() {
           english: english.trim(),
           tokens: tokenInputs,
           tags,
+          flags: ingestFlags.map((f) => ({
+            headword: f.headword,
+            storedPinyin: f.chosenValue,
+            llmValue: f.llmValue,
+            flagKind: f.kind,
+            cedictSuggestions: f.cedictSuggestions,
+          })),
         });
       } catch (e: any) {
         // In tutorial mode, skip duplicate errors so re-running works
@@ -789,6 +822,22 @@ export function AddSentencePage() {
           <div className="p-3 rounded-lg inset">
             <div className="text-lg">{chinese}</div>
           </div>
+
+          {ingestFlags.length > 0 && (
+            <div className="p-3 rounded-lg text-xs space-y-1"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+              <div style={{ color: 'var(--text-primary)' }}>
+                Pinyin adjusted for {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'}:
+              </div>
+              {ingestFlags.slice(0, 5).map((f, i) => (
+                <div key={i} className="font-mono">
+                  {f.headword}: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{f.llmValue}</span> → {f.chosenValue}
+                  {' '}<span style={{ opacity: 0.6 }}>({f.kind})</span>
+                </div>
+              ))}
+              {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
+            </div>
+          )}
 
           {missingChars.length > 0 && (
             <div className="p-3 rounded-lg space-y-2"

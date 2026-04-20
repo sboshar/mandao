@@ -13,6 +13,7 @@ import type {
   Deck,
   ReviewLog,
   AudioRecording,
+  MeaningFlag,
 } from './schema';
 
 // ============================================================
@@ -430,4 +431,23 @@ export async function updateAudioRecording(
 
 export async function deleteAudioRecording(id: string): Promise<void> {
   await localDb.audioRecordings.delete(id);
+}
+
+// ============================================================
+// Meaning flags
+// ============================================================
+
+export async function insertMeaningFlags(flags: MeaningFlag[]): Promise<void> {
+  if (flags.length === 0) return;
+  await localDb.meaningFlags.bulkPut(flags);
+}
+
+export async function getMeaningFlags(meaningId: string): Promise<MeaningFlag[]> {
+  return localDb.meaningFlags.where('meaningId').equals(meaningId).toArray();
+}
+
+export async function getUnresolvedMeaningFlags(): Promise<MeaningFlag[]> {
+  return localDb.meaningFlags
+    .filter((f) => f.resolvedAt === null || f.resolvedAt === undefined)
+    .toArray();
 }

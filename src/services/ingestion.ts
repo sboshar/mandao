@@ -18,6 +18,7 @@ import type {
   SentenceToken,
   SrsCard,
   ReviewMode,
+  MeaningFlag,
 } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 
@@ -58,12 +59,22 @@ export interface TokenInput {
   characters?: CharacterInput[];
 }
 
+export interface IngestFlag {
+  headword: string;
+  storedPinyin: string;
+  llmValue: string;
+  flagKind: 'auto-corrected' | 'polyphone-coerced' | 'cedict-disagreement' | 'cedict-unknown' | 'format-violation' | 'user-report';
+  cedictSuggestions: string[];
+}
+
 export interface SentenceInput {
   chinese: string;
   english: string;
   tokens: TokenInput[];
   source?: string;
   tags?: string[];
+  /** Audit trail of resolvePinyin overrides at ingest time. Optional. */
+  flags?: IngestFlag[];
 }
 
 // ============================================================
@@ -160,10 +171,33 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
 
     await repo.insertSrsCards(cards);
 
+    // Attach flags to meanings by looking up each flag's headword against
+    // the meanings touched during this ingest. Unlinked (CEDICT-unknown
+    // for words that didn't produce a token) fall through with null.
+    const flagRecords: MeaningFlag[] = (input.flags ?? []).map((f) => {
+      const meaning =
+        Array.from(acc.allMeanings.values()).find((m) => m.headword === f.headword) ?? null;
+      return {
+        id: uuid(),
+        meaningId: meaning?.id ?? null,
+        headword: f.headword,
+        storedPinyin: f.storedPinyin,
+        llmValue: f.llmValue,
+        flagKind: f.flagKind === 'format-violation' ? 'cedict-disagreement' : f.flagKind,
+        cedictSuggestions: f.cedictSuggestions,
+        createdAt: Date.now(),
+        resolvedAt: null,
+        resolution: null,
+      };
+    });
+    if (flagRecords.length > 0) {
+      await local.insertMeaningFlags(flagRecords);
+    }
+
     // Enqueue a single ingestBundle sync op for atomic server-side write
     await enqueueSync({
       op: 'ingestBundle',
-      payload: buildIngestPayload(acc, sentence, tokenRecords, cards),
+      payload: buildIngestPayload(acc, sentence, tokenRecords, cards, flagRecords),
     });
 
     return sentenceId;
@@ -192,6 +226,7 @@ function buildIngestPayload(
   sentence: Sentence,
   tokens: SentenceToken[],
   cards: SrsCard[],
+  flags: MeaningFlag[] = [],
 ) {
   return {
     meanings: Array.from(acc.allMeanings.values()).map((m) => ({
@@ -224,6 +259,16 @@ function buildIngestPayload(
       elapsed_days: c.elapsedDays, scheduled_days: c.scheduledDays,
       reps: c.reps, lapses: c.lapses, state: c.state,
       last_review: c.lastReview, created_at: c.createdAt,
+    })),
+    meaning_flags: flags.map((f) => ({
+      id: f.id,
+      meaning_id: f.meaningId,
+      headword: f.headword,
+      stored_pinyin: f.storedPinyin,
+      llm_value: f.llmValue,
+      flag_kind: f.flagKind,
+      cedict_suggestions: f.cedictSuggestions,
+      created_at: f.createdAt,
     })),
   };
 }
