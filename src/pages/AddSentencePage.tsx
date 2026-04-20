@@ -858,6 +858,17 @@ export function AddSentencePage() {
               </div>
 
               {ingestFlags.slice(0, 5).map((f, i) => {
+                const renderPinyin = (numeric: string) => {
+                  if (!numeric) return '(empty)';
+                  const diacritic = numericStringToDiacritic(numeric);
+                  return (
+                    <>
+                      {diacritic}{' '}
+                      <span style={{ opacity: 0.6 }} className="font-mono">({numeric})</span>
+                    </>
+                  );
+                };
+
                 if (f.kind === 'segmentation-disagreement') {
                   const pieces = f.tokenIndices.map((idx) => tokens[idx]?.surfaceForm ?? '?').join(' + ');
                   const firstSuggestion = f.cedictSuggestions[0];
@@ -871,13 +882,9 @@ export function AddSentencePage() {
                           {pinyinMatches ? 'Split compound.' : 'Split compound + pinyin mismatch.'}
                         </strong>{' '}
                         The AI tokenized this as <span className="font-mono">{pieces}</span>
-                        {f.llmValue && (
-                          <>
-                            {' '}(<span className="font-mono">{f.llmValue}</span>)
-                          </>
-                        )}
-                        , but CEDICT has <span className="font-mono">{f.headword}</span>{' '}
-                        (<span className="font-mono">{firstSuggestion}</span>) as one word
+                        {f.llmValue && <> ({renderPinyin(f.llmValue)})</>}, but CEDICT has{' '}
+                        <span className="font-mono">{f.headword}</span> ({renderPinyin(firstSuggestion)})
+                        as one word
                         {f.cedictEnglish ? ` meaning "${f.cedictEnglish}"` : ''}.
                         {!pinyinMatches && (
                           <> Merging also fixes the pinyin (e.g. neutral tone on the second syllable).</>
@@ -887,14 +894,14 @@ export function AddSentencePage() {
                         <button
                           type="button"
                           onClick={() => mergeTokensIntoCompound(f)}
-                          className="px-2 py-0.5 rounded transition-colors font-mono"
+                          className="px-2 py-0.5 rounded transition-colors"
                           style={{
                             background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
                             color: 'var(--accent)',
                             border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
                           }}
                         >
-                          Merge into {f.headword} [{firstSuggestion}]
+                          Merge into {f.headword} ({renderPinyin(firstSuggestion)})
                         </button>
                         <span style={{ color: 'var(--text-tertiary)' }}>
                           — or leave split if the AI was right
@@ -910,7 +917,7 @@ export function AddSentencePage() {
                       <div style={{ color: 'var(--text-primary)' }}>
                         <strong className="font-mono">{f.headword}</strong> isn't in CEDICT — often a
                         name, neologism, or regional usage. The AI's pinyin{' '}
-                        <span className="font-mono">{f.llmValue || '(empty)'}</span> is unchecked.
+                        {renderPinyin(f.llmValue)} is unchecked.
                       </div>
                       <div style={{ color: 'var(--text-tertiary)' }}>
                         Verify manually in the tokens below before saving.
@@ -924,7 +931,7 @@ export function AddSentencePage() {
                   <div key={i} className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
                     <div style={{ color: 'var(--text-primary)' }}>
                       <strong className="font-mono">{f.headword}:</strong> the AI chose{' '}
-                      <span className="font-mono">{f.llmValue || '(empty)'}</span>, but CEDICT lists
+                      {renderPinyin(f.llmValue)}, but CEDICT lists
                       {f.cedictSuggestions.length === 1 ? ' this reading:' : ' these readings:'}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -933,14 +940,14 @@ export function AddSentencePage() {
                           key={sugg}
                           type="button"
                           onClick={() => applyCedictSuggestion(f.headword, sugg)}
-                          className="px-2 py-0.5 rounded transition-colors font-mono"
+                          className="px-2 py-0.5 rounded transition-colors"
                           style={{
                             background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
                             color: 'var(--accent)',
                             border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
                           }}
                         >
-                          Use {sugg}
+                          Use {renderPinyin(sugg)}
                         </button>
                       ))}
                       <span style={{ color: 'var(--text-tertiary)' }}>
