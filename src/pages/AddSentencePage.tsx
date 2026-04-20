@@ -7,8 +7,9 @@ import {
   getExistingMeanings,
 } from '../services/llmPrompt';
 import { processLLMTokens } from '../services/processLLMTokens';
-import { checkPinyin } from '../lib/checkPinyin';
+import { collapsePinyin } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
+import { buildFlagsForSave } from '../services/ingestFlags';
 import type { IngestFlag } from '../services/processLLMTokens';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
@@ -44,6 +45,109 @@ interface TokenFormData {
   partOfSpeech: string;
   isTransliteration?: boolean;
   characters?: CharacterInput[];
+}
+
+function renderPinyin(numeric: string) {
+  if (!numeric) return '(empty)';
+  const diacritic = numericStringToDiacritic(numeric);
+  return (
+    <>
+      {diacritic}{' '}
+      <span style={{ opacity: 0.6 }} className="font-mono">({numeric})</span>
+    </>
+  );
+}
+
+const FLAG_BUTTON_STYLE: React.CSSProperties = {
+  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+  color: 'var(--accent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+};
+
+function FlagButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="px-2 py-0.5 rounded transition-colors"
+      style={FLAG_BUTTON_STYLE}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FlagRow({
+  flag,
+  tokens,
+  onApply,
+  onMerge,
+}: {
+  flag: IngestFlag;
+  tokens: TokenFormData[];
+  onApply: (headword: string, suggestion: string) => void;
+  onMerge: (flag: SegmentationFlag) => void;
+}) {
+  const wrapperClass = 'space-y-1 pt-2';
+  const wrapperStyle: React.CSSProperties = { borderTop: '1px solid var(--border)' };
+  const descStyle: React.CSSProperties = { color: 'var(--text-primary)' };
+  const hintStyle: React.CSSProperties = { color: 'var(--text-tertiary)' };
+
+  if (flag.kind === 'segmentation-disagreement') {
+    const pieces = flag.tokenIndices.map((idx) => tokens[idx]?.surfaceForm ?? '?').join(' + ');
+    const firstSuggestion = flag.cedictSuggestions[0];
+    const pinyinMatches = flag.cedictSuggestions.some(
+      (s) => collapsePinyin(s) === collapsePinyin(flag.llmValue),
+    );
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        <div style={descStyle}>
+          <strong>{pinyinMatches ? 'Split compound.' : 'Split compound + pinyin mismatch.'}</strong>{' '}
+          The AI tokenized this as <span className="font-mono">{pieces}</span>
+          {flag.llmValue && <> ({renderPinyin(flag.llmValue)})</>}, but CEDICT has{' '}
+          <span className="font-mono">{flag.headword}</span> ({renderPinyin(firstSuggestion)})
+          as one word
+          {flag.cedictEnglish ? ` meaning "${flag.cedictEnglish}"` : ''}.
+          {!pinyinMatches && <> Merging also fixes the pinyin.</>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <FlagButton onClick={() => onMerge(flag)}>
+            Merge into {flag.headword} ({renderPinyin(firstSuggestion)})
+          </FlagButton>
+          <span style={hintStyle}>— or leave split if the AI was right</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (flag.kind === 'cedict-unknown') {
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        <div style={descStyle}>
+          <strong className="font-mono">{flag.headword}</strong> isn't in CEDICT — often a
+          name, neologism, or regional usage. The AI's pinyin{' '}
+          {renderPinyin(flag.llmValue)} is unchecked.
+        </div>
+        <div style={hintStyle}>Verify manually in the tokens below before saving.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={wrapperClass} style={wrapperStyle}>
+      <div style={descStyle}>
+        <strong className="font-mono">{flag.headword}:</strong> the AI chose{' '}
+        {renderPinyin(flag.llmValue)}, but CEDICT lists
+        {flag.cedictSuggestions.length === 1 ? ' this reading:' : ' these readings:'}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {flag.cedictSuggestions.map((sugg) => (
+          <FlagButton key={sugg} onClick={() => onApply(flag.headword, sugg)}>
+            Use {renderPinyin(sugg)}
+          </FlagButton>
+        ))}
+        <span style={hintStyle}>— or keep the AI's value if it's correct</span>
+      </div>
+    </div>
+  );
 }
 
 export function AddSentencePage() {
@@ -311,30 +415,26 @@ export function AddSentencePage() {
 
   /** Collapse the tokens referenced by a segmentation flag into one
    *  compound token with CEDICT's reading + gloss. Other segmentation
-   *  flags stay valid — their tokenIndices are computed against the
-   *  old array so we recompute them from the new token shape. */
+   *  flags stay valid because we re-scan the new token list for them. */
   const mergeTokensIntoCompound = (flag: SegmentationFlag) => {
     if (flag.tokenIndices.length < 2) return;
     const sorted = [...flag.tokenIndices].sort((a, b) => a - b);
     const first = sorted[0];
     const last = sorted[sorted.length - 1];
-    setTokens((prev) => {
-      const merged: TokenFormData = {
-        surfaceForm: flag.headword,
-        pinyinNumeric: flag.cedictSuggestions[0] ?? '',
-        pinyinSandhi: '',
-        english: flag.cedictEnglish,
-        partOfSpeech: prev[first]?.partOfSpeech ?? '',
-        isTransliteration: false,
-      };
-      const next = [...prev.slice(0, first), merged, ...prev.slice(last + 1)];
-      const freshSeg = scanSegmentation(next);
-      setIngestFlags((prevFlags) => [
-        ...prevFlags.filter((f) => f.kind !== 'segmentation-disagreement'),
-        ...freshSeg,
-      ]);
-      return next;
-    });
+    const merged: TokenFormData = {
+      surfaceForm: flag.headword,
+      pinyinNumeric: flag.cedictSuggestions[0] ?? '',
+      pinyinSandhi: '',
+      english: flag.cedictEnglish,
+      partOfSpeech: tokens[first]?.partOfSpeech ?? '',
+      isTransliteration: false,
+    };
+    const next = [...tokens.slice(0, first), merged, ...tokens.slice(last + 1)];
+    setTokens(next);
+    setIngestFlags([
+      ...ingestFlags.filter((f) => f.kind !== 'segmentation-disagreement'),
+      ...scanSegmentation(next),
+    ]);
   };
 
   const updateCharacter = (tokenIndex: number, charIndex: number, field: string, value: string) => {
@@ -434,30 +534,7 @@ export function AddSentencePage() {
       // removal) are reflected in the persisted flags.
       const llmValueByHeadword = new Map<string, string>();
       for (const f of ingestFlags) llmValueByHeadword.set(f.headword, f.llmValue);
-
-      const pinyinFlags = tokenInputs
-        .map((t) => {
-          const check = checkPinyin(t.surfaceForm, t.pinyinNumeric);
-          if (!check.flag) return null;
-          return {
-            headword: t.surfaceForm,
-            storedPinyin: t.pinyinNumeric,
-            llmValue: llmValueByHeadword.get(t.surfaceForm) ?? t.pinyinNumeric,
-            flagKind: check.flag.kind,
-            cedictSuggestions: check.cedictSuggestions,
-          };
-        })
-        .filter((f): f is NonNullable<typeof f> => f !== null);
-
-      const segmentationFlags = scanSegmentation(tokenInputs).map((f) => ({
-        headword: f.headword,
-        storedPinyin: f.llmValue,
-        llmValue: llmValueByHeadword.get(f.headword) ?? f.llmValue,
-        flagKind: f.kind,
-        cedictSuggestions: f.cedictSuggestions,
-      }));
-
-      const flagsForSave = [...pinyinFlags, ...segmentationFlags];
+      const flagsForSave = buildFlagsForSave(tokenInputs, llmValueByHeadword);
 
       let createdSentenceId: string | null = null;
       try {
@@ -857,104 +934,12 @@ export function AddSentencePage() {
                 </div>
               </div>
 
-              {ingestFlags.slice(0, 5).map((f, i) => {
-                const renderPinyin = (numeric: string) => {
-                  if (!numeric) return '(empty)';
-                  const diacritic = numericStringToDiacritic(numeric);
-                  return (
-                    <>
-                      {diacritic}{' '}
-                      <span style={{ opacity: 0.6 }} className="font-mono">({numeric})</span>
-                    </>
-                  );
-                };
-
-                if (f.kind === 'segmentation-disagreement') {
-                  const pieces = f.tokenIndices.map((idx) => tokens[idx]?.surfaceForm ?? '?').join(' + ');
-                  const firstSuggestion = f.cedictSuggestions[0];
-                  const pinyinMatches = f.cedictSuggestions.some(
-                    (s) => s.replace(/\s+/g, '') === f.llmValue.replace(/\s+/g, ''),
-                  );
-                  return (
-                    <div key={i} className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                      <div style={{ color: 'var(--text-primary)' }}>
-                        <strong>
-                          {pinyinMatches ? 'Split compound.' : 'Split compound + pinyin mismatch.'}
-                        </strong>{' '}
-                        The AI tokenized this as <span className="font-mono">{pieces}</span>
-                        {f.llmValue && <> ({renderPinyin(f.llmValue)})</>}, but CEDICT has{' '}
-                        <span className="font-mono">{f.headword}</span> ({renderPinyin(firstSuggestion)})
-                        as one word
-                        {f.cedictEnglish ? ` meaning "${f.cedictEnglish}"` : ''}.
-                        {!pinyinMatches && <> Merging also fixes the pinyin.</>}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => mergeTokensIntoCompound(f)}
-                          className="px-2 py-0.5 rounded transition-colors"
-                          style={{
-                            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
-                            color: 'var(--accent)',
-                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-                          }}
-                        >
-                          Merge into {f.headword} ({renderPinyin(firstSuggestion)})
-                        </button>
-                        <span style={{ color: 'var(--text-tertiary)' }}>
-                          — or leave split if the AI was right
-                        </span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (f.kind === 'cedict-unknown') {
-                  return (
-                    <div key={i} className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                      <div style={{ color: 'var(--text-primary)' }}>
-                        <strong className="font-mono">{f.headword}</strong> isn't in CEDICT — often a
-                        name, neologism, or regional usage. The AI's pinyin{' '}
-                        {renderPinyin(f.llmValue)} is unchecked.
-                      </div>
-                      <div style={{ color: 'var(--text-tertiary)' }}>
-                        Verify manually in the tokens below before saving.
-                      </div>
-                    </div>
-                  );
-                }
-
-                // cedict-disagreement
-                return (
-                  <div key={i} className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                    <div style={{ color: 'var(--text-primary)' }}>
-                      <strong className="font-mono">{f.headword}:</strong> the AI chose{' '}
-                      {renderPinyin(f.llmValue)}, but CEDICT lists
-                      {f.cedictSuggestions.length === 1 ? ' this reading:' : ' these readings:'}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {f.cedictSuggestions.map((sugg) => (
-                        <button
-                          key={sugg}
-                          type="button"
-                          onClick={() => applyCedictSuggestion(f.headword, sugg)}
-                          className="px-2 py-0.5 rounded transition-colors"
-                          style={{
-                            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
-                            color: 'var(--accent)',
-                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-                          }}
-                        >
-                          Use {renderPinyin(sugg)}
-                        </button>
-                      ))}
-                      <span style={{ color: 'var(--text-tertiary)' }}>
-                        — or keep the AI's value if it's correct
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+              {ingestFlags.slice(0, 5).map((f, i) => (
+                <FlagRow key={i} flag={f} tokens={tokens}
+                  onApply={applyCedictSuggestion}
+                  onMerge={mergeTokensIntoCompound}
+                />
+              ))}
               {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
             </div>
           )}
