@@ -165,11 +165,8 @@ function AccountSection() {
   const pendingCount = useSyncStore((s) => s.pendingCount);
   const syncStatus = useSyncStore((s) => s.status);
   const [confirming, setConfirming] = useState(false);
-  const [syncingNow, setSyncingNow] = useState(false);
+  const isSyncing = syncStatus === 'syncing';
 
-  // If nothing is pending, sign out immediately — no need to confirm.
-  // Otherwise, surface the unsynced-data warning so the user can sync
-  // first or knowingly discard the local changes.
   const handleSignOutClick = async () => {
     if (pendingCount === 0) {
       await signOut();
@@ -178,12 +175,12 @@ function AccountSection() {
     setConfirming(true);
   };
 
+  // If sync clears everything, sign out automatically — the user
+  // picked this button to get rid of pending changes before signing out.
   const handleTrySync = async () => {
-    setSyncingNow(true);
-    try {
-      await runSync();
-    } finally {
-      setSyncingNow(false);
+    await runSync();
+    if (useSyncStore.getState().pendingCount === 0) {
+      await signOut();
     }
   };
 
@@ -248,11 +245,11 @@ function AccountSection() {
           <div className="flex flex-col sm:flex-row gap-2">
             <button
               onClick={handleTrySync}
-              disabled={syncingNow}
+              disabled={isSyncing}
               className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
               style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
             >
-              {syncingNow ? 'Syncing…' : 'Try syncing now'}
+              {isSyncing ? 'Syncing…' : 'Try syncing now'}
             </button>
             <button
               onClick={signOut}
