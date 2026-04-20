@@ -4,6 +4,7 @@ import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import * as repo from '../db/repo';
 import { useNavigationStore } from '../stores/navigationStore';
 import { MeaningCard } from '../components/MeaningCard';
+import { getMeaningPinyin } from '../lib/meaningPinyin';
 
 // ============================================================
 // Graph data types
@@ -117,7 +118,7 @@ async function buildGraphData(): Promise<GraphData> {
     nodes.push({
       id: m.id,
       label: m.headword,
-      pinyin: m.pinyin,
+      pinyin: getMeaningPinyin(m),
       english: m.englishShort,
       type: m.type,
       weight: Math.max(1, count),

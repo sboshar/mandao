@@ -9,6 +9,7 @@
 import * as repo from '../db/repo';
 import { lookup } from './cedict';
 import { numericStringToDiacritic } from '../services/toneSandhi';
+import { getMeaningPinyin } from './meaningPinyin';
 
 export async function lookupPinyinForChars(chars: string[]): Promise<string[]> {
   const parts: string[] = [];
@@ -16,7 +17,7 @@ export async function lookupPinyinForChars(chars: string[]): Promise<string[]> {
     const meanings = await repo.getMeaningsByHeadword(char);
     const meaning = meanings[0] ?? null;
     if (meaning) {
-      parts.push(meaning.pinyin);
+      parts.push(getMeaningPinyin(meaning));
       continue;
     }
     const entries = lookup(char);

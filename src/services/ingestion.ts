@@ -195,7 +195,7 @@ function buildIngestPayload(
 ) {
   return {
     meanings: Array.from(acc.allMeanings.values()).map((m) => ({
-      id: m.id, headword: m.headword, pinyin: m.pinyin,
+      id: m.id, headword: m.headword,
       pinyin_numeric: m.pinyinNumeric, part_of_speech: m.partOfSpeech,
       english_short: m.englishShort, english_full: m.englishFull,
       type: m.type, level: m.level,
@@ -255,7 +255,6 @@ async function findOrCreateMeaning(token: TokenInput, acc: IngestAccumulator): P
   const meaning: Meaning = {
     id: uuid(),
     headword: token.surfaceForm,
-    pinyin: numericStringToDiacritic(token.pinyinNumeric),
     pinyinNumeric: token.pinyinNumeric,
     partOfSpeech: token.partOfSpeech,
     englishShort: token.english,
@@ -299,7 +298,6 @@ async function findOrCreateCharacterMeaning(
   const meaning: Meaning = {
     id: uuid(),
     headword: char,
-    pinyin: numericStringToDiacritic(pinyinNumeric),
     pinyinNumeric: pinyinNumeric,
     partOfSpeech: '',
     englishShort: english,

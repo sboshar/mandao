@@ -16,7 +16,7 @@ import { normalizeChinese } from './localRepo';
 
 export function meaningFromRow(r: any): Meaning {
   return {
-    id: r.id, headword: r.headword, pinyin: r.pinyin,
+    id: r.id, headword: r.headword,
     pinyinNumeric: r.pinyin_numeric, partOfSpeech: r.part_of_speech,
     englishShort: r.english_short, englishFull: r.english_full,
     type: r.type, level: r.level,

@@ -81,7 +81,7 @@ import {
 function meaningToRow(m: Meaning, userId: string) {
   return {
     id: m.id, user_id: userId, headword: m.headword,
-    pinyin: m.pinyin, pinyin_numeric: m.pinyinNumeric,
+    pinyin_numeric: m.pinyinNumeric,
     part_of_speech: m.partOfSpeech, english_short: m.englishShort,
     english_full: m.englishFull, type: m.type, level: m.level,
     created_at: m.createdAt, updated_at: m.updatedAt,
