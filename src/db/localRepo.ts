@@ -433,6 +433,11 @@ export async function deleteAudioRecording(id: string): Promise<void> {
   await localDb.audioRecordings.delete(id);
 }
 
+export async function getAllAudioStoragePaths(): Promise<string[]> {
+  const rows = await localDb.audioRecordings.toArray();
+  return rows.map((r) => r.storagePath).filter((p): p is string => !!p);
+}
+
 // ============================================================
 // Meaning flags
 // ============================================================
