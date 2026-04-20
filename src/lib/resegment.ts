@@ -6,44 +6,55 @@ export interface Resegmentable {
   english: string;
 }
 
+export interface ResegmentedToken<T extends Resegmentable> {
+  /** Single input token when no merge happened; array of inputs when merged. */
+  sources: T[];
+  surfaceForm: string;
+  /** When sources.length === 1, equal to sources[0].pinyinNumeric.
+   *  When merged, empty — caller is expected to refill from CEDICT/LLM. */
+  pinyinNumeric: string;
+  /** Same semantics as pinyinNumeric — empty on merge. */
+  english: string;
+}
+
 /**
  * Re-merge tokens the LLM split apart when CC-CEDICT has a compound
  * entry covering them. For example, if the LLM produced
  *   [哥, 哥, 来, 了]
  * and CEDICT has 哥哥 as one entry, return
- *   [哥哥, 来, 了]
+ *   [哥哥 (sources: 哥 + 哥), 来, 了]
  * so downstream resolvePinyin sees the compound headword and applies
- * the compound's canonical reading (ge1 ge5) instead of character-level
- * readings (ge1 + ge1).
+ * the compound's canonical reading.
  *
  * Uses greedy left-to-right longest-match against CEDICT. Multi-character
- * tokens that the LLM already produced are passed through untouched —
- * only runs of single-character tokens get considered for merging.
+ * tokens the LLM already produced are passed through untouched — only
+ * runs of single-character tokens get considered for merging.
  *
- * Merged pinyin / english are left to the caller to refill (we just emit
- * the new surfaceForm with empty strings so resolvePinyin / the LLM fill
- * them in).
+ * The per-output `sources` array lets callers reach back to original
+ * LLM data (e.g. to reconstruct per-character breakdowns after a merge).
  */
 export function resegmentWithCedict<T extends Resegmentable>(
   tokens: T[],
   maxCompoundLen = 4,
-): T[] {
-  const result: T[] = [];
+): ResegmentedToken<T>[] {
+  const result: ResegmentedToken<T>[] = [];
   let i = 0;
 
   while (i < tokens.length) {
     const current = tokens[i];
 
-    // Passthrough multi-char tokens — LLM already committed to a compound.
     if (current.surfaceForm.length !== 1) {
-      result.push(current);
+      result.push({
+        sources: [current],
+        surfaceForm: current.surfaceForm,
+        pinyinNumeric: current.pinyinNumeric,
+        english: current.english,
+      });
       i++;
       continue;
     }
 
-    // Try to find a longer CEDICT compound starting at this position
-    // using consecutive single-char tokens.
-    let bestEnd = i; // exclusive
+    let bestEnd = i;
     let bestSurface = current.surfaceForm;
     for (let j = i + 1; j < tokens.length && j - i < maxCompoundLen; j++) {
       if (tokens[j].surfaceForm.length !== 1) break;
@@ -55,17 +66,20 @@ export function resegmentWithCedict<T extends Resegmentable>(
     }
 
     if (bestEnd > i) {
-      // Found a compound — merge tokens [i..bestEnd].
-      const merged: T = {
-        ...current,
+      result.push({
+        sources: tokens.slice(i, bestEnd + 1),
         surfaceForm: bestSurface,
         pinyinNumeric: '',
         english: '',
-      };
-      result.push(merged);
+      });
       i = bestEnd + 1;
     } else {
-      result.push(current);
+      result.push({
+        sources: [current],
+        surfaceForm: current.surfaceForm,
+        pinyinNumeric: current.pinyinNumeric,
+        english: current.english,
+      });
       i++;
     }
   }

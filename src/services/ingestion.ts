@@ -59,11 +59,13 @@ export interface TokenInput {
   characters?: CharacterInput[];
 }
 
+import type { MeaningFlagKind } from '../db/schema';
+
 export interface IngestFlag {
   headword: string;
   storedPinyin: string;
   llmValue: string;
-  flagKind: 'auto-corrected' | 'polyphone-coerced' | 'cedict-disagreement' | 'cedict-unknown' | 'format-violation' | 'user-report';
+  flagKind: MeaningFlagKind;
   cedictSuggestions: string[];
 }
 
@@ -183,7 +185,7 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
         headword: f.headword,
         storedPinyin: f.storedPinyin,
         llmValue: f.llmValue,
-        flagKind: f.flagKind === 'format-violation' ? 'cedict-disagreement' : f.flagKind,
+        flagKind: f.flagKind,
         cedictSuggestions: f.cedictSuggestions,
         createdAt: Date.now(),
         resolvedAt: null,

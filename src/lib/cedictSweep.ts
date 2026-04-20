@@ -24,6 +24,8 @@ function isCJK(s: string): boolean {
  * Deduped by substring, sorted longest-first so compound hits appear above
  * character hits in the rendered prompt block.
  */
+const MAX_HITS = 40;
+
 export async function gatherCedictHits(
   chinese: string,
   maxLen = 4,
@@ -41,9 +43,10 @@ export async function gatherCedictHits(
       seen.set(sub, { sub, entries, firstPos: i });
     }
   }
-  return [...seen.values()].sort(
+  const sorted = [...seen.values()].sort(
     (a, b) => b.sub.length - a.sub.length || a.firstPos - b.firstPos,
   );
+  return sorted.slice(0, MAX_HITS);
 }
 
 /**

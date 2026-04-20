@@ -74,26 +74,28 @@ describe('resolvePinyin', () => {
   });
 
   describe('format violations', () => {
-    it('flags diacritic-in-numeric', () => {
+    it('signals diacritic-in-numeric and still CEDICT-overrides when possible', () => {
       const r = resolvePinyin('渴', 'kè3');
-      expect(r.flag?.kind).toBe('format-violation');
+      expect(r.hasFormatViolation).toBe(true);
+      // CEDICT has 渴 [ke3] as a single entry — we still overwrite with it.
+      expect(r.pinyinNumeric).toBe('ke3');
+      expect(r.flag?.kind).toBe('auto-corrected');
     });
 
-    it('flags stray spaces between syllable and digit', () => {
+    it('signals stray spaces between syllable and digit', () => {
       const r = resolvePinyin('虽', 'sui 1');
-      expect(r.flag?.kind).toBe('format-violation');
+      expect(r.hasFormatViolation).toBe(true);
+      expect(r.pinyinNumeric).toBe('sui1');
     });
 
-    it('flags missing tone digit', () => {
+    it('signals missing tone digit', () => {
       const r = resolvePinyin('黑', 'hei');
-      expect(r.flag?.kind).toBe('format-violation');
+      expect(r.hasFormatViolation).toBe(true);
     });
 
-    it('flags uppercase', () => {
+    it('lowercases uppercase without flagging', () => {
       const r = resolvePinyin('我', 'Wo3');
-      // Normalized to lowercase first, so this actually passes through.
-      // Uppercase is normalized, not rejected.
-      expect(r.flag?.kind).not.toBe('format-violation');
+      expect(r.hasFormatViolation).toBe(false);
     });
   });
 

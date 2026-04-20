@@ -1,14 +1,8 @@
 import { lookup, type DictEntry } from './cedict';
-
-export type FlagKind =
-  | 'auto-corrected'
-  | 'polyphone-coerced'
-  | 'cedict-disagreement'
-  | 'cedict-unknown'
-  | 'format-violation';
+import type { MeaningFlagKind } from '../db/schema';
 
 export interface ResolvePinyinFlag {
-  kind: FlagKind;
+  kind: MeaningFlagKind;
   headword: string;
   llmValue: string;
   chosenValue: string;
@@ -20,17 +14,28 @@ export interface ResolvePinyinResult {
   pinyinNumeric: string;
   /** Non-null when the resolution wasn't a clean pass-through. */
   flag: ResolvePinyinFlag | null;
+  /**
+   * True when the LLM's value was malformed (diacritics, bad spacing).
+   * Ephemeral — used by callers to decide whether to retry the LLM.
+   * Not persisted; if the retry also fails, the resulting flag is
+   * still cedict-based (auto-corrected / cedict-disagreement / etc.)
+   * based on what CEDICT says about the headword.
+   */
+  hasFormatViolation: boolean;
 }
 
 const NUMERIC_FORMAT = /^[a-z]+[1-5](\s[a-z]+[1-5])*$/;
 
-function normalize(s: string): string {
+export function normalizePinyin(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function collapse(s: string): string {
+export function collapsePinyin(s: string): string {
   return s.replace(/\s+/g, '').toLowerCase();
 }
+
+const normalize = normalizePinyin;
+const collapse = collapsePinyin;
 
 /**
  * Character-level Levenshtein on space-collapsed pinyin. Scales with
@@ -102,19 +107,7 @@ export function resolvePinyin(
   llmValue: string,
 ): ResolvePinyinResult {
   const normalized = normalize(llmValue);
-
-  if (!NUMERIC_FORMAT.test(normalized)) {
-    return {
-      pinyinNumeric: normalized,
-      flag: {
-        kind: 'format-violation',
-        headword,
-        llmValue,
-        chosenValue: normalized,
-        cedictSuggestions: [],
-      },
-    };
-  }
+  const hasFormatViolation = !NUMERIC_FORMAT.test(normalized);
 
   const entries = lookup(headword);
   const cedictSuggestions = entries.map((e) => e.pinyin.toLowerCase());
@@ -129,13 +122,14 @@ export function resolvePinyin(
         chosenValue: normalized,
         cedictSuggestions: [],
       },
+      hasFormatViolation,
     };
   }
 
   if (entries.length === 1) {
     const canonical = entries[0].pinyin.toLowerCase();
     if (collapse(normalized) === collapse(canonical)) {
-      return { pinyinNumeric: canonical, flag: null };
+      return { pinyinNumeric: canonical, flag: null, hasFormatViolation };
     }
     return {
       pinyinNumeric: canonical,
@@ -146,15 +140,19 @@ export function resolvePinyin(
         chosenValue: canonical,
         cedictSuggestions,
       },
+      hasFormatViolation,
     };
   }
 
-  // Polyphone: multiple CEDICT entries.
   const match = entries.find(
     (e) => collapse(e.pinyin) === collapse(normalized),
   );
   if (match) {
-    return { pinyinNumeric: match.pinyin.toLowerCase(), flag: null };
+    return {
+      pinyinNumeric: match.pinyin.toLowerCase(),
+      flag: null,
+      hasFormatViolation,
+    };
   }
 
   const COERCE_THRESHOLD = 1;
@@ -169,6 +167,7 @@ export function resolvePinyin(
         chosenValue: entry.pinyin.toLowerCase(),
         cedictSuggestions,
       },
+      hasFormatViolation,
     };
   }
 
@@ -181,5 +180,6 @@ export function resolvePinyin(
       chosenValue: normalized,
       cedictSuggestions,
     },
+    hasFormatViolation,
   };
 }

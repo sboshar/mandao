@@ -203,52 +203,42 @@ export function AddSentencePage() {
     setTimeout(() => setPromptCopied(false), 2000);
   };
 
+  /** Apply a parsed LLM response to review-step state: policy, english,
+   *  flags, form tokens, missing-char coverage. Callers own setStep. */
+  const applyAnalysis = (parsed: ReturnType<typeof parseLLMResponse>) => {
+    const processed = processLLMTokens(parsed);
+    if (parsed.english) setEnglish(parsed.english);
+    setIngestFlags(processed.flags);
+
+    const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
+      surfaceForm: t.surfaceForm,
+      pinyinNumeric: t.pinyinNumeric,
+      pinyinSandhi: t.pinyinSandhi || '',
+      english: t.english,
+      partOfSpeech: t.partOfSpeech || '',
+      isTransliteration: !!t.isTransliteration,
+      characters: t.characters?.map((c) => ({
+        char: c.char,
+        pinyinNumeric: c.pinyinNumeric,
+        pinyinSandhi: c.pinyinSandhi,
+        english: c.english,
+      })),
+    }));
+
+    setTokens(formTokens);
+    const cov = computeTokenCoverage(chinese.trim(), formTokens);
+    setMissingChars(cov.missing.map((m) => m.surfaceForm));
+  };
+
   // Auto-analyze using configured AI provider
   const handleAutoAnalyze = async () => {
     setError('');
     setAnalyzing(true);
     try {
       const existingMeanings = await getExistingMeanings(chinese.trim());
-
-      // One LLM call with a bounded retry if the first response contains
-      // any diacritic-in-numeric or format-violation tokens. Second failure
-      // still persists (with flags) rather than blocking the user.
-      let parsed = parseLLMResponse(
-        await generateCompletion(
-          await generateAnalysisPrompt(chinese.trim(), existingMeanings),
-        ),
-      );
-      let processed = processLLMTokens(parsed);
-      if (processed.hasFormatViolation) {
-        const retryPrompt =
-          (await generateAnalysisPrompt(chinese.trim(), existingMeanings)) +
-          '\n\nREMINDER: pinyinNumeric MUST be lowercase ASCII + tone digits only. No diacritics. Example: "ke3" not "kè3"; "wo3" not "wǒ"; "xiu1 xi5" not "xiu1xī". Do NOT apply sandhi in pinyinNumeric.';
-        parsed = parseLLMResponse(await generateCompletion(retryPrompt));
-        processed = processLLMTokens(parsed);
-      }
-
-      if (parsed.english) setEnglish(parsed.english);
-
-      setIngestFlags(processed.flags);
-
-      const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
-        surfaceForm: t.surfaceForm,
-        pinyinNumeric: t.pinyinNumeric,
-        pinyinSandhi: t.pinyinSandhi || '',
-        english: t.english,
-        partOfSpeech: t.partOfSpeech || '',
-        isTransliteration: !!t.isTransliteration,
-        characters: t.characters?.map((c) => ({
-          char: c.char,
-          pinyinNumeric: c.pinyinNumeric,
-          pinyinSandhi: c.pinyinSandhi,
-          english: c.english,
-        })),
-      }));
-
-      setTokens(formTokens);
-      const cov = computeTokenCoverage(chinese.trim(), formTokens);
-      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
+      const parsed = parseLLMResponse(await generateCompletion(prompt));
+      applyAnalysis(parsed);
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -260,29 +250,7 @@ export function AddSentencePage() {
   const handleParseLLMResponse = () => {
     try {
       const parsed = parseLLMResponse(llmPasteValue);
-      const processed = processLLMTokens(parsed);
-
-      if (parsed.english) setEnglish(parsed.english);
-      setIngestFlags(processed.flags);
-
-      const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
-        surfaceForm: t.surfaceForm,
-        pinyinNumeric: t.pinyinNumeric,
-        pinyinSandhi: t.pinyinSandhi || '',
-        english: t.english,
-        partOfSpeech: t.partOfSpeech || '',
-        isTransliteration: !!t.isTransliteration,
-        characters: t.characters?.map((c) => ({
-          char: c.char,
-          pinyinNumeric: c.pinyinNumeric,
-          pinyinSandhi: c.pinyinSandhi,
-          english: c.english,
-        })),
-      }));
-
-      setTokens(formTokens);
-      const cov = computeTokenCoverage(chinese.trim(), formTokens);
-      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+      applyAnalysis(parsed);
       setLlmPasteValue('');
       setStep('review');
       setError('');
@@ -341,31 +309,8 @@ export function AddSentencePage() {
     try {
       const existingMeanings = await getExistingMeanings(chinese.trim());
       const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
-      const raw = await generateCompletion(prompt);
-      const parsed = parseLLMResponse(raw);
-      const processed = processLLMTokens(parsed);
-
-      if (parsed.english) setEnglish(parsed.english);
-      setIngestFlags(processed.flags);
-
-      const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
-        surfaceForm: t.surfaceForm,
-        pinyinNumeric: t.pinyinNumeric,
-        pinyinSandhi: t.pinyinSandhi || '',
-        english: t.english,
-        partOfSpeech: t.partOfSpeech || '',
-        isTransliteration: !!t.isTransliteration,
-        characters: t.characters?.map((c) => ({
-          char: c.char,
-          pinyinNumeric: c.pinyinNumeric,
-          pinyinSandhi: c.pinyinSandhi,
-          english: c.english,
-        })),
-      }));
-
-      setTokens(formTokens);
-      const cov = computeTokenCoverage(chinese.trim(), formTokens);
-      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+      const parsed = parseLLMResponse(await generateCompletion(prompt));
+      applyAnalysis(parsed);
     } catch (e: any) {
       setError(e.message || 'Re-analyze failed');
     }

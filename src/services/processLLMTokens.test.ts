@@ -56,12 +56,14 @@ describe('processLLMTokens', () => {
     expect(r.tokens[0].pinyinNumeric).toBe('ge1 ge5');
   });
 
-  it('flags format violations so caller can retry', () => {
+  it('signals format violations and still CEDICT-overrides', () => {
     const r = processLLMTokens(
       response([token('渴', 'kè3', 'thirsty')]),
     );
     expect(r.hasFormatViolation).toBe(true);
-    expect(r.flags[0].kind).toBe('format-violation');
+    // Even on a format violation we go through CEDICT, so 渴 is corrected to ke3.
+    expect(r.tokens[0].pinyinNumeric).toBe('ke3');
+    expect(r.flags[0].kind).toBe('auto-corrected');
   });
 
   it('keeps LLM polyphone pick when it matches CEDICT', () => {

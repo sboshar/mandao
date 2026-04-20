@@ -1,6 +1,10 @@
-import { resegmentWithCedict } from '../lib/resegment';
+import { resegmentWithCedict, type Resegmentable } from '../lib/resegment';
 import { resolvePinyin, type ResolvePinyinFlag } from '../lib/resolvePinyin';
 import type { LLMResponse, LLMTokenResponse } from './llmPrompt';
+
+interface LLMTokenResegInput extends Resegmentable {
+  original: LLMTokenResponse;
+}
 
 /**
  * Shape matching what the ingest path expects downstream. Mirrors
@@ -29,40 +33,32 @@ export interface ProcessResult {
  *      can decide whether to retry the LLM.
  */
 export function processLLMTokens(response: LLMResponse): ProcessResult {
-  const resegmented = resegmentWithCedict(
-    response.tokens.map((t) => ({
-      surfaceForm: t.surfaceForm,
-      pinyinNumeric: t.pinyinNumeric,
-      english: t.english,
-      _orig: t,
-    })),
-  );
+  const input: LLMTokenResegInput[] = response.tokens.map((t) => ({
+    surfaceForm: t.surfaceForm,
+    pinyinNumeric: t.pinyinNumeric,
+    english: t.english,
+    original: t,
+  }));
+  const resegmented = resegmentWithCedict(input);
 
   const tokens: ProcessedToken[] = [];
   const flags: ResolvePinyinFlag[] = [];
   let hasFormatViolation = false;
 
   for (const seg of resegmented) {
-    const original = (seg as unknown as { _orig: LLMTokenResponse })._orig;
-    // If resegment merged tokens, we cleared pinyin — rebuild from LLM
-    // values for constituent chars when possible, else leave empty and
-    // let resolvePinyin fall into the CEDICT-override branch.
-    const llmPinyin =
-      seg.pinyinNumeric || (original?.pinyinNumeric ?? '');
+    const firstSource = seg.sources[0]?.original;
+    // For a merged compound, individual source pinyins were cleared; let
+    // resolvePinyin fall into the CEDICT-override branch with empty input.
+    const llmPinyin = seg.pinyinNumeric || firstSource?.pinyinNumeric || '';
 
     const result = resolvePinyin(seg.surfaceForm, llmPinyin);
-    if (result.flag) {
-      flags.push(result.flag);
-      if (result.flag.kind === 'format-violation') hasFormatViolation = true;
-    }
+    if (result.flag) flags.push(result.flag);
+    if (result.hasFormatViolation) hasFormatViolation = true;
 
     tokens.push({
-      // Preserve the LLM's per-token extra fields where we have them.
-      ...(original ?? ({} as LLMTokenResponse)),
+      ...(firstSource ?? ({} as LLMTokenResponse)),
       surfaceForm: seg.surfaceForm,
       pinyinNumeric: result.pinyinNumeric,
-      // Keep the LLM's other fields (english, partOfSpeech, characters…)
-      // untouched — we only arbitrate pinyinNumeric here.
     });
   }
 

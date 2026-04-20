@@ -17,6 +17,10 @@ const T = (surface: string, pinyin = '', english = '') => ({
   english,
 });
 
+// Test helper: extract surface forms from the new ResegmentedToken shape.
+const surfaces = (tokens: { surfaceForm: string }[]) =>
+  tokens.map((t) => t.surfaceForm);
+
 describe('resegmentWithCedict', () => {
   it('merges split 哥 哥 into compound 哥哥', () => {
     const input = [T('我', 'wo3'), T('哥', 'ge1'), T('哥', 'ge1')];
