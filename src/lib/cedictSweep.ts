@@ -1,4 +1,4 @@
-import { lookup, loadCedict, type DictEntry } from './cedict';
+import { lookup, loadCedict, firstGloss, type DictEntry } from './cedict';
 
 export interface CedictHit {
   sub: string;
@@ -56,7 +56,7 @@ export function formatCedictBlock(hits: CedictHit[]): string {
   if (hits.length === 0) return '';
   const lines = hits.map((h) => {
     const pinyins = h.entries.map((e) => e.pinyin).join(' | ');
-    const gloss = (h.entries[0].english.split('/')[0] || '').trim();
+    const gloss = firstGloss(h.sub);
     return `  ${h.sub}  [${pinyins}]${gloss ? '  /' + gloss + '/' : ''}`;
   });
   return `\nCC-CEDICT readings for substrings of this sentence. Emit each compound (length ≥ 2) as a SINGLE token with the listed pinyin — never split it into character tokens, never recompute the reading from characters:
