@@ -68,6 +68,8 @@ export function AddSentencePage() {
   const [missingChars, setMissingChars] = useState<string[]>([]);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [ingestFlags, setIngestFlags] = useState<ResolvePinyinFlag[]>([]);
+  const [rawLLMResponse, setRawLLMResponse] = useState<string | null>(null);
+  const [showRawLLM, setShowRawLLM] = useState(false);
   const aiEnabled = isAIConfigured();
   const [listening, setListening] = useState(false);
   const speechSupported = isSpeechRecognitionSupported();
@@ -242,6 +244,7 @@ export function AddSentencePage() {
       const t2 = performance.now();
       const raw = await generateCompletion(prompt);
       const t3 = performance.now();
+      setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
       const t4 = performance.now();
       applyAnalysis(parsed);
@@ -265,6 +268,7 @@ export function AddSentencePage() {
   // Parse LLM JSON response
   const handleParseLLMResponse = () => {
     try {
+      setRawLLMResponse(llmPasteValue);
       const parsed = parseLLMResponse(llmPasteValue);
       applyAnalysis(parsed);
       setLlmPasteValue('');
@@ -325,7 +329,9 @@ export function AddSentencePage() {
     try {
       const existingMeanings = await getExistingMeanings(chinese.trim());
       const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
-      const parsed = parseLLMResponse(await generateCompletion(prompt));
+      const raw = await generateCompletion(prompt);
+      setRawLLMResponse(raw);
+      const parsed = parseLLMResponse(raw);
       applyAnalysis(parsed);
     } catch (e: any) {
       setError(e.message || 'Re-analyze failed');
@@ -823,6 +829,28 @@ export function AddSentencePage() {
               })}
               {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
             </div>
+          )}
+
+          {rawLLMResponse && (
+            <details
+              className="rounded-lg text-xs"
+              style={{ border: '1px solid var(--border)' }}
+              open={showRawLLM}
+              onToggle={(e) => setShowRawLLM((e.target as HTMLDetailsElement).open)}
+            >
+              <summary
+                className="px-3 py-2 cursor-pointer select-none"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                Raw LLM response
+              </summary>
+              <pre
+                className="px-3 pb-3 overflow-auto font-mono"
+                style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)', maxHeight: '24rem' }}
+              >
+                {rawLLMResponse}
+              </pre>
+            </details>
           )}
 
           {missingChars.length > 0 && (
