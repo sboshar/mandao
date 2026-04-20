@@ -235,10 +235,26 @@ export function AddSentencePage() {
     setError('');
     setAnalyzing(true);
     try {
+      const t0 = performance.now();
       const existingMeanings = await getExistingMeanings(chinese.trim());
+      const t1 = performance.now();
       const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
-      const parsed = parseLLMResponse(await generateCompletion(prompt));
+      const t2 = performance.now();
+      const raw = await generateCompletion(prompt);
+      const t3 = performance.now();
+      const parsed = parseLLMResponse(raw);
+      const t4 = performance.now();
       applyAnalysis(parsed);
+      const t5 = performance.now();
+      console.log(
+        `[analyze] existing-meanings: ${(t1 - t0).toFixed(0)}ms | ` +
+          `prompt-build (incl. CEDICT sweep): ${(t2 - t1).toFixed(0)}ms | ` +
+          `llm: ${(t3 - t2).toFixed(0)}ms | ` +
+          `parse: ${(t4 - t3).toFixed(0)}ms | ` +
+          `policy: ${(t5 - t4).toFixed(0)}ms | ` +
+          `total: ${(t5 - t0).toFixed(0)}ms | ` +
+          `prompt-chars: ${prompt.length}`,
+      );
       setStep('review');
     } catch (e: any) {
       setError(e.message);
