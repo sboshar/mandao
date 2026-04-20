@@ -7,7 +7,9 @@ import {
   getExistingMeanings,
 } from '../services/llmPrompt';
 import { processLLMTokens } from '../services/processLLMTokens';
-import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
+import { checkPinyin } from '../lib/checkPinyin';
+import { scanSegmentation } from '../lib/segmentationCheck';
+import type { IngestFlag } from '../services/processLLMTokens';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
@@ -67,7 +69,7 @@ export function AddSentencePage() {
   /** Chars the analyzer dropped — nonzero until user re-analyzes or adds them manually. */
   const [missingChars, setMissingChars] = useState<string[]>([]);
   const [reanalyzing, setReanalyzing] = useState(false);
-  const [ingestFlags, setIngestFlags] = useState<CheckPinyinFlag[]>([]);
+  const [ingestFlags, setIngestFlags] = useState<IngestFlag[]>([]);
   const [rawLLMResponse, setRawLLMResponse] = useState<string | null>(null);
   const [showRawLLM, setShowRawLLM] = useState(false);
   const aiEnabled = isAIConfigured();
@@ -307,6 +309,35 @@ export function AddSentencePage() {
     setIngestFlags((prev) => prev.filter((f) => f.headword !== headword));
   };
 
+  /** Collapse the given token indices into one token with the CEDICT
+   *  compound's surface form, pinyin, and gloss. After merge, flag
+   *  indices shift — simplest is to drop all segmentation flags and
+   *  let the next render recompute if needed (we don't recompute here,
+   *  so subsequent mis-segmentations surface at save time). */
+  const mergeTokensIntoCompound = (
+    indices: number[],
+    compoundSurface: string,
+    compoundPinyin: string,
+    compoundEnglish: string,
+  ) => {
+    if (indices.length < 2) return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    setTokens((prev) => {
+      const merged: TokenFormData = {
+        surfaceForm: compoundSurface,
+        pinyinNumeric: compoundPinyin,
+        pinyinSandhi: '',
+        english: compoundEnglish,
+        partOfSpeech: prev[first]?.partOfSpeech ?? '',
+        isTransliteration: false,
+      };
+      return [...prev.slice(0, first), merged, ...prev.slice(last + 1)];
+    });
+    setIngestFlags((prev) => prev.filter((f) => f.kind !== 'segmentation-disagreement'));
+  };
+
   const updateCharacter = (tokenIndex: number, charIndex: number, field: string, value: string) => {
     const newTokens = [...tokens];
     const token = { ...newTokens[tokenIndex] };
@@ -399,15 +430,13 @@ export function AddSentencePage() {
         characters: t.characters,
       }));
 
-      // Flags record what the LLM originally emitted vs what finally
       // Recompute flags from the final tokenInputs so user edits on the
-      // review screen (manual edits, apply-CEDICT clicks, token removal)
-      // are reflected in the persisted flags. Original LLM value comes
-      // from ingestFlags snapshot; if the user added tokens that weren't
-      // in the LLM response, llmValue equals the current pinyin.
+      // review screen (manual edits, apply-CEDICT clicks, merges, token
+      // removal) are reflected in the persisted flags.
       const llmValueByHeadword = new Map<string, string>();
       for (const f of ingestFlags) llmValueByHeadword.set(f.headword, f.llmValue);
-      const flagsForSave = tokenInputs
+
+      const pinyinFlags = tokenInputs
         .map((t) => {
           const check = checkPinyin(t.surfaceForm, t.pinyinNumeric);
           if (!check.flag) return null;
@@ -420,6 +449,16 @@ export function AddSentencePage() {
           };
         })
         .filter((f): f is NonNullable<typeof f> => f !== null);
+
+      const segmentationFlags = scanSegmentation(tokenInputs).map((f) => ({
+        headword: f.headword,
+        storedPinyin: f.llmValue,
+        llmValue: llmValueByHeadword.get(f.headword) ?? f.llmValue,
+        flagKind: f.kind,
+        cedictSuggestions: f.cedictSuggestions,
+      }));
+
+      const flagsForSave = [...pinyinFlags, ...segmentationFlags];
 
       let createdSentenceId: string | null = null;
       try {
@@ -808,33 +847,66 @@ export function AddSentencePage() {
               <div style={{ color: 'var(--text-primary)' }}>
                 {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'} disagree with CC-CEDICT — review below.
               </div>
-              {ingestFlags.slice(0, 5).map((f, i) => (
-                <div key={i} className="font-mono flex flex-wrap items-center gap-1">
-                  <span style={{ color: 'var(--text-primary)' }}>{f.headword}:</span>
-                  <span>{f.llmValue || '(empty)'}</span>
-                  {f.cedictSuggestions.length > 0 && (
-                    <>
-                      <span style={{ opacity: 0.6 }}>→ CEDICT:</span>
-                      {f.cedictSuggestions.map((sugg) => (
-                        <button
-                          key={sugg}
-                          type="button"
-                          onClick={() => applyCedictSuggestion(f.headword, sugg)}
-                          className="px-1.5 py-0.5 rounded transition-colors"
-                          style={{
-                            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
-                            color: 'var(--accent)',
-                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-                          }}
-                        >
-                          {sugg}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  <span style={{ opacity: 0.5 }}>({f.kind})</span>
-                </div>
-              ))}
+              {ingestFlags.slice(0, 5).map((f, i) => {
+                if (f.kind === 'segmentation-disagreement') {
+                  const pieces = f.tokenIndices.map((idx) => tokens[idx]?.surfaceForm ?? '?').join(' + ');
+                  const firstSuggestion = f.cedictSuggestions[0];
+                  return (
+                    <div key={i} className="font-mono flex flex-wrap items-center gap-1">
+                      <span style={{ color: 'var(--text-primary)' }}>{pieces}</span>
+                      <span style={{ opacity: 0.6 }}>→ CEDICT compound:</span>
+                      <span>{f.headword} [{firstSuggestion}]</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          mergeTokensIntoCompound(
+                            f.tokenIndices,
+                            f.headword,
+                            firstSuggestion,
+                            f.cedictEnglish,
+                          )
+                        }
+                        className="px-1.5 py-0.5 rounded transition-colors"
+                        style={{
+                          background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+                          color: 'var(--accent)',
+                          border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                        }}
+                      >
+                        Merge
+                      </button>
+                      <span style={{ opacity: 0.5 }}>({f.kind})</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={i} className="font-mono flex flex-wrap items-center gap-1">
+                    <span style={{ color: 'var(--text-primary)' }}>{f.headword}:</span>
+                    <span>{f.llmValue || '(empty)'}</span>
+                    {f.cedictSuggestions.length > 0 && (
+                      <>
+                        <span style={{ opacity: 0.6 }}>→ CEDICT:</span>
+                        {f.cedictSuggestions.map((sugg) => (
+                          <button
+                            key={sugg}
+                            type="button"
+                            onClick={() => applyCedictSuggestion(f.headword, sugg)}
+                            className="px-1.5 py-0.5 rounded transition-colors"
+                            style={{
+                              background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+                              color: 'var(--accent)',
+                              border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                            }}
+                          >
+                            {sugg}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    <span style={{ opacity: 0.5 }}>({f.kind})</span>
+                  </div>
+                );
+              })}
               {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
             </div>
           )}

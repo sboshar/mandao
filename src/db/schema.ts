@@ -189,6 +189,7 @@ export interface ReviewLog {
 export type MeaningFlagKind =
   | 'cedict-disagreement'
   | 'cedict-unknown'
+  | 'segmentation-disagreement'
   | 'user-report';
 
 export type MeaningFlagResolution = 'confirmed' | 'corrected' | 'dismissed';

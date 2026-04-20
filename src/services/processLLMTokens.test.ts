@@ -56,16 +56,22 @@ describe('processLLMTokens — observation only', () => {
     expect(r.flags[0].cedictSuggestions).toContain('xiu1 xi5');
   });
 
-  it('trusts LLM segmentation: split 哥+哥 passes through as two tokens', () => {
-    // Segmentation is the LLM's call; we don't silently re-merge.
-    // 哥 has a single CEDICT entry [ge1], so each token matches and no
-    // flag fires. If the LLM got segmentation wrong, the prompt is where
-    // we fix that — not by second-guessing here.
+  it('surfaces segmentation-disagreement when LLM splits a CEDICT compound', () => {
+    // Segmentation is the LLM's call; we don't silently re-merge. But a
+    // segmentation-disagreement flag tells the user CEDICT has the
+    // compound, with a Merge button in the review UI.
     const r = processLLMTokens(
       response([token('哥', 'ge1', 'elder brother'), token('哥', 'ge1', 'elder brother')]),
     );
     expect(r.tokens).toHaveLength(2);
-    expect(r.flags).toHaveLength(0);
+    expect(r.flags).toHaveLength(1);
+    const f = r.flags[0];
+    expect(f.kind).toBe('segmentation-disagreement');
+    if (f.kind === 'segmentation-disagreement') {
+      expect(f.headword).toBe('哥哥');
+      expect(f.tokenIndices).toEqual([0, 1]);
+      expect(f.cedictSuggestions).toContain('ge1 ge5');
+    }
   });
 
   it('accepts 不是 bu2 shi4 via de-sandhi — no flag', () => {
