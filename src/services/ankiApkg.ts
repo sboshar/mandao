@@ -421,7 +421,7 @@ export async function importFromApkg(
 
         // Analyze via LLM
         const existingMeanings = await getExistingMeanings(chinese);
-        const prompt = generateAnalysisPrompt(chinese, existingMeanings);
+        const prompt = await generateAnalysisPrompt(chinese, existingMeanings);
         const raw = await generateCompletion(prompt);
         const parsed = parseLLMResponse(raw);
 

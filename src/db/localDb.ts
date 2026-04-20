@@ -8,6 +8,7 @@ import type {
   Deck,
   ReviewLog,
   AudioRecording,
+  MeaningFlag,
 } from './schema';
 
 export interface SyncMeta {
@@ -45,6 +46,7 @@ class MandaoDb extends Dexie {
   outbox!: Table<SyncOp, number>;
   syncMeta!: Table<SyncMeta, string>;
   audioRecordings!: Table<AudioRecording, string>;
+  meaningFlags!: Table<MeaningFlag, string>;
 
   constructor() {
     super('MandaoApp');
@@ -82,6 +84,11 @@ class MandaoDb extends Dexie {
         }
         if (rows.length > 0) await table.bulkPut(rows);
       });
+
+    // v4: meaning_flags — audit trail of CEDICT/LLM disagreements at ingest.
+    this.version(4).stores({
+      meaningFlags: 'id, meaningId, headword, flagKind, resolvedAt, createdAt',
+    });
   }
 }
 
@@ -114,6 +121,7 @@ export async function clearLocalDb(): Promise<void> {
       localDb.outbox,
       localDb.syncMeta,
       localDb.audioRecordings,
+      localDb.meaningFlags,
     ],
     async () => {
       await Promise.all([
@@ -127,6 +135,7 @@ export async function clearLocalDb(): Promise<void> {
         localDb.outbox.clear(),
         localDb.syncMeta.clear(),
         localDb.audioRecordings.clear(),
+        localDb.meaningFlags.clear(),
       ]);
     }
   );

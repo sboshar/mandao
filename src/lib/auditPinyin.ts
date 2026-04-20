@@ -1,6 +1,7 @@
 import * as repo from '../db/repo';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { loadCedict, lookup } from './cedict';
+import { collapsePinyin } from './checkPinyin';
 import { localDb } from '../db/localDb';
 import { supabase } from './supabase';
 import type { Meaning } from '../db/schema';
@@ -20,10 +21,6 @@ export interface AuditReport {
   totalMeanings: number;
   diacriticMismatches: AuditRow[];
   cedictMismatches: AuditRow[];
-}
-
-function stripSpaces(s: string): string {
-  return s.replace(/\s+/g, '').toLowerCase();
 }
 
 /**
@@ -55,7 +52,7 @@ export async function auditPinyin(): Promise<AuditReport> {
     const cedictMismatch =
       entries.length > 0 &&
       !cedictPinyins.some(
-        (p) => stripSpaces(p) === stripSpaces(m.pinyinNumeric),
+        (p) => collapsePinyin(p) === collapsePinyin(m.pinyinNumeric),
       );
 
     const row: AuditRow = {

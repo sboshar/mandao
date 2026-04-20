@@ -199,7 +199,7 @@ async function analyzeAndIngest(
 
   // Get existing meanings for better LLM context
   const existingMeanings = await getExistingMeanings(chinese.trim());
-  const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings);
+  const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
   const raw = await generateCompletion(prompt);
   const parsed = parseLLMResponse(raw);
 

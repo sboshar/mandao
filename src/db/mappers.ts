@@ -11,6 +11,7 @@ import type {
   Deck,
   ReviewLog,
   AudioRecording,
+  MeaningFlag,
 } from './schema';
 import { normalizeChinese } from './localRepo';
 
@@ -129,6 +130,22 @@ export function audioRecordingToRow(
     duration_ms: rec.durationMs ?? null,
     source: rec.source,
     created_at: rec.createdAt,
+  };
+}
+
+export function meaningFlagFromRow(r: any): MeaningFlag {
+  return {
+    id: r.id,
+    meaningId: r.meaning_id ?? null,
+    headword: r.headword,
+    storedPinyin: r.stored_pinyin,
+    llmValue: r.llm_value ?? undefined,
+    flagKind: r.flag_kind,
+    cedictSuggestions: r.cedict_suggestions ?? [],
+    createdAt: r.created_at,
+    resolvedAt: r.resolved_at ?? null,
+    resolution: r.resolution ?? null,
+    usn: r.usn,
   };
 }
 

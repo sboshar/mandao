@@ -186,6 +186,31 @@ export interface ReviewLog {
   usn?: number;
 }
 
+export type MeaningFlagKind =
+  | 'cedict-disagreement'
+  | 'cedict-unknown'
+  | 'user-report';
+
+export type MeaningFlagResolution = 'confirmed' | 'corrected' | 'dismissed';
+
+export interface MeaningFlag {
+  id: string;
+  /** Optional: may be null if the flag was created before the meaning was persisted. */
+  meaningId: string | null;
+  headword: string;
+  /** Pinyin that ended up stored on the Meaning at flag creation time. */
+  storedPinyin: string;
+  /** Pinyin the LLM originally emitted (before any override). */
+  llmValue?: string;
+  flagKind: MeaningFlagKind;
+  /** CEDICT readings at the time of flag creation — snapshot for audit. */
+  cedictSuggestions: string[];
+  createdAt: number;
+  resolvedAt?: number | null;
+  resolution?: MeaningFlagResolution | null;
+  usn?: number;
+}
+
 // ============================================================
 // Default card face configs for the two review modes
 // ============================================================

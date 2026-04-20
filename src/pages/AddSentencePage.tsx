@@ -6,6 +6,8 @@ import {
   parseLLMResponse,
   getExistingMeanings,
 } from '../services/llmPrompt';
+import { processLLMTokens } from '../services/processLLMTokens';
+import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
@@ -65,6 +67,9 @@ export function AddSentencePage() {
   /** Chars the analyzer dropped — nonzero until user re-analyzes or adds them manually. */
   const [missingChars, setMissingChars] = useState<string[]>([]);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [ingestFlags, setIngestFlags] = useState<CheckPinyinFlag[]>([]);
+  const [rawLLMResponse, setRawLLMResponse] = useState<string | null>(null);
+  const [showRawLLM, setShowRawLLM] = useState(false);
   const aiEnabled = isAIConfigured();
   const [listening, setListening] = useState(false);
   const speechSupported = isSpeechRecognitionSupported();
@@ -194,10 +199,37 @@ export function AddSentencePage() {
   const handleCopyPrompt = async () => {
     setError('');
     const existingMeanings = await getExistingMeanings(chinese.trim());
-    const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings);
+    const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
     await navigator.clipboard.writeText(prompt);
     setPromptCopied(true);
     setTimeout(() => setPromptCopied(false), 2000);
+  };
+
+  /** Apply a parsed LLM response to review-step state: policy, english,
+   *  flags, form tokens, missing-char coverage. Callers own setStep. */
+  const applyAnalysis = (parsed: ReturnType<typeof parseLLMResponse>) => {
+    const processed = processLLMTokens(parsed);
+    if (parsed.english) setEnglish(parsed.english);
+    setIngestFlags(processed.flags);
+
+    const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
+      surfaceForm: t.surfaceForm,
+      pinyinNumeric: t.pinyinNumeric,
+      pinyinSandhi: t.pinyinSandhi || '',
+      english: t.english,
+      partOfSpeech: t.partOfSpeech || '',
+      isTransliteration: !!t.isTransliteration,
+      characters: t.characters?.map((c) => ({
+        char: c.char,
+        pinyinNumeric: c.pinyinNumeric,
+        pinyinSandhi: c.pinyinSandhi,
+        english: c.english,
+      })),
+    }));
+
+    setTokens(formTokens);
+    const cov = computeTokenCoverage(chinese.trim(), formTokens);
+    setMissingChars(cov.missing.map((m) => m.surfaceForm));
   };
 
   // Auto-analyze using configured AI provider
@@ -206,29 +238,11 @@ export function AddSentencePage() {
     setAnalyzing(true);
     try {
       const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings);
+      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
       const raw = await generateCompletion(prompt);
+      setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      if (parsed.english) setEnglish(parsed.english);
-
-      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
-        surfaceForm: t.surfaceForm,
-        pinyinNumeric: t.pinyinNumeric,
-        pinyinSandhi: t.pinyinSandhi || '',
-        english: t.english,
-        partOfSpeech: t.partOfSpeech || '',
-        isTransliteration: !!t.isTransliteration,
-        characters: t.characters?.map((c) => ({
-          char: c.char,
-          pinyinNumeric: c.pinyinNumeric,
-          pinyinSandhi: c.pinyinSandhi,
-          english: c.english,
-        })),
-      }));
-
-      setTokens(formTokens);
-      const cov = computeTokenCoverage(chinese.trim(), formTokens);
-      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+      applyAnalysis(parsed);
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -239,27 +253,9 @@ export function AddSentencePage() {
   // Parse LLM JSON response
   const handleParseLLMResponse = () => {
     try {
+      setRawLLMResponse(llmPasteValue);
       const parsed = parseLLMResponse(llmPasteValue);
-      if (parsed.english) setEnglish(parsed.english);
-
-      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
-        surfaceForm: t.surfaceForm,
-        pinyinNumeric: t.pinyinNumeric,
-        pinyinSandhi: t.pinyinSandhi || '',
-        english: t.english,
-        partOfSpeech: t.partOfSpeech || '',
-        isTransliteration: !!t.isTransliteration,
-        characters: t.characters?.map((c) => ({
-          char: c.char,
-          pinyinNumeric: c.pinyinNumeric,
-          pinyinSandhi: c.pinyinSandhi,
-          english: c.english,
-        })),
-      }));
-
-      setTokens(formTokens);
-      const cov = computeTokenCoverage(chinese.trim(), formTokens);
-      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+      applyAnalysis(parsed);
       setLlmPasteValue('');
       setStep('review');
       setError('');
@@ -300,6 +296,17 @@ export function AddSentencePage() {
     }
   };
 
+  /** Accept a CEDICT suggestion for all tokens with the given headword.
+   *  Updates pinyinNumeric inline and drops the now-resolved flag. */
+  const applyCedictSuggestion = (headword: string, suggestion: string) => {
+    setTokens((prev) =>
+      prev.map((t) =>
+        t.surfaceForm === headword ? { ...t, pinyinNumeric: suggestion } : t,
+      ),
+    );
+    setIngestFlags((prev) => prev.filter((f) => f.headword !== headword));
+  };
+
   const updateCharacter = (tokenIndex: number, charIndex: number, field: string, value: string) => {
     const newTokens = [...tokens];
     const token = { ...newTokens[tokenIndex] };
@@ -317,29 +324,11 @@ export function AddSentencePage() {
     setReanalyzing(true);
     try {
       const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
+      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
       const raw = await generateCompletion(prompt);
+      setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      if (parsed.english) setEnglish(parsed.english);
-
-      const formTokens: TokenFormData[] = parsed.tokens.map((t) => ({
-        surfaceForm: t.surfaceForm,
-        pinyinNumeric: t.pinyinNumeric,
-        pinyinSandhi: t.pinyinSandhi || '',
-        english: t.english,
-        partOfSpeech: t.partOfSpeech || '',
-        isTransliteration: !!t.isTransliteration,
-        characters: t.characters?.map((c) => ({
-          char: c.char,
-          pinyinNumeric: c.pinyinNumeric,
-          pinyinSandhi: c.pinyinSandhi,
-          english: c.english,
-        })),
-      }));
-
-      setTokens(formTokens);
-      const cov = computeTokenCoverage(chinese.trim(), formTokens);
-      setMissingChars(cov.missing.map((m) => m.surfaceForm));
+      applyAnalysis(parsed);
     } catch (e: any) {
       setError(e.message || 'Re-analyze failed');
     }
@@ -410,6 +399,28 @@ export function AddSentencePage() {
         characters: t.characters,
       }));
 
+      // Flags record what the LLM originally emitted vs what finally
+      // Recompute flags from the final tokenInputs so user edits on the
+      // review screen (manual edits, apply-CEDICT clicks, token removal)
+      // are reflected in the persisted flags. Original LLM value comes
+      // from ingestFlags snapshot; if the user added tokens that weren't
+      // in the LLM response, llmValue equals the current pinyin.
+      const llmValueByHeadword = new Map<string, string>();
+      for (const f of ingestFlags) llmValueByHeadword.set(f.headword, f.llmValue);
+      const flagsForSave = tokenInputs
+        .map((t) => {
+          const check = checkPinyin(t.surfaceForm, t.pinyinNumeric);
+          if (!check.flag) return null;
+          return {
+            headword: t.surfaceForm,
+            storedPinyin: t.pinyinNumeric,
+            llmValue: llmValueByHeadword.get(t.surfaceForm) ?? t.pinyinNumeric,
+            flagKind: check.flag.kind,
+            cedictSuggestions: check.cedictSuggestions,
+          };
+        })
+        .filter((f): f is NonNullable<typeof f> => f !== null);
+
       let createdSentenceId: string | null = null;
       try {
         createdSentenceId = await ingestSentence({
@@ -417,6 +428,7 @@ export function AddSentencePage() {
           english: english.trim(),
           tokens: tokenInputs,
           tags,
+          flags: flagsForSave,
         });
       } catch (e: any) {
         // In tutorial mode, skip duplicate errors so re-running works
@@ -789,6 +801,65 @@ export function AddSentencePage() {
           <div className="p-3 rounded-lg inset">
             <div className="text-lg">{chinese}</div>
           </div>
+
+          {ingestFlags.length > 0 && (
+            <div className="p-3 rounded-lg text-xs space-y-2"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+              <div style={{ color: 'var(--text-primary)' }}>
+                {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'} disagree with CC-CEDICT — review below.
+              </div>
+              {ingestFlags.slice(0, 5).map((f, i) => (
+                <div key={i} className="font-mono flex flex-wrap items-center gap-1">
+                  <span style={{ color: 'var(--text-primary)' }}>{f.headword}:</span>
+                  <span>{f.llmValue || '(empty)'}</span>
+                  {f.cedictSuggestions.length > 0 && (
+                    <>
+                      <span style={{ opacity: 0.6 }}>→ CEDICT:</span>
+                      {f.cedictSuggestions.map((sugg) => (
+                        <button
+                          key={sugg}
+                          type="button"
+                          onClick={() => applyCedictSuggestion(f.headword, sugg)}
+                          className="px-1.5 py-0.5 rounded transition-colors"
+                          style={{
+                            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+                            color: 'var(--accent)',
+                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                          }}
+                        >
+                          {sugg}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  <span style={{ opacity: 0.5 }}>({f.kind})</span>
+                </div>
+              ))}
+              {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
+            </div>
+          )}
+
+          {rawLLMResponse && (
+            <details
+              className="rounded-lg text-xs"
+              style={{ border: '1px solid var(--border)' }}
+              open={showRawLLM}
+              onToggle={(e) => setShowRawLLM((e.target as HTMLDetailsElement).open)}
+            >
+              <summary
+                className="px-3 py-2 cursor-pointer select-none"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                Raw LLM response
+              </summary>
+              <pre
+                className="px-3 pb-3 overflow-auto font-mono"
+                style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)', maxHeight: '24rem' }}
+              >
+                {rawLLMResponse}
+              </pre>
+            </details>
+          )}
 
           {missingChars.length > 0 && (
             <div className="p-3 rounded-lg space-y-2"
