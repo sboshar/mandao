@@ -841,61 +841,110 @@ export function AddSentencePage() {
           </div>
 
           {ingestFlags.length > 0 && (
-            <div className="p-3 rounded-lg text-xs space-y-2"
+            <div className="p-3 rounded-lg text-xs space-y-3"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              <div style={{ color: 'var(--text-primary)' }}>
-                {ingestFlags.length} token{ingestFlags.length === 1 ? '' : 's'} disagree with CC-CEDICT — review below.
+              <div className="space-y-1">
+                <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and CC-CEDICT
+                </div>
+                <div style={{ color: 'var(--text-tertiary)' }}>
+                  Both sources are usually right, but they differ on polyphone readings, neutral tones,
+                  segmentation, and coverage. Apply a CEDICT suggestion when you're unsure — keep the AI's
+                  value if you know it's a valid variant, dialect, or neologism. You can also edit any
+                  field manually in the tokens below.
+                </div>
               </div>
+
               {ingestFlags.slice(0, 5).map((f, i) => {
                 if (f.kind === 'segmentation-disagreement') {
                   const pieces = f.tokenIndices.map((idx) => tokens[idx]?.surfaceForm ?? '?').join(' + ');
                   const firstSuggestion = f.cedictSuggestions[0];
+                  const pinyinMatches = f.cedictSuggestions.some(
+                    (s) => s.replace(/\s+/g, '') === f.llmValue.replace(/\s+/g, ''),
+                  );
                   return (
-                    <div key={i} className="font-mono flex flex-wrap items-center gap-1">
-                      <span style={{ color: 'var(--text-primary)' }}>{pieces}</span>
-                      <span style={{ opacity: 0.6 }}>→ CEDICT compound:</span>
-                      <span>{f.headword} [{firstSuggestion}]</span>
-                      <button
-                        type="button"
-                        onClick={() => mergeTokensIntoCompound(f)}
-                        className="px-1.5 py-0.5 rounded transition-colors"
-                        style={{
-                          background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
-                          color: 'var(--accent)',
-                          border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-                        }}
-                      >
-                        Merge
-                      </button>
-                      <span style={{ opacity: 0.5 }}>({f.kind})</span>
+                    <div key={i} className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                      <div style={{ color: 'var(--text-primary)' }}>
+                        <strong>
+                          {pinyinMatches ? 'Split compound.' : 'Split compound + pinyin mismatch.'}
+                        </strong>{' '}
+                        The AI tokenized this as <span className="font-mono">{pieces}</span>
+                        {f.llmValue && (
+                          <>
+                            {' '}(<span className="font-mono">{f.llmValue}</span>)
+                          </>
+                        )}
+                        , but CEDICT has <span className="font-mono">{f.headword}</span>{' '}
+                        (<span className="font-mono">{firstSuggestion}</span>) as one word
+                        {f.cedictEnglish ? ` meaning "${f.cedictEnglish}"` : ''}.
+                        {!pinyinMatches && (
+                          <> Merging also fixes the pinyin (e.g. neutral tone on the second syllable).</>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => mergeTokensIntoCompound(f)}
+                          className="px-2 py-0.5 rounded transition-colors font-mono"
+                          style={{
+                            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+                            color: 'var(--accent)',
+                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                          }}
+                        >
+                          Merge into {f.headword} [{firstSuggestion}]
+                        </button>
+                        <span style={{ color: 'var(--text-tertiary)' }}>
+                          — or leave split if the AI was right
+                        </span>
+                      </div>
                     </div>
                   );
                 }
+
+                if (f.kind === 'cedict-unknown') {
+                  return (
+                    <div key={i} className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                      <div style={{ color: 'var(--text-primary)' }}>
+                        <strong className="font-mono">{f.headword}</strong> isn't in CEDICT — often a
+                        name, neologism, or regional usage. The AI's pinyin{' '}
+                        <span className="font-mono">{f.llmValue || '(empty)'}</span> is unchecked.
+                      </div>
+                      <div style={{ color: 'var(--text-tertiary)' }}>
+                        Verify manually in the tokens below before saving.
+                      </div>
+                    </div>
+                  );
+                }
+
+                // cedict-disagreement
                 return (
-                  <div key={i} className="font-mono flex flex-wrap items-center gap-1">
-                    <span style={{ color: 'var(--text-primary)' }}>{f.headword}:</span>
-                    <span>{f.llmValue || '(empty)'}</span>
-                    {f.cedictSuggestions.length > 0 && (
-                      <>
-                        <span style={{ opacity: 0.6 }}>→ CEDICT:</span>
-                        {f.cedictSuggestions.map((sugg) => (
-                          <button
-                            key={sugg}
-                            type="button"
-                            onClick={() => applyCedictSuggestion(f.headword, sugg)}
-                            className="px-1.5 py-0.5 rounded transition-colors"
-                            style={{
-                              background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
-                              color: 'var(--accent)',
-                              border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-                            }}
-                          >
-                            {sugg}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                    <span style={{ opacity: 0.5 }}>({f.kind})</span>
+                  <div key={i} className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                    <div style={{ color: 'var(--text-primary)' }}>
+                      <strong className="font-mono">{f.headword}:</strong> the AI chose{' '}
+                      <span className="font-mono">{f.llmValue || '(empty)'}</span>, but CEDICT lists
+                      {f.cedictSuggestions.length === 1 ? ' this reading:' : ' these readings:'}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {f.cedictSuggestions.map((sugg) => (
+                        <button
+                          key={sugg}
+                          type="button"
+                          onClick={() => applyCedictSuggestion(f.headword, sugg)}
+                          className="px-2 py-0.5 rounded transition-colors font-mono"
+                          style={{
+                            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+                            color: 'var(--accent)',
+                            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                          }}
+                        >
+                          Use {sugg}
+                        </button>
+                      ))}
+                      <span style={{ color: 'var(--text-tertiary)' }}>
+                        — or keep the AI's value if it's correct
+                      </span>
+                    </div>
                   </div>
                 );
               })}
