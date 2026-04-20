@@ -10,6 +10,7 @@
 import * as local from './localRepo';
 import { localDb, type SyncOp } from './localDb';
 import { supabase } from '../lib/supabase';
+import { removeStorageObjects } from '../lib/audioStorage';
 import { getDeviceId, scheduleSyncSoon } from './syncEngine';
 import {
   getUserId as getRemoteUserId,
@@ -153,11 +154,15 @@ export async function updateSentenceTags(id: string, tags: string[]): Promise<vo
 }
 
 export async function deleteSentenceById(id: string): Promise<void> {
+  const audioPaths = (await local.getAudioRecordingsBySentence(id))
+    .map((r) => r.storagePath)
+    .filter((p): p is string => !!p);
   await local.deleteSentenceById(id);
   await enqueue({
     op: 'deleteEntity',
     payload: { entity_type: 'sentence', entity_id: id },
   });
+  await removeStorageObjects(audioPaths);
 }
 
 export async function deleteSentencesBySource(source: string): Promise<void> {
@@ -315,6 +320,7 @@ export async function deleteReviewLogsByCardIds(cardIds: string[]): Promise<void
 // ============================================================
 
 export async function deleteAllUserData(): Promise<void> {
+  const audioPaths = await local.getAllAudioStoragePaths();
   await local.deleteAllUserData();
   // Clear hydration + USN so the app can rehydrate from server if
   // the delete op doesn't push (e.g. user is offline or closes the tab).
@@ -322,6 +328,7 @@ export async function deleteAllUserData(): Promise<void> {
   await localDb.syncMeta.delete('lastUsn');
   await localDb.syncMeta.delete('schemaVersion');
   await enqueue({ op: 'deleteAllData', payload: {} });
+  await removeStorageObjects(audioPaths);
 }
 
 // ============================================================
@@ -363,6 +370,8 @@ export async function updateAudioRecordingName(id: string, name: string) {
 }
 
 export async function deleteAudioRecording(id: string) {
+  const rec = await local.getAudioRecording(id);
+
   // Coalesce any still-pending upsert for this id so record-then-delete
   // offline doesn't waste an upload. Narrowed by the `op` index first.
   const pendingUpsert = await localDb.outbox
@@ -379,6 +388,10 @@ export async function deleteAudioRecording(id: string) {
     op: 'deleteEntity',
     payload: { entity_type: 'audio_recording', entity_id: id },
   });
+  // Clean up the Storage blob. The server's AFTER DELETE trigger no
+  // longer can (platform change — migration 009 swallowed the error
+  // so deletes stop failing), so the client handles it explicitly.
+  await removeStorageObjects([rec?.storagePath]);
 }
 
 /**

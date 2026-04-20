@@ -327,6 +327,17 @@ export async function getAllAudioRecordings(): Promise<AudioRecording[]> {
   return data.map(audioRecordingFromRow);
 }
 
+/** Storage paths for every audio recording the caller can see (RLS-
+ *  scoped to the current user). Used by the orphan-audio sweep. */
+export async function getAllAudioStoragePaths(): Promise<string[]> {
+  const data = await fetchAllPages((from, to) =>
+    supabase.from('audio_recordings').select('storage_path').order('id').range(from, to),
+  );
+  return data
+    .map((r) => (r as { storage_path: string | null }).storage_path)
+    .filter((p): p is string => !!p);
+}
+
 // ============================================================
 // Sync metadata
 // ============================================================

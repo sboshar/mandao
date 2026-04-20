@@ -11,6 +11,7 @@
  *   - graves: delete from local Dexie
  */
 import { supabase } from '../lib/supabase';
+import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
 import {
   meaningFromRow,
@@ -244,7 +245,7 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
     const ext = extensionFromMime(payload.mimeType);
     storagePath = `${userId}/${payload.id}.${ext}`;
     const { error: uploadErr } = await supabase.storage
-      .from('audio-recordings')
+      .from(AUDIO_BUCKET)
       .upload(storagePath, rec.blob!, {
         contentType: payload.mimeType,
         upsert: true,
@@ -264,9 +265,7 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
       // this was a metadata-only push, the cascade from the deleted
       // sentence already removed the object via the delete trigger.
       if (isFirstUpload) {
-        try {
-          await supabase.storage.from('audio-recordings').remove([storagePath!]);
-        } catch {}
+        await removeStorageObjects([storagePath]);
       }
       await localDb.audioRecordings.delete(payload.id);
       return;
