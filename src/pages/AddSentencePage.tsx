@@ -381,6 +381,23 @@ export function AddSentencePage() {
         characters: t.characters,
       }));
 
+      // Flags record what the LLM originally emitted vs what finally
+      // landed on the Meaning row. Recompute storedPinyin from the
+      // final tokenInputs (in case the user hand-edited after seeing
+      // the flag), and drop any flag whose headword no longer appears
+      // in the tokens (user deleted or retokenized that word).
+      const finalPinyinByHeadword = new Map<string, string>();
+      for (const t of tokenInputs) finalPinyinByHeadword.set(t.surfaceForm, t.pinyinNumeric);
+      const flagsForSave = ingestFlags
+        .filter((f) => finalPinyinByHeadword.has(f.headword))
+        .map((f) => ({
+          headword: f.headword,
+          storedPinyin: finalPinyinByHeadword.get(f.headword)!,
+          llmValue: f.llmValue,
+          flagKind: f.kind,
+          cedictSuggestions: f.cedictSuggestions,
+        }));
+
       let createdSentenceId: string | null = null;
       try {
         createdSentenceId = await ingestSentence({
@@ -388,13 +405,7 @@ export function AddSentencePage() {
           english: english.trim(),
           tokens: tokenInputs,
           tags,
-          flags: ingestFlags.map((f) => ({
-            headword: f.headword,
-            storedPinyin: f.chosenValue,
-            llmValue: f.llmValue,
-            flagKind: f.kind,
-            cedictSuggestions: f.cedictSuggestions,
-          })),
+          flags: flagsForSave,
         });
       } catch (e: any) {
         // In tutorial mode, skip duplicate errors so re-running works

@@ -14,14 +14,6 @@ export interface ResolvePinyinResult {
   pinyinNumeric: string;
   /** Non-null when the resolution wasn't a clean pass-through. */
   flag: ResolvePinyinFlag | null;
-  /**
-   * True when the LLM's value was malformed (diacritics, bad spacing).
-   * Ephemeral — used by callers to decide whether to retry the LLM.
-   * Not persisted; if the retry also fails, the resulting flag is
-   * still cedict-based (auto-corrected / cedict-disagreement / etc.)
-   * based on what CEDICT says about the headword.
-   */
-  hasFormatViolation: boolean;
 }
 
 const NUMERIC_FORMAT = /^[a-z]+[1-5](\s[a-z]+[1-5])*$/;
@@ -34,9 +26,6 @@ export function collapsePinyin(s: string): string {
   return s.replace(/\s+/g, '').toLowerCase();
 }
 
-const normalize = normalizePinyin;
-const collapse = collapsePinyin;
-
 /**
  * Character-level Levenshtein on space-collapsed pinyin. Scales with
  * how different the two readings actually are.
@@ -46,8 +35,8 @@ const collapse = collapsePinyin;
  *   "ge1ge1" vs "ge1ge5" → 1
  */
 function charEditDistance(a: string, b: string): number {
-  const as = collapse(a);
-  const bs = collapse(b);
+  const as = collapsePinyin(a);
+  const bs = collapsePinyin(b);
   const m = as.length;
   const n = bs.length;
   if (m === 0) return n;
@@ -74,11 +63,11 @@ function pickClosest(
   llmValue: string,
   entries: DictEntry[],
 ): { entry: DictEntry; distance: number } {
-  const normalized = normalize(llmValue);
+  const normalized = normalizePinyin(llmValue);
   let best = entries[0];
-  let bestDist = charEditDistance(normalized, normalize(best.pinyin));
+  let bestDist = charEditDistance(normalized, normalizePinyin(best.pinyin));
   for (let i = 1; i < entries.length; i++) {
-    const d = charEditDistance(normalized, normalize(entries[i].pinyin));
+    const d = charEditDistance(normalized, normalizePinyin(entries[i].pinyin));
     if (d < bestDist) {
       best = entries[i];
       bestDist = d;
@@ -106,9 +95,7 @@ export function resolvePinyin(
   headword: string,
   llmValue: string,
 ): ResolvePinyinResult {
-  const normalized = normalize(llmValue);
-  const hasFormatViolation = !NUMERIC_FORMAT.test(normalized);
-
+  const normalized = normalizePinyin(llmValue);
   const entries = lookup(headword);
   const cedictSuggestions = entries.map((e) => e.pinyin.toLowerCase());
 
@@ -122,14 +109,13 @@ export function resolvePinyin(
         chosenValue: normalized,
         cedictSuggestions: [],
       },
-      hasFormatViolation,
     };
   }
 
   if (entries.length === 1) {
     const canonical = entries[0].pinyin.toLowerCase();
-    if (collapse(normalized) === collapse(canonical)) {
-      return { pinyinNumeric: canonical, flag: null, hasFormatViolation };
+    if (collapsePinyin(normalized) === collapsePinyin(canonical)) {
+      return { pinyinNumeric: canonical, flag: null };
     }
     return {
       pinyinNumeric: canonical,
@@ -140,19 +126,14 @@ export function resolvePinyin(
         chosenValue: canonical,
         cedictSuggestions,
       },
-      hasFormatViolation,
     };
   }
 
   const match = entries.find(
-    (e) => collapse(e.pinyin) === collapse(normalized),
+    (e) => collapsePinyin(e.pinyin) === collapsePinyin(normalized),
   );
   if (match) {
-    return {
-      pinyinNumeric: match.pinyin.toLowerCase(),
-      flag: null,
-      hasFormatViolation,
-    };
+    return { pinyinNumeric: match.pinyin.toLowerCase(), flag: null };
   }
 
   const COERCE_THRESHOLD = 1;
@@ -167,7 +148,6 @@ export function resolvePinyin(
         chosenValue: entry.pinyin.toLowerCase(),
         cedictSuggestions,
       },
-      hasFormatViolation,
     };
   }
 
@@ -180,6 +160,5 @@ export function resolvePinyin(
       chosenValue: normalized,
       cedictSuggestions,
     },
-    hasFormatViolation,
   };
 }

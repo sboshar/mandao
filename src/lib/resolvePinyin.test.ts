@@ -73,29 +73,22 @@ describe('resolvePinyin', () => {
     });
   });
 
-  describe('format violations', () => {
-    it('signals diacritic-in-numeric and still CEDICT-overrides when possible', () => {
+  describe('malformed LLM values still resolve via CEDICT', () => {
+    it('overrides diacritic-in-numeric to CEDICT when headword is single-reading', () => {
       const r = resolvePinyin('渴', 'kè3');
-      expect(r.hasFormatViolation).toBe(true);
-      // CEDICT has 渴 [ke3] as a single entry — we still overwrite with it.
       expect(r.pinyinNumeric).toBe('ke3');
       expect(r.flag?.kind).toBe('auto-corrected');
     });
 
-    it('signals stray spaces between syllable and digit', () => {
+    it('normalizes stray spaces and still CEDICT-overrides', () => {
       const r = resolvePinyin('虽', 'sui 1');
-      expect(r.hasFormatViolation).toBe(true);
       expect(r.pinyinNumeric).toBe('sui1');
     });
 
-    it('signals missing tone digit', () => {
-      const r = resolvePinyin('黑', 'hei');
-      expect(r.hasFormatViolation).toBe(true);
-    });
-
-    it('lowercases uppercase without flagging', () => {
+    it('lowercases and accepts valid value without flagging', () => {
       const r = resolvePinyin('我', 'Wo3');
-      expect(r.hasFormatViolation).toBe(false);
+      expect(r.pinyinNumeric).toBe('wo3');
+      expect(r.flag).toBeNull();
     });
   });
 

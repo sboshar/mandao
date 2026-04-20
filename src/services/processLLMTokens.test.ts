@@ -56,12 +56,10 @@ describe('processLLMTokens', () => {
     expect(r.tokens[0].pinyinNumeric).toBe('ge1 ge5');
   });
 
-  it('signals format violations and still CEDICT-overrides', () => {
+  it('overrides malformed LLM pinyin via CEDICT on single-reading headwords', () => {
     const r = processLLMTokens(
       response([token('渴', 'kè3', 'thirsty')]),
     );
-    expect(r.hasFormatViolation).toBe(true);
-    // Even on a format violation we go through CEDICT, so 渴 is corrected to ke3.
     expect(r.tokens[0].pinyinNumeric).toBe('ke3');
     expect(r.flags[0].kind).toBe('auto-corrected');
   });
@@ -76,13 +74,13 @@ describe('processLLMTokens', () => {
   });
 
   it('passes novel words through with cedict-unknown flag', () => {
+    // "佛系青年" (Buddhist-style youth — 2010s slang) is a well-known
+    // internet coinage not in CC-CEDICT.
     const r = processLLMTokens(
-      response([token('莫须有', 'mo4 xu1 you3', 'trumped up')]),
+      response([token('佛系青年', 'fo2 xi4 qing1 nian2', 'apathetic youth')]),
     );
-    expect(r.tokens[0].pinyinNumeric).toBe('mo4 xu1 you3');
-    // Depending on whether 莫须有 is in CEDICT or not. If it is, no flag;
-    // if not, cedict-unknown. Either is fine behavior.
-    const flagKinds = r.flags.map((f) => f.kind);
-    expect(flagKinds.every((k) => k === 'cedict-unknown' || k === 'auto-corrected' || k === 'polyphone-coerced')).toBe(true);
+    expect(r.tokens[0].pinyinNumeric).toBe('fo2 xi4 qing1 nian2');
+    expect(r.flags).toHaveLength(1);
+    expect(r.flags[0].kind).toBe('cedict-unknown');
   });
 });

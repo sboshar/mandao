@@ -1,5 +1,6 @@
 import { resegmentWithCedict, type Resegmentable } from '../lib/resegment';
 import { resolvePinyin, type ResolvePinyinFlag } from '../lib/resolvePinyin';
+import { lookup as cedictLookup } from '../lib/cedict';
 import type { LLMResponse, LLMTokenResponse } from './llmPrompt';
 
 interface LLMTokenResegInput extends Resegmentable {
@@ -18,9 +19,13 @@ export interface ProcessedToken extends LLMTokenResponse {
 export interface ProcessResult {
   tokens: ProcessedToken[];
   flags: ResolvePinyinFlag[];
-  /** True iff any token still has a format violation after resolution.
-   *  Caller should retry the LLM once with a stricter reminder. */
-  hasFormatViolation: boolean;
+}
+
+function cedictGloss(surfaceForm: string): string | null {
+  const entries = cedictLookup(surfaceForm);
+  if (entries.length === 0) return null;
+  const first = entries[0].english.split('/').filter(Boolean)[0];
+  return first?.trim() || null;
 }
 
 /**
@@ -29,8 +34,9 @@ export interface ProcessResult {
  *   2. For each token, run resolvePinyin: CEDICT overrides for
  *      single-reading headwords; coerce close polyphone misses; flag
  *      novel readings and CEDICT-unknown words.
- *   3. Collect flags + detect residual format violations so the caller
- *      can decide whether to retry the LLM.
+ *   3. For merged compounds, prefer CEDICT's gloss over the first
+ *      constituent character's english (which would otherwise be e.g.
+ *      "elder brother" for a merged 哥哥 rather than "older brother").
  */
 export function processLLMTokens(response: LLMResponse): ProcessResult {
   const input: LLMTokenResegInput[] = response.tokens.map((t) => ({
@@ -43,24 +49,29 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
 
   const tokens: ProcessedToken[] = [];
   const flags: ResolvePinyinFlag[] = [];
-  let hasFormatViolation = false;
 
   for (const seg of resegmented) {
     const firstSource = seg.sources[0]?.original;
-    // For a merged compound, individual source pinyins were cleared; let
-    // resolvePinyin fall into the CEDICT-override branch with empty input.
+    const isMerged = seg.sources.length > 1;
     const llmPinyin = seg.pinyinNumeric || firstSource?.pinyinNumeric || '';
 
     const result = resolvePinyin(seg.surfaceForm, llmPinyin);
     if (result.flag) flags.push(result.flag);
-    if (result.hasFormatViolation) hasFormatViolation = true;
+
+    const base: LLMTokenResponse = firstSource ?? ({} as LLMTokenResponse);
+    const englishOverride = isMerged ? cedictGloss(seg.surfaceForm) : null;
 
     tokens.push({
-      ...(firstSource ?? ({} as LLMTokenResponse)),
+      ...base,
       surfaceForm: seg.surfaceForm,
       pinyinNumeric: result.pinyinNumeric,
+      english: englishOverride ?? base.english ?? '',
+      // Character-level breakdown from the first source can't describe
+      // the compound accurately; clear it so the user re-populates from
+      // the compound's canonical definition.
+      characters: isMerged ? undefined : base.characters,
     });
   }
 
-  return { tokens, flags, hasFormatViolation };
+  return { tokens, flags };
 }

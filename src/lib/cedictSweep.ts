@@ -24,12 +24,12 @@ function isCJK(s: string): boolean {
  * Deduped by substring, sorted longest-first so compound hits appear above
  * character hits in the rendered prompt block.
  */
-const MAX_HITS = 40;
-
 export async function gatherCedictHits(
   chinese: string,
   maxLen = 4,
 ): Promise<CedictHit[]> {
+  /** Bound prompt size for long, compound-dense sentences. */
+  const MAX_HITS = 40;
   await loadCedict();
   const seen = new Map<string, CedictHit>();
   for (let i = 0; i < chinese.length; i++) {
