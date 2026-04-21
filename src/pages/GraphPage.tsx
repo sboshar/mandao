@@ -58,6 +58,25 @@ function getThemeColors() {
   };
 }
 
+/** Mix two hex colors in RGB space; t=0 → a, t=1 → b. Used for node
+ *  highlights (lighter color toward the top-left for a gradient sheen). */
+function mixColor(a: string, b: string, t: number): string {
+  const parse = (c: string) => {
+    const h = c.replace('#', '');
+    const n = h.length === 3 ? h.split('').map((ch) => ch + ch).join('') : h;
+    return [
+      parseInt(n.slice(0, 2), 16) || 0,
+      parseInt(n.slice(2, 4), 16) || 0,
+      parseInt(n.slice(4, 6), 16) || 0,
+    ];
+  };
+  const [ar, ag, ab] = parse(a);
+  const [br, bg, bb] = parse(b);
+  const mix = (x: number, y: number) => Math.round(x + (y - x) * t);
+  const hex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${hex(mix(ar, br))}${hex(mix(ag, bg))}${hex(mix(ab, bb))}`;
+}
+
 function getNodeColor(type: GraphNode['type'], colors: ReturnType<typeof getThemeColors>): string {
   switch (type) {
     case 'word': return colors.word;
@@ -201,12 +220,32 @@ export function GraphPage() {
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [colors, setColors] = useState(getThemeColors);
+  const [loading, setLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
 
   useEffect(() => {
-    buildGraphData().then(setGraphData);
+    buildGraphData().then((data) => {
+      setGraphData(data);
+      setLoading(false);
+    });
   }, []);
+
+  /** Precomputed neighbor map for connection-highlight on hover.
+   *  Recomputed on data change (rare), O(links) memory — fine. */
+  const neighborsById = useRef(new Map<string, Set<string>>());
+  useEffect(() => {
+    const map = new Map<string, Set<string>>();
+    for (const link of graphData.links) {
+      const s = typeof link.source === 'string' ? link.source : (link.source as any).id;
+      const t = typeof link.target === 'string' ? link.target : (link.target as any).id;
+      if (!map.has(s)) map.set(s, new Set());
+      if (!map.has(t)) map.set(t, new Set());
+      map.get(s)!.add(t);
+      map.get(t)!.add(s);
+    }
+    neighborsById.current = map;
+  }, [graphData]);
 
   // Re-read colors when theme changes
   useEffect(() => {
@@ -229,13 +268,17 @@ export function GraphPage() {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  // Zoom to fit on load
+  // Zoom to fit once the force simulation has had time to lay nodes out.
+  // A single zoom after ~1s gets the camera close; a second at ~2.5s
+  // re-centers after the sim cools so the final view isn't off-screen.
   useEffect(() => {
-    if (graphData.nodes.length > 0 && fgRef.current) {
-      setTimeout(() => {
-        fgRef.current?.zoomToFit(400, 60);
-      }, 500);
-    }
+    if (graphData.nodes.length === 0 || !fgRef.current) return;
+    const first = setTimeout(() => fgRef.current?.zoomToFit(400, 80), 1000);
+    const settle = setTimeout(() => fgRef.current?.zoomToFit(600, 80), 2500);
+    return () => {
+      clearTimeout(first);
+      clearTimeout(settle);
+    };
   }, [graphData]);
 
   const handleNodeClick = useCallback(
@@ -260,32 +303,47 @@ export function GraphPage() {
       const x = n.x || 0;
       const y = n.y || 0;
       const isHovered = hoveredNode?.id === n.id;
+      const isNeighbor =
+        hoveredNode !== null &&
+        hoveredNode.id !== n.id &&
+        neighborsById.current.get(hoveredNode.id)?.has(n.id);
+      const dimmed = hoveredNode !== null && !isHovered && !isNeighbor;
       const baseSize = n.type === 'sentence' ? 4 : n.type === 'pinyin' ? 5 : 6;
       const size = baseSize + Math.sqrt(n.weight) * 2;
       const fontSize = Math.max(10 / globalScale, 2);
       const nodeColor = getNodeColor(n.type, colors);
 
-      // Glow effect on hover
-      if (isHovered) {
-        ctx.shadowColor = nodeColor;
-        ctx.shadowBlur = 20;
-      }
+      // Soft ambient glow on every node so the canvas feels alive even
+      // without hover. Stronger glow + highlight on hovered/neighbor.
+      ctx.shadowColor = nodeColor;
+      ctx.shadowBlur = isHovered ? 24 : isNeighbor ? 12 : 6;
 
-      // Node circle
+      // Radial gradient fill for a bit of dimensionality.
+      const grad = ctx.createRadialGradient(
+        x - size * 0.3,
+        y - size * 0.3,
+        size * 0.2,
+        x,
+        y,
+        size,
+      );
+      grad.addColorStop(0, mixColor(nodeColor, '#ffffff', 0.35));
+      grad.addColorStop(1, nodeColor);
+
       ctx.beginPath();
       ctx.arc(x, y, size, 0, 2 * Math.PI);
-      ctx.fillStyle = nodeColor;
-      ctx.globalAlpha = isHovered ? 1 : 0.85;
+      ctx.fillStyle = grad;
+      ctx.globalAlpha = dimmed ? 0.18 : isHovered ? 1 : 0.92;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
 
-      // Ring
-      if (n.type !== 'sentence') {
-        ctx.strokeStyle = colors.bgSurface;
-        ctx.lineWidth = 1.5 / globalScale;
-        ctx.stroke();
-      }
+      // Crisp ring separates overlapping nodes.
+      ctx.strokeStyle = colors.bgBase;
+      ctx.lineWidth = 1.2 / globalScale;
+      ctx.globalAlpha = dimmed ? 0.25 : 1;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
 
       // Label
       if (globalScale > 0.5 || isHovered) {
@@ -297,23 +355,27 @@ export function GraphPage() {
         if (n.type === 'sentence' || n.type === 'pinyin') {
           // Label below node
           ctx.fillStyle = colors.textTertiary;
+          ctx.globalAlpha = dimmed ? 0.3 : 1;
           ctx.fillText(label, x, y + size + fontSize * 0.8);
+          ctx.globalAlpha = 1;
         } else {
-          // Character/word label inside/on node
+          // Character/word label inside the node
           const charSize = Math.max(14 / globalScale, 3);
           ctx.font = `bold ${charSize}px "SF Pro", system-ui, sans-serif`;
           ctx.fillStyle = '#ffffff';
+          ctx.globalAlpha = dimmed ? 0.4 : 1;
           ctx.fillText(label, x, y + 1);
+          ctx.globalAlpha = 1;
 
-          // English below
+          // English below, only when zoomed in or hovered
           if (globalScale > 1.2 || isHovered) {
             ctx.font = `${fontSize * 0.85}px "SF Pro", system-ui, sans-serif`;
             ctx.fillStyle = colors.textTertiary;
+            ctx.globalAlpha = dimmed ? 0.3 : 1;
             const eng =
-              n.english.length > 15
-                ? n.english.slice(0, 14) + '…'
-                : n.english;
+              n.english.length > 15 ? n.english.slice(0, 14) + '…' : n.english;
             ctx.fillText(eng, x, y + size + fontSize);
+            ctx.globalAlpha = 1;
           }
         }
       }
@@ -325,71 +387,88 @@ export function GraphPage() {
     (link: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const source = link.source as any;
       const target = link.target as any;
-      if (!source.x || !target.x) return;
+      if (source.x == null || target.x == null) return;
+
+      const l = link as GraphLink;
+      const touchesHovered =
+        hoveredNode !== null && (source.id === hoveredNode.id || target.id === hoveredNode.id);
+      const dimmed = hoveredNode !== null && !touchesHovered;
+      const opacity = dimmed ? '0d' : touchesHovered ? 'cc' : '33';
 
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
 
-      const l = link as GraphLink;
       if (l.type === 'character-of') {
-        ctx.strokeStyle = colors.character + '33';
-        ctx.lineWidth = 1.5 / globalScale;
+        ctx.strokeStyle = colors.character + opacity;
+        ctx.lineWidth = (touchesHovered ? 2 : 1.5) / globalScale;
       } else if (l.type === 'same-pinyin') {
-        ctx.strokeStyle = colors.pinyin + '26';
-        ctx.lineWidth = 1 / globalScale;
+        ctx.strokeStyle = colors.pinyin + opacity;
+        ctx.lineWidth = (touchesHovered ? 1.6 : 1) / globalScale;
         ctx.setLineDash([4 / globalScale, 4 / globalScale]);
       } else {
-        ctx.strokeStyle = colors.textTertiary + '26';
-        ctx.lineWidth = 0.8 / globalScale;
+        ctx.strokeStyle = colors.textTertiary + opacity;
+        ctx.lineWidth = (touchesHovered ? 1.6 : 0.8) / globalScale;
       }
 
       ctx.stroke();
       ctx.setLineDash([]);
     },
-    [colors]
+    [colors, hoveredNode]
   );
 
   return (
-    <div className="h-screen flex flex-col" style={{ background: 'var(--bg-base)' }}>
-      {/* Header */}
-      <div
-        className="px-3 sm:px-4 pt-9 pb-0.5 backdrop-blur"
-        style={{ background: 'var(--bg-surface)', borderBottom: `1px solid var(--border)` }}
+    <div
+      className="fixed inset-0 overflow-hidden"
+      style={{
+        background: `radial-gradient(ellipse at 50% 45%, var(--bg-surface) 0%, var(--bg-base) 70%, var(--bg-inset) 100%)`,
+      }}
+    >
+      {/* Floating Back button — top-left, sits over the canvas.
+          top-12 clears App.tsx's global top bar (h-10 + some padding). */}
+      <button
+        onClick={() => navigate('/')}
+        className="absolute top-12 left-3 z-40 px-3 py-1.5 rounded-full text-xs font-medium transition-colors backdrop-blur-sm"
+        style={{
+          background: 'color-mix(in srgb, var(--bg-surface) 85%, transparent)',
+          color: 'var(--text-secondary)',
+          border: '1px solid var(--border)',
+        }}
       >
-        <div className="flex items-center justify-between mb-0.5">
-          <button
-            onClick={() => navigate('/')}
-            className="px-3 py-1 rounded-lg text-sm transition-colors"
-            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-          >
-            &larr; Back
-          </button>
-          <h1 className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
-            Graph
-          </h1>
-          <div className="w-16" />
-        </div>
-        <div className="flex items-center justify-center gap-3 sm:gap-4 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-          {([
-            { label: 'Words', color: colors.word },
-            { label: 'Characters', color: colors.character },
-            { label: 'Sentences', color: colors.sentence },
-            { label: 'Pinyin', color: colors.pinyin },
-          ]).map((item) => (
-            <span key={item.label} className="flex items-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-full" style={{ background: item.color }} />
-              {item.label}
-            </span>
-          ))}
-        </div>
+        ← Back
+      </button>
+
+      {/* Floating legend — bottom-right pill */}
+      <div
+        className="absolute bottom-3 right-3 z-40 px-3 py-2 rounded-xl text-xs backdrop-blur-sm flex flex-col gap-1.5"
+        style={{
+          background: 'color-mix(in srgb, var(--bg-surface) 85%, transparent)',
+          border: '1px solid var(--border)',
+          color: 'var(--text-tertiary)',
+        }}
+      >
+        {([
+          { label: 'Words', color: colors.word },
+          { label: 'Characters', color: colors.character },
+          { label: 'Sentences', color: colors.sentence },
+          { label: 'Pinyin', color: colors.pinyin },
+        ]).map((item) => (
+          <span key={item.label} className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full" style={{ background: item.color, boxShadow: `0 0 6px ${item.color}` }} />
+            {item.label}
+          </span>
+        ))}
       </div>
 
-      {/* Hover tooltip */}
+      {/* Hover tooltip — same top-12 offset to clear the global chrome. */}
       {hoveredNode && (
         <div
-          className="absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2.5 rounded-xl shadow-2xl pointer-events-none backdrop-blur-sm"
-          style={{ background: 'var(--bg-surface)', border: `1px solid var(--border)`, color: 'var(--text-primary)' }}
+          className="absolute top-12 left-1/2 -translate-x-1/2 z-40 px-4 py-2.5 rounded-xl shadow-2xl pointer-events-none backdrop-blur-sm"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-surface) 92%, transparent)',
+            border: `1px solid var(--border)`,
+            color: 'var(--text-primary)',
+          }}
         >
           <div className="flex items-center gap-3">
             <span className="text-2xl">{hoveredNode.label}</span>
@@ -401,9 +480,22 @@ export function GraphPage() {
         </div>
       )}
 
-      {/* Graph */}
-      <div ref={containerRef} className="flex-1 relative">
-        {graphData.nodes.length === 0 ? (
+      {/* Graph canvas — fills the viewport */}
+      <div ref={containerRef} className="absolute inset-0">
+        {loading ? (
+          <div className="flex items-center justify-center h-full" style={{ color: 'var(--text-tertiary)' }}>
+            <div className="flex flex-col items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-full animate-spin"
+                style={{
+                  border: '2px solid var(--border)',
+                  borderTopColor: 'var(--accent)',
+                }}
+              />
+              <div className="text-xs">Building graph…</div>
+            </div>
+          </div>
+        ) : graphData.nodes.length === 0 ? (
           <div className="flex items-center justify-center h-full" style={{ color: 'var(--text-tertiary)' }}>
             No data yet. Add some sentences first.
           </div>
