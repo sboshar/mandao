@@ -59,25 +59,6 @@ function getThemeColors() {
   };
 }
 
-/** Mix two hex colors in RGB space; t=0 → a, t=1 → b. Used for node
- *  highlights (lighter color toward the top-left for a gradient sheen). */
-function mixColor(a: string, b: string, t: number): string {
-  const parse = (c: string) => {
-    const h = c.replace('#', '');
-    const n = h.length === 3 ? h.split('').map((ch) => ch + ch).join('') : h;
-    return [
-      parseInt(n.slice(0, 2), 16) || 0,
-      parseInt(n.slice(2, 4), 16) || 0,
-      parseInt(n.slice(4, 6), 16) || 0,
-    ];
-  };
-  const [ar, ag, ab] = parse(a);
-  const [br, bg, bb] = parse(b);
-  const mix = (x: number, y: number) => Math.round(x + (y - x) * t);
-  const hex = (n: number) => n.toString(16).padStart(2, '0');
-  return `#${hex(mix(ar, br))}${hex(mix(ag, bg))}${hex(mix(ab, bb))}`;
-}
-
 function getNodeColor(type: GraphNode['type'], colors: ReturnType<typeof getThemeColors>): string {
   switch (type) {
     case 'word': return colors.word;
@@ -251,6 +232,21 @@ export function GraphPage() {
     neighborsById.current = map;
   }, [graphData]);
 
+  // Tune the d3-force simulation once data has loaded.
+  //   - Weaker repulsion keeps disconnected islands from drifting to
+  //     opposite corners with no counterforce to pull them back.
+  //   - Link distance + strength control how tightly connected nodes
+  //     cluster. The defaults are too loose for our small graphs.
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg || graphData.nodes.length === 0) return;
+    const charge = fg.d3Force('charge') as { strength: (s: number) => unknown } | undefined;
+    charge?.strength(-40);
+    const link = fg.d3Force('link') as { distance: (d: number) => unknown } | undefined;
+    link?.distance(32);
+    fg.d3ReheatSimulation();
+  }, [graphData]);
+
   // Re-read colors when theme changes
   useEffect(() => {
     const observer = new MutationObserver(() => setColors(getThemeColors()));
@@ -317,27 +313,20 @@ export function GraphPage() {
       const fontSize = Math.max(10 / globalScale, 2);
       const nodeColor = getNodeColor(n.type, colors);
 
-      // Soft ambient glow on every node so the canvas feels alive even
-      // without hover. Stronger glow + highlight on hovered/neighbor.
-      ctx.shadowColor = nodeColor;
-      ctx.shadowBlur = isHovered ? 24 : isNeighbor ? 12 : 6;
-
-      // Radial gradient fill for a bit of dimensionality.
-      const grad = ctx.createRadialGradient(
-        x - size * 0.3,
-        y - size * 0.3,
-        size * 0.2,
-        x,
-        y,
-        size,
-      );
-      grad.addColorStop(0, mixColor(nodeColor, '#ffffff', 0.35));
-      grad.addColorStop(1, nodeColor);
+      // Matte flat fill — no gradient, no ambient glow. Glow only when
+      // the user is inspecting this node (hover) or its direct neighbor.
+      if (isHovered) {
+        ctx.shadowColor = nodeColor;
+        ctx.shadowBlur = 16;
+      } else if (isNeighbor) {
+        ctx.shadowColor = nodeColor;
+        ctx.shadowBlur = 6;
+      }
 
       ctx.beginPath();
       ctx.arc(x, y, size, 0, 2 * Math.PI);
-      ctx.fillStyle = grad;
-      ctx.globalAlpha = dimmed ? 0.18 : isHovered ? 1 : 0.92;
+      ctx.fillStyle = nodeColor;
+      ctx.globalAlpha = dimmed ? 0.18 : 1;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
