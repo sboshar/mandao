@@ -495,7 +495,9 @@ export function GraphPage() {
         ctx.strokeStyle = colors.pinyin + opacity;
         ctx.setLineDash([4 / globalScale, 4 / globalScale]);
       } else {
-        ctx.strokeStyle = colors.textTertiary + opacity;
+        // in-sentence: use textSecondary (medium gray) instead of
+        // textTertiary (light gray) so these edges aren't washed out.
+        ctx.strokeStyle = colors.textSecondary + opacity;
       }
 
       ctx.stroke();
