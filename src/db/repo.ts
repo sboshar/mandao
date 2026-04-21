@@ -153,18 +153,37 @@ export async function updateSentenceTags(id: string, tags: string[]): Promise<vo
   await enqueue({ op: 'updateTags', payload: { id, tags } });
 }
 
-/** Enqueue deleteEntity ops for an orphan closure. Concurrent because
- *  each enqueue is its own Dexie transaction — avoids the per-call
- *  await stall when the closure is large. */
+/** Enqueue deleteEntity ops for an orphan closure in a single Dexie
+ *  bulkAdd transaction. Using a per-op `enqueue` fan-out here would
+ *  spin up one transaction per op, which the backfill sweep can push
+ *  into the thousands on an old account. */
 export async function enqueueOrphanDeletes(meaningIds: string[], linkIds: string[]): Promise<void> {
-  await Promise.all([
-    ...linkIds.map((lid) =>
-      enqueue({ op: 'deleteEntity', payload: { entity_type: 'meaning_link', entity_id: lid } }),
-    ),
-    ...meaningIds.map((mid) =>
-      enqueue({ op: 'deleteEntity', payload: { entity_type: 'meaning', entity_id: mid } }),
-    ),
-  ]);
+  if (meaningIds.length === 0 && linkIds.length === 0) return;
+  const now = Date.now();
+  const deviceId = getDeviceId();
+  const rows: SyncOp[] = [
+    ...linkIds.map((lid) => ({
+      op: 'deleteEntity' as const,
+      payload: { entity_type: 'meaning_link', entity_id: lid },
+      status: 'pending' as const,
+      attempts: 0,
+      createdAt: now,
+      deviceId,
+      opId: uuid(),
+    })),
+    ...meaningIds.map((mid) => ({
+      op: 'deleteEntity' as const,
+      payload: { entity_type: 'meaning', entity_id: mid },
+      status: 'pending' as const,
+      attempts: 0,
+      createdAt: now,
+      deviceId,
+      opId: uuid(),
+    })),
+  ];
+  await localDb.outbox.bulkAdd(rows);
+  if (navigator.onLine) useSyncStore.getState().setStatus('syncing');
+  scheduleSyncSoon();
 }
 
 export async function deleteSentenceById(id: string): Promise<void> {

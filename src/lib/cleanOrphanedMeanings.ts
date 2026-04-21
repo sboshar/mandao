@@ -17,6 +17,11 @@ export interface OrphanMeaningReport {
  * surviving parent meaning_link. Enqueues the same deleteEntity ops
  * the normal sentence-delete path emits so the server catches up.
  *
+ * This seeds findOrphanClosure with the full Meaning table, so the
+ * closure computation touches every link + token row — O(whole
+ * corpus). Intended for manual DevTools invocation only, not any hot
+ * path.
+ *
  * Run from DevTools after loading the app:
  *   await window.__cleanOrphanedMeanings()
  */

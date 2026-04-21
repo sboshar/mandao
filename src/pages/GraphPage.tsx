@@ -78,6 +78,11 @@ function getNodeColor(type: GraphNode['type'], colors: ReturnType<typeof getThem
 // Build graph data from DB
 // ============================================================
 
+// `seen` is snapshotted here at build time. A card reviewed in the
+// same session (via the MeaningCard overlay or another tab) won't
+// un-fog its subtree until the page remounts or buildGraphData() runs
+// again. Acceptable for now — fog is a coarse orientation tool, not a
+// live indicator — but revisit if review-from-graph becomes common.
 async function buildGraphData(): Promise<GraphData> {
   const [meanings, links, sentenceTokens, sentences, cards] = await Promise.all([
     repo.getAllMeanings(),
@@ -400,8 +405,10 @@ export function GraphPage() {
       ctx.stroke();
       ctx.globalAlpha = 1;
 
-      // Label
-      if (globalScale > 0.5 || isHovered) {
+      // Fogged nodes stay as pure color blobs so only the studied
+      // subgraph carries text. `fogged` is false when `isHovered`
+      // (see its definition above), so hover still reveals the label.
+      if (!fogged && (globalScale > 0.5 || isHovered)) {
         const label = n.label;
         const isSingleChar = label.length === 1;
         // A single character can live inside the node; multi-character
@@ -413,25 +420,29 @@ export function GraphPage() {
         ctx.textBaseline = 'middle';
 
         if (labelInside) {
-          // Size the glyph to fit inside the circle. Chinese characters
-          // render at roughly their point size wide/tall, so aiming for
-          // ~1.35× the radius keeps the glyph comfortably inside the ring.
-          // Still clamp to a readable floor so tiny nodes don't become
-          // unreadable pixel blobs when zoomed out.
-          const charSize = Math.min(size * 1.35, 16 / globalScale);
-          ctx.font = `bold ${charSize}px "SF Pro", system-ui, sans-serif`;
-          ctx.fillStyle = '#ffffff';
-          ctx.globalAlpha = dimmed ? 0.4 : 1;
-          ctx.fillText(label, x, y + 1);
-          ctx.globalAlpha = 1;
-
-          if (globalScale > 1.2 || isHovered) {
-            ctx.font = `${fontSize * 0.85}px "SF Pro", system-ui, sans-serif`;
-            ctx.fillStyle = colors.textTertiary;
-            ctx.globalAlpha = dimmed ? 0.3 : 1;
-            const eng = n.english.length > 15 ? n.english.slice(0, 14) + '…' : n.english;
-            ctx.fillText(eng, x, y + size + fontSize);
+          // Inside-glyph is unreadable soup at low zoom — stay as a
+          // blob until we're close enough to actually read the char.
+          if (globalScale > 1.0 || isHovered) {
+            // Size the glyph to fit inside the circle. Chinese characters
+            // render at roughly their point size wide/tall, so aiming for
+            // ~1.35× the radius keeps the glyph comfortably inside the ring.
+            // Still clamp to a readable floor so tiny nodes don't become
+            // unreadable pixel blobs when zoomed out.
+            const charSize = Math.min(size * 1.35, 16 / globalScale);
+            ctx.font = `bold ${charSize}px "SF Pro", system-ui, sans-serif`;
+            ctx.fillStyle = '#ffffff';
+            ctx.globalAlpha = dimmed ? 0.4 : 1;
+            ctx.fillText(label, x, y + 1);
             ctx.globalAlpha = 1;
+
+            if (globalScale > 1.4 || isHovered) {
+              ctx.font = `${fontSize * 0.85}px "SF Pro", system-ui, sans-serif`;
+              ctx.fillStyle = colors.textTertiary;
+              ctx.globalAlpha = dimmed ? 0.3 : 1;
+              const eng = n.english.length > 15 ? n.english.slice(0, 14) + '…' : n.english;
+              ctx.fillText(eng, x, y + size + fontSize);
+              ctx.globalAlpha = 1;
+            }
           }
         } else {
           // Below-node label (sentences, pinyin clusters, multi-char words).
@@ -484,17 +495,19 @@ export function GraphPage() {
       const widthMul = touchesHovered ? 1.5 : inSeenSubgraph ? 1.3 : 1;
 
       // Uniform base width across link types — differentiation is
-      // carried by color (and dash pattern for pinyin).
+      // carried by color alone. Non-fogged edges render thicker so the
+      // visible graph has more presence; fogged edges stay thin to
+      // read as ambient.
+      const baseWidth = fogged ? 1.0 : 1.8;
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
-      ctx.lineWidth = (1.2 * widthMul) / globalScale;
+      ctx.lineWidth = (baseWidth * widthMul) / globalScale;
 
       if (l.type === 'character-of') {
         ctx.strokeStyle = colors.character + opacity;
       } else if (l.type === 'same-pinyin') {
         ctx.strokeStyle = colors.pinyin + opacity;
-        ctx.setLineDash([4 / globalScale, 4 / globalScale]);
       } else {
         // in-sentence: use textSecondary (medium gray) instead of
         // textTertiary (light gray) so these edges aren't washed out.
@@ -502,7 +515,6 @@ export function GraphPage() {
       }
 
       ctx.stroke();
-      ctx.setLineDash([]);
     },
     [colors, hoveredNode, fogEnabled]
   );
