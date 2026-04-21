@@ -5,6 +5,7 @@ import * as repo from '../db/repo';
 import { useNavigationStore } from '../stores/navigationStore';
 import { MeaningCard } from '../components/MeaningCard';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
+import { numericStringToDiacritic } from '../services/toneSandhi';
 
 // ============================================================
 // Graph data types
@@ -170,14 +171,17 @@ async function buildGraphData(): Promise<GraphData> {
     }
   }
 
-  // Only show pinyin nodes that connect 2+ characters
+  // Only show pinyin nodes that connect 2+ characters.
+  // Node ID keeps the numeric form so navigation lookups still work;
+  // the label renders the diacritic form for readability (zài not zai4).
   for (const [pinyin, meaningIds] of pinyinGroups) {
     if (meaningIds.length < 2) continue;
     const nodeId = `p-${pinyin}`;
+    const diacritic = numericStringToDiacritic(pinyin);
     nodes.push({
       id: nodeId,
-      label: pinyin,
-      pinyin: pinyin,
+      label: diacritic,
+      pinyin: diacritic,
       english: `${meaningIds.length} characters`,
       type: 'pinyin',
       weight: meaningIds.length,
