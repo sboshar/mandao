@@ -153,15 +153,77 @@ export async function updateSentenceTags(id: string, tags: string[]): Promise<vo
   await enqueue({ op: 'updateTags', payload: { id, tags } });
 }
 
+/** Enqueue deleteEntity ops for an orphan closure in a single Dexie
+ *  bulkAdd transaction. Using a per-op `enqueue` fan-out here would
+ *  spin up one transaction per op, which the backfill sweep can push
+ *  into the thousands on an old account. */
+export async function enqueueOrphanDeletes(meaningIds: string[], linkIds: string[]): Promise<void> {
+  if (meaningIds.length === 0 && linkIds.length === 0) return;
+  const now = Date.now();
+  const deviceId = getDeviceId();
+  const rows: SyncOp[] = [
+    ...linkIds.map((lid) => ({
+      op: 'deleteEntity' as const,
+      payload: { entity_type: 'meaning_link', entity_id: lid },
+      status: 'pending' as const,
+      attempts: 0,
+      createdAt: now,
+      deviceId,
+      opId: uuid(),
+    })),
+    ...meaningIds.map((mid) => ({
+      op: 'deleteEntity' as const,
+      payload: { entity_type: 'meaning', entity_id: mid },
+      status: 'pending' as const,
+      attempts: 0,
+      createdAt: now,
+      deviceId,
+      opId: uuid(),
+    })),
+  ];
+  await localDb.outbox.bulkAdd(rows);
+  if (navigator.onLine) useSyncStore.getState().setStatus('syncing');
+  scheduleSyncSoon();
+}
+
 export async function deleteSentenceById(id: string): Promise<void> {
-  const audioPaths = (await local.getAudioRecordingsBySentence(id))
+  // Collect audio paths + meanings this sentence was the only reason
+  // for, BEFORE the delete cascades away the sentence_tokens we need
+  // to inspect.
+  const [audioRecs, tokens] = await Promise.all([
+    local.getAudioRecordingsBySentence(id),
+    local.getTokensBySentence(id),
+  ]);
+  const audioPaths = audioRecs
     .map((r) => r.storagePath)
     .filter((p): p is string => !!p);
+  const candidateMeaningIds = [...new Set(tokens.map((t) => t.meaningId))];
+
+  // Delete the sentence — localRepo cascades tokens, cards, review_logs,
+  // and audio_recordings rows.
   await local.deleteSentenceById(id);
+
+  // Find meanings (and their meaning_links) that are now orphaned.
+  // Includes transitive closure: compound-word children freed by the
+  // word's deletion get cleaned up too.
+  const { meanings: orphanedMeanings, links: orphanedLinks } =
+    await local.findOrphanClosure(candidateMeaningIds);
+
+  if (orphanedLinks.length > 0) {
+    await local.deleteMeaningLinksByIds(orphanedLinks);
+  }
+  if (orphanedMeanings.length > 0) {
+    await local.deleteMeaningsByIds(orphanedMeanings);
+  }
+
+  // Sentence delete cascades meaning_links server-side via FK, but we
+  // still enqueue link/meaning deletes so graves are emitted for other
+  // devices to sync.
   await enqueue({
     op: 'deleteEntity',
     payload: { entity_type: 'sentence', entity_id: id },
   });
+  await enqueueOrphanDeletes(orphanedMeanings, orphanedLinks);
   await removeStorageObjects(audioPaths);
 }
 

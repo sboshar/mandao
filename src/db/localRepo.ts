@@ -93,6 +93,96 @@ export async function deleteMeaningLinksByIds(ids: string[]): Promise<void> {
   await localDb.meaningLinks.bulkDelete(ids);
 }
 
+/**
+ * Pure orphan-closure computation — split out of findOrphanClosure so
+ * it's exercisable without Dexie. Given the candidate set and the
+ * current meaning_links + sentence_tokens, returns the meaning IDs
+ * that should be deleted and the meaning_link IDs that should go with
+ * them (any link incident to an orphan, on either end).
+ *
+ * An orphan is a meaning with:
+ *   - no surviving sentence_token pointing at it, AND
+ *   - no surviving meaning_link from a *non-orphan* parent.
+ *
+ * The fixed-point loop handles the transitive case: a character
+ * reachable only from a compound word becomes an orphan once the
+ * compound word is itself determined to be orphan.
+ */
+export function computeOrphanClosure(
+  candidateMeaningIds: string[],
+  allLinks: MeaningLink[],
+  allTokens: SentenceToken[],
+): { meanings: string[]; links: string[] } {
+  if (candidateMeaningIds.length === 0) return { meanings: [], links: [] };
+
+  // Precompute three indexes so the fixed-point loop is O(1) per
+  // lookup, and so the final "which links touch the orphan set" step
+  // doesn't need another full scan:
+  //   referenced:      any remaining sentence_token still points at m
+  //   parentsOf:       m → parent meaning IDs
+  //   childrenOf:      m → child meaning IDs
+  //   linksTouching:   m → meaning_link IDs incident to m
+  const referenced = new Set(allTokens.map((t) => t.meaningId));
+  const parentsOf = new Map<string, string[]>();
+  const childrenOf = new Map<string, string[]>();
+  const linksTouching = new Map<string, string[]>();
+  const pushTo = (m: Map<string, string[]>, k: string, v: string) => {
+    const arr = m.get(k);
+    if (arr) arr.push(v);
+    else m.set(k, [v]);
+  };
+  for (const l of allLinks) {
+    pushTo(parentsOf, l.childMeaningId, l.parentMeaningId);
+    pushTo(childrenOf, l.parentMeaningId, l.childMeaningId);
+    pushTo(linksTouching, l.parentMeaningId, l.id);
+    pushTo(linksTouching, l.childMeaningId, l.id);
+  }
+
+  const orphans = new Set<string>();
+  let candidates = [...candidateMeaningIds];
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const nextCandidates: string[] = [];
+    for (const mId of candidates) {
+      if (orphans.has(mId)) continue;
+      if (referenced.has(mId)) continue;
+      const parents = parentsOf.get(mId) ?? [];
+      const hasLivingParent = parents.some((p) => !orphans.has(p));
+      if (hasLivingParent) continue;
+      orphans.add(mId);
+      changed = true;
+      for (const cId of childrenOf.get(mId) ?? []) {
+        if (!orphans.has(cId)) nextCandidates.push(cId);
+      }
+    }
+    candidates = nextCandidates;
+  }
+
+  const linkIds = new Set<string>();
+  for (const m of orphans) {
+    for (const lid of linksTouching.get(m) ?? []) linkIds.add(lid);
+  }
+  return { meanings: [...orphans], links: [...linkIds] };
+}
+
+/**
+ * Thin Dexie wrapper around computeOrphanClosure — reads the current
+ * meaning_links + sentence_tokens tables and defers to the pure
+ * computation. See computeOrphanClosure for semantics.
+ */
+export async function findOrphanClosure(
+  candidateMeaningIds: string[],
+): Promise<{ meanings: string[]; links: string[] }> {
+  if (candidateMeaningIds.length === 0) return { meanings: [], links: [] };
+  const [allLinks, allTokens] = await Promise.all([
+    localDb.meaningLinks.toArray(),
+    localDb.sentenceTokens.toArray(),
+  ]);
+  return computeOrphanClosure(candidateMeaningIds, allLinks, allTokens);
+}
+
 // ============================================================
 // Sentences
 // ============================================================
