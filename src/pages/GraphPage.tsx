@@ -191,22 +191,7 @@ async function buildGraphData(): Promise<GraphData> {
     });
   }
 
-  // Hide orphaned meaning nodes — rows that no longer appear in any
-  // sentence token, character link, or pinyin cluster after deletes.
-  // Meanings are reusable by design so deleting a sentence doesn't
-  // delete the Meaning row, but once nothing references a meaning it
-  // just clutters the graph with disconnected dots.
-  const connectedIds = new Set<string>();
-  for (const link of graphLinks) {
-    connectedIds.add(link.source);
-    connectedIds.add(link.target);
-  }
-  const visibleNodes = nodes.filter((n) => {
-    if (n.type === 'sentence' || n.type === 'pinyin') return true;
-    return connectedIds.has(n.id);
-  });
-
-  return { nodes: visibleNodes, links: graphLinks };
+  return { nodes, links: graphLinks };
 }
 
 // ============================================================

@@ -93,6 +93,60 @@ export async function deleteMeaningLinksByIds(ids: string[]): Promise<void> {
   await localDb.meaningLinks.bulkDelete(ids);
 }
 
+/**
+ * Given a set of candidate meaning IDs whose parent sentence was just
+ * deleted, compute the transitive closure of meanings that are now
+ * orphaned — no surviving sentence_token and no surviving parent
+ * meaning_link points to them.
+ *
+ * Character meanings only reachable via meaning_links from a compound
+ * word also get cleaned up once the compound word is orphaned.
+ * Returns both the orphan meaning IDs and the meaning_link IDs
+ * referencing any of them (as parent or child), so callers can delete
+ * them + enqueue sync ops in one pass.
+ */
+export async function findOrphanClosure(
+  candidateMeaningIds: string[],
+): Promise<{ meanings: string[]; links: string[] }> {
+  if (candidateMeaningIds.length === 0) return { meanings: [], links: [] };
+
+  const allLinks = await localDb.meaningLinks.toArray();
+  const orphans = new Set<string>();
+  let candidates = [...candidateMeaningIds];
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const nextCandidates: string[] = [];
+    for (const mId of candidates) {
+      if (orphans.has(mId)) continue;
+      const tokenCount = await localDb.sentenceTokens
+        .where('meaningId')
+        .equals(mId)
+        .count();
+      if (tokenCount > 0) continue;
+      const hasLivingParent = allLinks.some(
+        (l) => l.childMeaningId === mId && !orphans.has(l.parentMeaningId),
+      );
+      if (hasLivingParent) continue;
+      orphans.add(mId);
+      changed = true;
+      // Children might be newly orphaned now that this parent is gone.
+      for (const l of allLinks) {
+        if (l.parentMeaningId === mId && !orphans.has(l.childMeaningId)) {
+          nextCandidates.push(l.childMeaningId);
+        }
+      }
+    }
+    candidates = nextCandidates;
+  }
+
+  const links = allLinks
+    .filter((l) => orphans.has(l.parentMeaningId) || orphans.has(l.childMeaningId))
+    .map((l) => l.id);
+  return { meanings: [...orphans], links };
+}
+
 // ============================================================
 // Sentences
 // ============================================================

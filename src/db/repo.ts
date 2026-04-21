@@ -154,14 +154,55 @@ export async function updateSentenceTags(id: string, tags: string[]): Promise<vo
 }
 
 export async function deleteSentenceById(id: string): Promise<void> {
-  const audioPaths = (await local.getAudioRecordingsBySentence(id))
+  // Collect audio paths + meanings this sentence was the only reason
+  // for, BEFORE the delete cascades away the sentence_tokens we need
+  // to inspect.
+  const [audioRecs, tokens] = await Promise.all([
+    local.getAudioRecordingsBySentence(id),
+    local.getSentenceTokensBySentence(id),
+  ]);
+  const audioPaths = audioRecs
     .map((r) => r.storagePath)
     .filter((p): p is string => !!p);
+  const candidateMeaningIds = [...new Set(tokens.map((t) => t.meaningId))];
+
+  // Delete the sentence — localRepo cascades tokens, cards, review_logs,
+  // and audio_recordings rows.
   await local.deleteSentenceById(id);
+
+  // Find meanings (and their meaning_links) that are now orphaned.
+  // Includes transitive closure: compound-word children freed by the
+  // word's deletion get cleaned up too.
+  const { meanings: orphanedMeanings, links: orphanedLinks } =
+    await local.findOrphanClosure(candidateMeaningIds);
+
+  if (orphanedLinks.length > 0) {
+    await local.deleteMeaningLinksByIds(orphanedLinks);
+  }
+  if (orphanedMeanings.length > 0) {
+    await local.deleteMeaningsByIds(orphanedMeanings);
+  }
+
+  // Server-side enqueue. Meaning delete cascades meaning_links via FK,
+  // but we enqueue link deletes too so graves are emitted for other
+  // devices to pick up.
   await enqueue({
     op: 'deleteEntity',
     payload: { entity_type: 'sentence', entity_id: id },
   });
+  for (const linkId of orphanedLinks) {
+    await enqueue({
+      op: 'deleteEntity',
+      payload: { entity_type: 'meaning_link', entity_id: linkId },
+    });
+  }
+  for (const mId of orphanedMeanings) {
+    await enqueue({
+      op: 'deleteEntity',
+      payload: { entity_type: 'meaning', entity_id: mId },
+    });
+  }
+
   await removeStorageObjects(audioPaths);
 }
 
