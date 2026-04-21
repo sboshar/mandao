@@ -259,6 +259,11 @@ export function GraphPage() {
   });
   useEffect(() => {
     localStorage.setItem('mandao_graph_fog', String(fogEnabled));
+    // Once the force simulation has cooled, the canvas stops painting
+    // on its own. Toggling fog changes the paint callbacks' behavior
+    // but won't show until we ask the graph to redraw.
+    const fg = fgRef.current as unknown as { refresh?: () => void } | undefined;
+    fg?.refresh?.();
   }, [fogEnabled]);
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
@@ -441,7 +446,7 @@ export function GraphPage() {
         }
       }
     },
-    [hoveredNode, colors]
+    [hoveredNode, colors, fogEnabled]
   );
 
   const paintLink = useCallback(
@@ -481,7 +486,7 @@ export function GraphPage() {
       ctx.stroke();
       ctx.setLineDash([]);
     },
-    [colors, hoveredNode]
+    [colors, hoveredNode, fogEnabled]
   );
 
   return (
