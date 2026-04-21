@@ -153,13 +153,27 @@ export async function updateSentenceTags(id: string, tags: string[]): Promise<vo
   await enqueue({ op: 'updateTags', payload: { id, tags } });
 }
 
+/** Enqueue deleteEntity ops for an orphan closure. Concurrent because
+ *  each enqueue is its own Dexie transaction — avoids the per-call
+ *  await stall when the closure is large. */
+export async function enqueueOrphanDeletes(meaningIds: string[], linkIds: string[]): Promise<void> {
+  await Promise.all([
+    ...linkIds.map((lid) =>
+      enqueue({ op: 'deleteEntity', payload: { entity_type: 'meaning_link', entity_id: lid } }),
+    ),
+    ...meaningIds.map((mid) =>
+      enqueue({ op: 'deleteEntity', payload: { entity_type: 'meaning', entity_id: mid } }),
+    ),
+  ]);
+}
+
 export async function deleteSentenceById(id: string): Promise<void> {
   // Collect audio paths + meanings this sentence was the only reason
   // for, BEFORE the delete cascades away the sentence_tokens we need
   // to inspect.
   const [audioRecs, tokens] = await Promise.all([
     local.getAudioRecordingsBySentence(id),
-    local.getSentenceTokensBySentence(id),
+    local.getTokensBySentence(id),
   ]);
   const audioPaths = audioRecs
     .map((r) => r.storagePath)
@@ -183,26 +197,14 @@ export async function deleteSentenceById(id: string): Promise<void> {
     await local.deleteMeaningsByIds(orphanedMeanings);
   }
 
-  // Server-side enqueue. Meaning delete cascades meaning_links via FK,
-  // but we enqueue link deletes too so graves are emitted for other
-  // devices to pick up.
+  // Sentence delete cascades meaning_links server-side via FK, but we
+  // still enqueue link/meaning deletes so graves are emitted for other
+  // devices to sync.
   await enqueue({
     op: 'deleteEntity',
     payload: { entity_type: 'sentence', entity_id: id },
   });
-  for (const linkId of orphanedLinks) {
-    await enqueue({
-      op: 'deleteEntity',
-      payload: { entity_type: 'meaning_link', entity_id: linkId },
-    });
-  }
-  for (const mId of orphanedMeanings) {
-    await enqueue({
-      op: 'deleteEntity',
-      payload: { entity_type: 'meaning', entity_id: mId },
-    });
-  }
-
+  await enqueueOrphanDeletes(orphanedMeanings, orphanedLinks);
   await removeStorageObjects(audioPaths);
 }
 

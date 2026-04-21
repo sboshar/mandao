@@ -268,17 +268,14 @@ export function GraphPage() {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  // Zoom to fit once the force simulation has had time to lay nodes out.
-  // A single zoom after ~1s gets the camera close; a second at ~2.5s
-  // re-centers after the sim cools so the final view isn't off-screen.
+  // zoomToFit is driven by onEngineStop (set on ForceGraph2D below), so
+  // the camera lands once the simulation has actually settled rather
+  // than on a wall-clock timer that might fire before nodes finish
+  // moving. We arm a once-per-load flag so the user's manual pan/zoom
+  // isn't yanked back every time the sim retriggers.
+  const autoFittedRef = useRef(false);
   useEffect(() => {
-    if (graphData.nodes.length === 0 || !fgRef.current) return;
-    const first = setTimeout(() => fgRef.current?.zoomToFit(400, 80), 1000);
-    const settle = setTimeout(() => fgRef.current?.zoomToFit(600, 80), 2500);
-    return () => {
-      clearTimeout(first);
-      clearTimeout(settle);
-    };
+    autoFittedRef.current = false;
   }, [graphData]);
 
   const handleNodeClick = useCallback(
@@ -527,6 +524,11 @@ export function GraphPage() {
             d3VelocityDecay={0.3}
             warmupTicks={50}
             cooldownTicks={200}
+            onEngineStop={() => {
+              if (autoFittedRef.current) return;
+              autoFittedRef.current = true;
+              fgRef.current?.zoomToFit(500, 80);
+            }}
           />
         )}
       </div>

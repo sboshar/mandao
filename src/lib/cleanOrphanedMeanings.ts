@@ -1,6 +1,4 @@
 import * as repo from '../db/repo';
-import { localDb } from '../db/localDb';
-import { enqueueSync } from '../db/repo';
 import * as local from '../db/localRepo';
 
 export interface OrphanMeaningReport {
@@ -34,18 +32,7 @@ export async function cleanOrphanedMeanings(): Promise<OrphanMeaningReport> {
     await local.deleteMeaningsByIds(orphanedMeanings);
   }
 
-  for (const linkId of orphanedLinks) {
-    await enqueueSync({
-      op: 'deleteEntity',
-      payload: { entity_type: 'meaning_link', entity_id: linkId },
-    });
-  }
-  for (const mId of orphanedMeanings) {
-    await enqueueSync({
-      op: 'deleteEntity',
-      payload: { entity_type: 'meaning', entity_id: mId },
-    });
-  }
+  await repo.enqueueOrphanDeletes(orphanedMeanings, orphanedLinks);
 
   return {
     scanned: meanings.length,
@@ -60,8 +47,5 @@ export async function runCleanOrphanedMeaningsInConsole(): Promise<OrphanMeaning
     `Orphan meanings sweep: scanned ${report.scanned}, removed ` +
       `${report.orphanedMeanings} meanings + ${report.orphanedLinks} links.`,
   );
-  // Mark-as-used so unused-var lint won't gripe at localDb being pulled
-  // in via tree-shaking hygiene from repo.ts.
-  void localDb;
   return report;
 }

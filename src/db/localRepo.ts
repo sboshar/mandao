@@ -110,7 +110,28 @@ export async function findOrphanClosure(
 ): Promise<{ meanings: string[]; links: string[] }> {
   if (candidateMeaningIds.length === 0) return { meanings: [], links: [] };
 
-  const allLinks = await localDb.meaningLinks.toArray();
+  // Precompute three maps so the fixed-point loop is O(1) per lookup:
+  //   referenced: any remaining sentence_token still points at this meaning
+  //   parentsOf:  meaning_links indexed by childMeaningId
+  //   childrenOf: meaning_links indexed by parentMeaningId
+  // Trades one full scan of each table for O(N·M) nested scans in the
+  // previous implementation.
+  const [allLinks, allTokens] = await Promise.all([
+    localDb.meaningLinks.toArray(),
+    localDb.sentenceTokens.toArray(),
+  ]);
+  const referenced = new Set(allTokens.map((t) => t.meaningId));
+  const parentsOf = new Map<string, string[]>();
+  const childrenOf = new Map<string, string[]>();
+  for (const l of allLinks) {
+    const ps = parentsOf.get(l.childMeaningId);
+    if (ps) ps.push(l.parentMeaningId);
+    else parentsOf.set(l.childMeaningId, [l.parentMeaningId]);
+    const cs = childrenOf.get(l.parentMeaningId);
+    if (cs) cs.push(l.childMeaningId);
+    else childrenOf.set(l.parentMeaningId, [l.childMeaningId]);
+  }
+
   const orphans = new Set<string>();
   let candidates = [...candidateMeaningIds];
   let changed = true;
@@ -120,22 +141,14 @@ export async function findOrphanClosure(
     const nextCandidates: string[] = [];
     for (const mId of candidates) {
       if (orphans.has(mId)) continue;
-      const tokenCount = await localDb.sentenceTokens
-        .where('meaningId')
-        .equals(mId)
-        .count();
-      if (tokenCount > 0) continue;
-      const hasLivingParent = allLinks.some(
-        (l) => l.childMeaningId === mId && !orphans.has(l.parentMeaningId),
-      );
+      if (referenced.has(mId)) continue;
+      const parents = parentsOf.get(mId) ?? [];
+      const hasLivingParent = parents.some((p) => !orphans.has(p));
       if (hasLivingParent) continue;
       orphans.add(mId);
       changed = true;
-      // Children might be newly orphaned now that this parent is gone.
-      for (const l of allLinks) {
-        if (l.parentMeaningId === mId && !orphans.has(l.childMeaningId)) {
-          nextCandidates.push(l.childMeaningId);
-        }
+      for (const cId of childrenOf.get(mId) ?? []) {
+        if (!orphans.has(cId)) nextCandidates.push(cId);
       }
     }
     candidates = nextCandidates;
