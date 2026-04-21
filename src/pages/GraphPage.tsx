@@ -482,20 +482,20 @@ export function GraphPage() {
               : '33';
       const widthMul = touchesHovered ? 1.5 : inSeenSubgraph ? 1.3 : 1;
 
+      // Uniform base width across link types — differentiation is
+      // carried by color (and dash pattern for pinyin).
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
+      ctx.lineWidth = (1.2 * widthMul) / globalScale;
 
       if (l.type === 'character-of') {
         ctx.strokeStyle = colors.character + opacity;
-        ctx.lineWidth = (1.5 * widthMul) / globalScale;
       } else if (l.type === 'same-pinyin') {
         ctx.strokeStyle = colors.pinyin + opacity;
-        ctx.lineWidth = (1 * widthMul) / globalScale;
         ctx.setLineDash([4 / globalScale, 4 / globalScale]);
       } else {
         ctx.strokeStyle = colors.textTertiary + opacity;
-        ctx.lineWidth = (0.9 * widthMul) / globalScale;
       }
 
       ctx.stroke();
