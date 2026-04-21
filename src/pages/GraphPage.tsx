@@ -466,13 +466,14 @@ export function GraphPage() {
       const inSeenSubgraph =
         fogEnabled && source.seen && target.seen && !touchesHovered;
       // Opacity packed as a two-char hex suffix on the stroke color.
-      //   fogged:        05  (barely visible — ambient background)
-      //   hover-dimmed:  0d  (dim, but more visible than fog)
+      //   fogged:        22  (still traceable — shows the graph's
+      //                       shape even in the unstudied portion)
+      //   hover-dimmed:  0d
       //   seen subgraph: 80  (studied content, pops without hover)
       //   touches hover: cc  (highlighted)
       //   default:       33  (baseline, fog off)
       const opacity = fogged
-        ? '05'
+        ? '22'
         : dimmedByHover
           ? '0d'
           : touchesHovered
