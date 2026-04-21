@@ -348,35 +348,46 @@ export function GraphPage() {
       // Label
       if (globalScale > 0.5 || isHovered) {
         const label = n.label;
-        ctx.font = `${n.type === 'pinyin' ? 'italic ' : ''}${fontSize}px "SF Pro", system-ui, sans-serif`;
+        const isSingleChar = label.length === 1;
+        // A single character can live inside the node; multi-character
+        // words don't fit, so render them below like sentences/pinyin.
+        const labelInside =
+          (n.type === 'character' || n.type === 'component' || n.type === 'word') && isSingleChar;
+
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        if (n.type === 'sentence' || n.type === 'pinyin') {
-          // Label below node
-          ctx.fillStyle = colors.textTertiary;
-          ctx.globalAlpha = dimmed ? 0.3 : 1;
-          ctx.fillText(label, x, y + size + fontSize * 0.8);
-          ctx.globalAlpha = 1;
-        } else {
-          // Character/word label inside the node
-          const charSize = Math.max(14 / globalScale, 3);
+        if (labelInside) {
+          // Size the glyph to fit inside the circle. Chinese characters
+          // render at roughly their point size wide/tall, so aiming for
+          // ~1.35× the radius keeps the glyph comfortably inside the ring.
+          // Still clamp to a readable floor so tiny nodes don't become
+          // unreadable pixel blobs when zoomed out.
+          const charSize = Math.min(size * 1.35, 16 / globalScale);
           ctx.font = `bold ${charSize}px "SF Pro", system-ui, sans-serif`;
           ctx.fillStyle = '#ffffff';
           ctx.globalAlpha = dimmed ? 0.4 : 1;
           ctx.fillText(label, x, y + 1);
           ctx.globalAlpha = 1;
 
-          // English below, only when zoomed in or hovered
           if (globalScale > 1.2 || isHovered) {
             ctx.font = `${fontSize * 0.85}px "SF Pro", system-ui, sans-serif`;
             ctx.fillStyle = colors.textTertiary;
             ctx.globalAlpha = dimmed ? 0.3 : 1;
-            const eng =
-              n.english.length > 15 ? n.english.slice(0, 14) + '…' : n.english;
+            const eng = n.english.length > 15 ? n.english.slice(0, 14) + '…' : n.english;
             ctx.fillText(eng, x, y + size + fontSize);
             ctx.globalAlpha = 1;
           }
+        } else {
+          // Below-node label (sentences, pinyin clusters, multi-char words).
+          ctx.font = `${n.type === 'pinyin' ? 'italic ' : 'bold '}${fontSize}px "SF Pro", system-ui, sans-serif`;
+          ctx.fillStyle =
+            n.type === 'pinyin' || n.type === 'sentence'
+              ? colors.textTertiary
+              : colors.textPrimary;
+          ctx.globalAlpha = dimmed ? 0.3 : 1;
+          ctx.fillText(label, x, y + size + fontSize * 0.8);
+          ctx.globalAlpha = 1;
         }
       }
     },
