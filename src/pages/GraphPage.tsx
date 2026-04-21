@@ -460,12 +460,27 @@ export function GraphPage() {
         hoveredNode !== null && (source.id === hoveredNode.id || target.id === hoveredNode.id);
       const dimmedByHover = hoveredNode !== null && !touchesHovered;
       const fogged = fogEnabled && !source.seen && !target.seen && !touchesHovered;
+      // When fog is on, links entirely inside the studied subgraph
+      // pop as the active layer — more saturated + thicker than the
+      // baseline, short of the hover-highlight tier.
+      const inSeenSubgraph =
+        fogEnabled && source.seen && target.seen && !touchesHovered;
       // Opacity packed as a two-char hex suffix on the stroke color.
       //   fogged:        05  (barely visible — ambient background)
       //   hover-dimmed:  0d  (dim, but more visible than fog)
+      //   seen subgraph: 80  (studied content, pops without hover)
       //   touches hover: cc  (highlighted)
-      //   default:       33  (baseline)
-      const opacity = fogged ? '05' : dimmedByHover ? '0d' : touchesHovered ? 'cc' : '33';
+      //   default:       33  (baseline, fog off)
+      const opacity = fogged
+        ? '05'
+        : dimmedByHover
+          ? '0d'
+          : touchesHovered
+            ? 'cc'
+            : inSeenSubgraph
+              ? '80'
+              : '33';
+      const widthMul = touchesHovered ? 1.5 : inSeenSubgraph ? 1.3 : 1;
 
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
@@ -473,14 +488,14 @@ export function GraphPage() {
 
       if (l.type === 'character-of') {
         ctx.strokeStyle = colors.character + opacity;
-        ctx.lineWidth = (touchesHovered ? 2 : 1.5) / globalScale;
+        ctx.lineWidth = (1.5 * widthMul) / globalScale;
       } else if (l.type === 'same-pinyin') {
         ctx.strokeStyle = colors.pinyin + opacity;
-        ctx.lineWidth = (touchesHovered ? 1.6 : 1) / globalScale;
+        ctx.lineWidth = (1 * widthMul) / globalScale;
         ctx.setLineDash([4 / globalScale, 4 / globalScale]);
       } else {
         ctx.strokeStyle = colors.textTertiary + opacity;
-        ctx.lineWidth = (touchesHovered ? 1.6 : 0.8) / globalScale;
+        ctx.lineWidth = (0.9 * widthMul) / globalScale;
       }
 
       ctx.stroke();
