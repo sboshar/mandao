@@ -21,6 +21,10 @@ interface GraphNode {
   weight: number;
   /** Color group */
   group: number;
+  /** True if the user has reviewed this node's sentence at least once,
+   *  or if it's a word/character that composes one they have. Pinyin
+   *  cluster nodes are 'seen' if any member character is seen. */
+  seen: boolean;
   x?: number;
   y?: number;
 }
@@ -75,12 +79,46 @@ function getNodeColor(type: GraphNode['type'], colors: ReturnType<typeof getThem
 // ============================================================
 
 async function buildGraphData(): Promise<GraphData> {
-  const [meanings, links, sentenceTokens, sentences] = await Promise.all([
+  const [meanings, links, sentenceTokens, sentences, cards] = await Promise.all([
     repo.getAllMeanings(),
     repo.getAllMeaningLinks(),
     repo.getAllSentenceTokens(),
     repo.getAllSentences(),
+    repo.getAllSrsCards(),
   ]);
+
+  // A sentence is "seen" once any of its SRS cards has actually been
+  // reviewed (reps > 0). Fresh sentences the user just added but never
+  // studied don't count — the whole point of fog is to surface what
+  // the user has actively engaged with vs the raw deck.
+  const seenSentenceIds = new Set<string>();
+  for (const c of cards) {
+    if (c.reps > 0) seenSentenceIds.add(c.sentenceId);
+  }
+
+  // Meanings referenced by seen sentences, then fan out via
+  // meaning_links — a seen compound word's character children count as
+  // seen too (you encountered them while studying the word).
+  const seenMeaningIds = new Set<string>();
+  for (const t of sentenceTokens) {
+    if (seenSentenceIds.has(t.sentenceId)) seenMeaningIds.add(t.meaningId);
+  }
+  const childrenOf = new Map<string, string[]>();
+  for (const l of links) {
+    const cs = childrenOf.get(l.parentMeaningId);
+    if (cs) cs.push(l.childMeaningId);
+    else childrenOf.set(l.parentMeaningId, [l.childMeaningId]);
+  }
+  const frontier = [...seenMeaningIds];
+  while (frontier.length > 0) {
+    const mId = frontier.pop()!;
+    for (const childId of childrenOf.get(mId) ?? []) {
+      if (!seenMeaningIds.has(childId)) {
+        seenMeaningIds.add(childId);
+        frontier.push(childId);
+      }
+    }
+  }
 
   const nodes: GraphNode[] = [];
   const graphLinks: GraphLink[] = [];
@@ -124,6 +162,7 @@ async function buildGraphData(): Promise<GraphData> {
       type: m.type,
       weight: Math.max(1, count),
       group: m.type === 'word' ? 0 : m.type === 'character' ? 1 : 2,
+      seen: seenMeaningIds.has(m.id),
     });
   }
 
@@ -137,6 +176,7 @@ async function buildGraphData(): Promise<GraphData> {
       type: 'sentence',
       weight: 2,
       group: 3,
+      seen: seenSentenceIds.has(s.id),
     });
   }
 
@@ -167,6 +207,10 @@ async function buildGraphData(): Promise<GraphData> {
       type: 'pinyin',
       weight: meaningIds.length,
       group: 4,
+      // Cluster node is seen if any member character is seen — so the
+      // cluster joins the visible subgraph as soon as one of its
+      // characters has been studied.
+      seen: meaningIds.some((id) => seenMeaningIds.has(id)),
     });
     for (const mId of meaningIds) {
       graphLinks.push({ source: nodeId, target: mId, type: 'same-pinyin' });
@@ -206,6 +250,16 @@ export function GraphPage() {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [colors, setColors] = useState(getThemeColors);
   const [loading, setLoading] = useState(true);
+  const [fogEnabled, setFogEnabled] = useState(() => {
+    // Persist the toggle so it survives reloads. Default on — the whole
+    // point is that a 5000-sentence deck shouldn't look uniform before
+    // you've studied most of it.
+    const stored = localStorage.getItem('mandao_graph_fog');
+    return stored === null ? true : stored === 'true';
+  });
+  useEffect(() => {
+    localStorage.setItem('mandao_graph_fog', String(fogEnabled));
+  }, [fogEnabled]);
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
 
@@ -304,7 +358,9 @@ export function GraphPage() {
         hoveredNode !== null &&
         hoveredNode.id !== n.id &&
         neighborsById.current.get(hoveredNode.id)?.has(n.id);
-      const dimmed = hoveredNode !== null && !isHovered && !isNeighbor;
+      const dimmedByHover = hoveredNode !== null && !isHovered && !isNeighbor;
+      const fogged = fogEnabled && !n.seen && !isHovered;
+      const dimmed = dimmedByHover || fogged;
       const baseSize = n.type === 'sentence' ? 4 : n.type === 'pinyin' ? 5 : 6;
       const size = baseSize + Math.sqrt(n.weight) * 2;
       const fontSize = Math.max(10 / globalScale, 2);
@@ -320,10 +376,14 @@ export function GraphPage() {
         ctx.shadowBlur = 6;
       }
 
+      // Fogged nodes go deeper into the background than hover-dimmed
+      // ones — they should read as ambient, not paused for you to
+      // return to like a hover-dimmed neighbor would.
+      const fillAlpha = fogged ? 0.1 : dimmedByHover ? 0.18 : 1;
       ctx.beginPath();
       ctx.arc(x, y, size, 0, 2 * Math.PI);
       ctx.fillStyle = nodeColor;
-      ctx.globalAlpha = dimmed ? 0.18 : 1;
+      ctx.globalAlpha = fillAlpha;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
@@ -393,8 +453,14 @@ export function GraphPage() {
       const l = link as GraphLink;
       const touchesHovered =
         hoveredNode !== null && (source.id === hoveredNode.id || target.id === hoveredNode.id);
-      const dimmed = hoveredNode !== null && !touchesHovered;
-      const opacity = dimmed ? '0d' : touchesHovered ? 'cc' : '33';
+      const dimmedByHover = hoveredNode !== null && !touchesHovered;
+      const fogged = fogEnabled && !source.seen && !target.seen && !touchesHovered;
+      // Opacity packed as a two-char hex suffix on the stroke color.
+      //   fogged:        05  (barely visible — ambient background)
+      //   hover-dimmed:  0d  (dim, but more visible than fog)
+      //   touches hover: cc  (highlighted)
+      //   default:       33  (baseline)
+      const opacity = fogged ? '05' : dimmedByHover ? '0d' : touchesHovered ? 'cc' : '33';
 
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
@@ -437,6 +503,26 @@ export function GraphPage() {
         }}
       >
         ← Back
+      </button>
+
+      {/* Fog toggle — bottom-left corner.
+          Dims unstudied nodes so a big deck doesn't look uniform. */}
+      <button
+        type="button"
+        onClick={() => setFogEnabled((v) => !v)}
+        className="absolute bottom-3 left-3 z-40 px-3 py-1.5 rounded-full text-xs font-medium transition-colors backdrop-blur-sm"
+        style={{
+          background: 'color-mix(in srgb, var(--bg-surface) 85%, transparent)',
+          color: fogEnabled ? 'var(--accent)' : 'var(--text-tertiary)',
+          border: `1px solid ${fogEnabled ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--border)'}`,
+        }}
+        title={
+          fogEnabled
+            ? 'Fog is on — unreviewed nodes are dim'
+            : 'Fog is off — all nodes at full opacity'
+        }
+      >
+        {fogEnabled ? '◐ Fog: on' : '○ Fog: off'}
       </button>
 
       {/* Floating legend — bottom-right pill */}
