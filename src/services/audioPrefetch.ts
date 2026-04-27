@@ -12,10 +12,10 @@
 import { localDb } from '../db/localDb';
 import { supabase } from '../lib/supabase';
 import * as local from '../db/localRepo';
-import type { AudioRecording, AudioBlob } from '../db/schema';
+import type { AudioRecording } from '../db/schema';
+import { AUDIO_BUCKET } from '../lib/audioStorage';
 import { getAudioCacheCapBytes } from '../stores/audioCacheSettingsStore';
 
-const AUDIO_BUCKET = 'audio-recordings';
 const SIGNED_URL_TTL_SECONDS = 60;
 const CONCURRENCY = 4;
 const RECENT_CREATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -132,15 +132,7 @@ async function fetchAndStore(rec: AudioRecording): Promise<number> {
     return 0;
   }
 
-  const now = Date.now();
-  const entry: AudioBlob = {
-    recordingId: rec.id,
-    blob,
-    mimeType: rec.mimeType ?? blob.type ?? 'audio/webm',
-    sizeBytes: blob.size,
-    fetchedAt: now,
-    lastPlayedAt: now,
-  };
+  const entry = local.makeAudioBlobEntry(rec.id, blob, rec.mimeType);
 
   try {
     await local.putAudioBlob(entry);
@@ -160,24 +152,37 @@ async function fetchAndStore(rec: AudioRecording): Promise<number> {
   return entry.sizeBytes;
 }
 
-/** Drop oldest-played entries until total cache size is at or below `targetBytes`.
- *  Returns the post-eviction total. */
-async function evictToTarget(targetBytes: number): Promise<number> {
+/** Pick LRU entries to evict to bring the cache at or below `targetBytes`.
+ *  Pure: doesn't mutate. Reused by both eviction and the Settings preview
+ *  so the count the user sees matches what actually gets deleted. */
+async function selectEvictionCandidates(targetBytes: number): Promise<{
+  ids: string[];
+  freedBytes: number;
+  postTotal: number;
+}> {
   const usage = await local.getAudioCacheUsage();
-  if (usage.totalBytes <= targetBytes) return usage.totalBytes;
-
+  if (usage.totalBytes <= targetBytes) {
+    return { ids: [], freedBytes: 0, postTotal: usage.totalBytes };
+  }
   const sorted = await local.getAudioBlobsSortedByLru();
-  const toDelete: string[] = [];
+  const ids: string[] = [];
+  let freedBytes = 0;
   let running = usage.totalBytes;
   for (const entry of sorted) {
     if (running <= targetBytes) break;
-    toDelete.push(entry.recordingId);
+    ids.push(entry.recordingId);
+    freedBytes += entry.sizeBytes;
     running -= entry.sizeBytes;
   }
-  if (toDelete.length > 0) {
-    await local.deleteAudioBlobs(toDelete);
-  }
-  return running;
+  return { ids, freedBytes, postTotal: running };
+}
+
+/** Drop oldest-played entries until total cache size is at or below `targetBytes`.
+ *  Returns the post-eviction total. */
+async function evictToTarget(targetBytes: number): Promise<number> {
+  const { ids, postTotal } = await selectEvictionCandidates(targetBytes);
+  if (ids.length > 0) await local.deleteAudioBlobs(ids);
+  return postTotal;
 }
 
 /** Sentences whose cards are due now or in the next 24h, across all decks.
@@ -218,18 +223,6 @@ export async function shrinkAudioCacheTo(targetBytes: number): Promise<number> {
  *  the Settings UI to show "X recordings (Y MB) will be deleted" in the
  *  confirmation prompt. */
 export async function previewShrink(targetBytes: number): Promise<{ evictCount: number; freedBytes: number }> {
-  const usage = await local.getAudioCacheUsage();
-  if (usage.totalBytes <= targetBytes) return { evictCount: 0, freedBytes: 0 };
-
-  const sorted = await local.getAudioBlobsSortedByLru();
-  let evictCount = 0;
-  let freedBytes = 0;
-  let running = usage.totalBytes;
-  for (const entry of sorted) {
-    if (running <= targetBytes) break;
-    evictCount += 1;
-    freedBytes += entry.sizeBytes;
-    running -= entry.sizeBytes;
-  }
-  return { evictCount, freedBytes };
+  const { ids, freedBytes } = await selectEvictionCandidates(targetBytes);
+  return { evictCount: ids.length, freedBytes };
 }

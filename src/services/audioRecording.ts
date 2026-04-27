@@ -65,6 +65,11 @@ export interface RecordingOptions {
  * Start recording audio from the microphone.
  * Returns a handle; call stop() to finalize and get the blob. If
  * `maxDurationMs` is set, the recorder auto-stops at that limit.
+ *
+ * The result promise is resolved exactly once by the recorder's onstop /
+ * onerror handlers (registered eagerly, before recorder.start()), so
+ * concurrent stop() calls — e.g., user click racing the cap timer —
+ * share the same outcome instead of overwriting each other's resolvers.
  */
 export async function startRecording(
   opts: RecordingOptions = {},
@@ -82,17 +87,53 @@ export async function startRecording(
   let cancelled = false;
   let capped = false;
 
-  recorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
-  };
-
-  recorder.start();
-
   const cleanupStream = () => {
     for (const track of stream.getTracks()) track.stop();
   };
 
   let capTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearCapTimer = () => {
+    if (capTimer != null) {
+      clearTimeout(capTimer);
+      capTimer = null;
+    }
+  };
+
+  let resolveResult: ((r: RecordingResult) => void) | null = null;
+  let rejectResult: ((e: any) => void) | null = null;
+  const resultPromise = new Promise<RecordingResult>((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
+  });
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+
+  recorder.onstop = () => {
+    clearCapTimer();
+    cleanupStream();
+    if (cancelled) {
+      rejectResult?.(new Error('Recording cancelled'));
+    } else {
+      const type = recorder.mimeType || mimeType || 'audio/webm';
+      const blob = new Blob(chunks, { type });
+      resolveResult?.({ blob, mimeType: type, durationMs: Date.now() - startedAt });
+    }
+    resolveResult = null;
+    rejectResult = null;
+  };
+
+  recorder.onerror = (e: any) => {
+    clearCapTimer();
+    cleanupStream();
+    rejectResult?.(e?.error || new Error('Recording failed'));
+    resolveResult = null;
+    rejectResult = null;
+  };
+
+  recorder.start();
+
   if (opts.maxDurationMs && opts.maxDurationMs > 0) {
     capTimer = setTimeout(() => {
       capTimer = null;
@@ -104,42 +145,13 @@ export async function startRecording(
       }
     }, opts.maxDurationMs);
   }
-  const clearCapTimer = () => {
-    if (capTimer != null) {
-      clearTimeout(capTimer);
-      capTimer = null;
-    }
-  };
 
-  const stop = () =>
-    new Promise<RecordingResult>((resolve, reject) => {
-      if (cancelled) {
-        clearCapTimer();
-        reject(new Error('Recording cancelled'));
-        return;
-      }
-      recorder.onstop = () => {
-        clearCapTimer();
-        cleanupStream();
-        const type = recorder.mimeType || mimeType || 'audio/webm';
-        const blob = new Blob(chunks, { type });
-        resolve({ blob, mimeType: type, durationMs: Date.now() - startedAt });
-      };
-      recorder.onerror = (e: any) => {
-        clearCapTimer();
-        cleanupStream();
-        reject(e?.error || new Error('Recording failed'));
-      };
-      if (recorder.state !== 'inactive') {
-        recorder.stop();
-      } else {
-        // Already stopped (e.g. duration cap fired); produce what we have.
-        clearCapTimer();
-        cleanupStream();
-        const type = recorder.mimeType || mimeType || 'audio/webm';
-        resolve({ blob: new Blob(chunks, { type }), mimeType: type, durationMs: Date.now() - startedAt });
-      }
-    });
+  const stop = (): Promise<RecordingResult> => {
+    if (recorder.state !== 'inactive') {
+      try { recorder.stop(); } catch {}
+    }
+    return resultPromise;
+  };
 
   const cancel = () => {
     cancelled = true;

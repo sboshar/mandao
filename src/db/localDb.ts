@@ -123,6 +123,8 @@ class MandaoDb extends Dexie {
               fetchedAt: ts,
               lastPlayedAt: ts,
             });
+            // bulkPut replaces the whole row, so dropping `blob` from the
+            // copy is enough to remove it from IDB.
             const next = { ...rec } as AudioRecording & { blob?: Blob };
             delete next.blob;
             cleared.push(next);

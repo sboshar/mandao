@@ -545,6 +545,25 @@ export async function getAllAudioRecordings(): Promise<AudioRecording[]> {
 // Audio blobs (client-only cache for AudioRecording bytes)
 // ============================================================
 
+/** Build an AudioBlob entry with the standard mime fallback chain and
+ *  matched fetchedAt/lastPlayedAt timestamps. Centralized so the four
+ *  insert sites (insert, fetch, prefetch, migration) can't drift. */
+export function makeAudioBlobEntry(
+  recordingId: string,
+  blob: Blob,
+  mimeType?: string,
+  ts: number = Date.now(),
+): AudioBlob {
+  return {
+    recordingId,
+    blob,
+    mimeType: mimeType ?? blob.type ?? 'audio/webm',
+    sizeBytes: blob.size,
+    fetchedAt: ts,
+    lastPlayedAt: ts,
+  };
+}
+
 export async function getAudioBlob(recordingId: string): Promise<AudioBlob | undefined> {
   return localDb.audioBlobs.get(recordingId);
 }

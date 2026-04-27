@@ -10,7 +10,7 @@
 import * as local from './localRepo';
 import { localDb, type SyncOp } from './localDb';
 import { supabase } from '../lib/supabase';
-import { removeStorageObjects } from '../lib/audioStorage';
+import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
 import { getDeviceId, scheduleSyncSoon } from './syncEngine';
 import {
   getUserId as getRemoteUserId,
@@ -424,15 +424,9 @@ export async function insertAudioRecording(
 ) {
   await local.insertAudioRecording(rec);
   if (blob) {
-    const ts = rec.createdAt ?? Date.now();
-    await local.putAudioBlob({
-      recordingId: rec.id,
-      blob,
-      mimeType: rec.mimeType ?? blob.type ?? 'audio/webm',
-      sizeBytes: blob.size,
-      fetchedAt: ts,
-      lastPlayedAt: ts,
-    });
+    await local.putAudioBlob(
+      local.makeAudioBlobEntry(rec.id, blob, rec.mimeType, rec.createdAt),
+    );
   }
   await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
 }
@@ -492,22 +486,14 @@ export async function fetchAudioBlob(id: string): Promise<Blob | null> {
   // longer expiry just widens the leak window (browser history, HAR
   // exports, extensions) for what is otherwise per-user private content.
   const { data, error } = await supabase.storage
-    .from('audio-recordings')
+    .from(AUDIO_BUCKET)
     .createSignedUrl(rec.storagePath, 60);
   if (error || !data?.signedUrl) return null;
   try {
     const resp = await fetch(data.signedUrl);
     if (!resp.ok) return null;
     const blob = await resp.blob();
-    const now = Date.now();
-    await local.putAudioBlob({
-      recordingId: id,
-      blob,
-      mimeType: rec.mimeType ?? blob.type ?? 'audio/webm',
-      sizeBytes: blob.size,
-      fetchedAt: now,
-      lastPlayedAt: now,
-    });
+    await local.putAudioBlob(local.makeAudioBlobEntry(id, blob, rec.mimeType));
     return blob;
   } catch {
     return null;

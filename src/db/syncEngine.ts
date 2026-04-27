@@ -410,6 +410,7 @@ async function pullOnePage(): Promise<boolean> {
       localDb.decks,
       localDb.reviewLogs,
       localDb.audioRecordings,
+      localDb.audioBlobs,
       localDb.syncMeta,
     ],
     async () => {
