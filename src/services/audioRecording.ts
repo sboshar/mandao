@@ -226,22 +226,90 @@ export function formatDuration(ms: number | undefined): string {
 }
 
 /**
- * Play an audio blob. Returns a stop() function.
- * Revokes the object URL when playback ends or is stopped.
+ * Single shared Audio element for all blob playback.
+ *
+ * iOS Safari grants playback permission per-element on the first .play()
+ * within a user gesture, then allows subsequent plays on that element
+ * even when triggered after async work (e.g., await fetchAudioBlob).
+ * Creating a new Audio() per play would re-trigger the gesture check
+ * every time, which silently fails on iOS once the user-gesture context
+ * is lost across an `await`.
+ */
+let sharedAudio: HTMLAudioElement | null = null;
+let pendingObjectUrl: string | null = null;
+let audioUnlocked = false;
+
+function getSharedAudio(): HTMLAudioElement {
+  if (!sharedAudio) {
+    sharedAudio = new Audio();
+    sharedAudio.preload = 'auto';
+  }
+  return sharedAudio;
+}
+
+/** Tiny silent MP3 (~100 bytes) used to "unlock" iOS audio on first
+ *  interaction. iOS allows audio.play() inside a gesture, but only the
+ *  first one — after that the element stays unlocked for the page. */
+const SILENT_MP3 =
+  'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+/**
+ * Call from inside a user-gesture handler (any click / touchstart) to
+ * unlock audio playback for the rest of the session. No-op after the
+ * first successful unlock. Safe to call repeatedly.
+ */
+export function unlockAudio(): void {
+  if (audioUnlocked) return;
+  const audio = getSharedAudio();
+  audio.muted = true;
+  audio.src = SILENT_MP3;
+  const p = audio.play();
+  // Older browsers return undefined; newer ones return a promise.
+  Promise.resolve(p)
+    .then(() => {
+      audio.pause();
+      audio.muted = false;
+      audio.removeAttribute('src');
+      audio.load();
+      audioUnlocked = true;
+    })
+    .catch(() => {
+      audio.muted = false;
+      // Wasn't a real gesture, or browser denied — try again next click.
+    });
+}
+
+/**
+ * Play an audio blob. Returns a stop() function. Revokes the object URL
+ * when playback ends or is stopped.
  */
 export function playBlob(blob: Blob, onEnded?: () => void): () => void {
+  const audio = getSharedAudio();
+  // Stop whatever is playing on the shared element.
+  try { audio.pause(); } catch {}
+  if (pendingObjectUrl) {
+    URL.revokeObjectURL(pendingObjectUrl);
+    pendingObjectUrl = null;
+  }
+
   const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
+  pendingObjectUrl = url;
+  audio.src = url;
+
   let stopped = false;
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
-    URL.revokeObjectURL(url);
+    if (pendingObjectUrl === url) {
+      URL.revokeObjectURL(url);
+      pendingObjectUrl = null;
+    }
     onEnded?.();
   };
   audio.onended = cleanup;
   audio.onerror = cleanup;
   audio.play().catch(cleanup);
+
   return () => {
     try { audio.pause(); } catch {}
     cleanup();
