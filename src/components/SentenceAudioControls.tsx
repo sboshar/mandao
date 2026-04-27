@@ -264,7 +264,15 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   const defaultActive = playingId === 'default';
 
   return (
-    <div className={`inline-flex flex-col items-center gap-1 ${className}`}>
+    <div
+      className={`inline-flex flex-col items-center gap-1 ${className}`}
+      // Stop click bubbling: parents like BrowsePage wrap the whole sentence
+      // row in a `<button>` whose onClick toggles expansion. Without this,
+      // tapping a play / record button inside us would also fire the parent
+      // collapse handler, which unmounts this component and triggers our
+      // useEffect cleanup — pausing audio milliseconds after it starts.
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="inline-flex flex-wrap items-start justify-center gap-3">
         {/* Default Google TTS */}
         <div className="flex flex-col items-center">
