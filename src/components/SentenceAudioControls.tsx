@@ -7,7 +7,6 @@ import {
   isAudioRecordingSupported,
   playBlob,
   startRecording,
-  unlockAudio,
   type RecordingHandle,
   type RecordingResult,
 } from '../services/audioRecording';
@@ -135,16 +134,18 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     setPlayingId((cur) => (cur === 'default' ? null : cur));
   };
 
-  // Synchronous when the blob is already in blobMap (the common case after
-  // the eager load on mount). This keeps the click → audio.play() chain
-  // inside iOS's user-gesture context. Falls back to async fetch only if
-  // the eager load hasn't finished yet — in which case we'd lose the
-  // gesture, but at least desktop and the second tap will work.
+  // Synchronous when the blob is already in blobMap (the common case
+  // after the eager load on mount). The click → audio.play() chain stays
+  // inside iOS's user-gesture context and uses the blob URL as the FIRST
+  // play of the shared element — iOS authorizes it on first sight.
+  //
+  // We deliberately do NOT call unlockAudio() here: it sets src to
+  // /silent.mp3 and starts a play, then this function immediately
+  // overrides src and starts another play. iOS rejects the rapid
+  // src-swap-mid-load and never authorizes the element. Without
+  // unlockAudio, the first thing iOS sees on this element is the user's
+  // blob play, which it accepts cleanly.
   const playRecording = (rec: AudioRecording) => {
-    // Belt-and-suspenders: prime the shared Audio element on iOS in case
-    // the synchronous path falls through to async.
-    unlockAudio();
-
     if (playingId === rec.id) { stopAll(); return; }
     stopAll();
 
