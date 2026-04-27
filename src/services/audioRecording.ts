@@ -228,16 +228,23 @@ export function formatDuration(ms: number | undefined): string {
 /**
  * Single shared Audio element for all blob playback.
  *
- * iOS Safari grants playback permission per-element on the first .play()
- * within a user gesture, then allows subsequent plays on that element
- * even when triggered after async work (e.g., await fetchAudioBlob).
- * Creating a new Audio() per play would re-trigger the gesture check
- * every time, which silently fails on iOS once the user-gesture context
- * is lost across an `await`.
+ * iOS Safari rejects audio.play() for unmuted audio when the call doesn't
+ * happen inside a user-gesture event handler. Our playback path always
+ * has an `await fetchAudioBlob()` between the click and play(), which
+ * loses the gesture context.
+ *
+ * BUT iOS allows muted playback even after the gesture is lost. Once the
+ * element is actually playing (muted), unmuting it doesn't trigger a
+ * fresh gesture check. So we start every play muted and unmute as soon
+ * as the `playing` event fires. Audible audio after a ~50ms blip of
+ * silence — which is still better than no audio at all.
+ *
+ * (Earlier we tried priming the element with a silent WAV data URL in
+ * the gesture, but iOS rejects 0-byte data-URL audio specifically; the
+ * priming would silently fail and leave the element locked.)
  */
 let sharedAudio: HTMLAudioElement | null = null;
 let pendingObjectUrl: string | null = null;
-let audioUnlocked = false;
 
 function getSharedAudio(): HTMLAudioElement {
   if (!sharedAudio) {
@@ -247,41 +254,13 @@ function getSharedAudio(): HTMLAudioElement {
   return sharedAudio;
 }
 
-/** Smallest valid silent WAV (~60 bytes). WAV is the most universally
- *  decoded format on iOS — picky MP3 frame parsing is a known pitfall
- *  for unlock-style data URLs, so we avoid it. */
-const SILENT_WAV =
-  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAVFYAAFRWAAABAAgAZGF0YQAAAAA=';
-
 /**
- * Call from inside a user-gesture handler (any click / touchstart) to
- * unlock audio playback for the rest of the session. No-op after the
- * first successful unlock. Safe to call repeatedly.
+ * No-op kept for back-compat with existing call sites. The muted-then-
+ * unmute pattern in playBlob handles iOS unlocking inline; an explicit
+ * unlock primer is no longer needed.
  */
 export function unlockAudio(): void {
-  if (audioUnlocked) return;
-  const audio = getSharedAudio();
-  audio.muted = true;
-  audio.src = SILENT_WAV;
-  const p = audio.play();
-  // Older browsers return undefined; newer ones return a promise.
-  Promise.resolve(p)
-    .then(() => {
-      audio.pause();
-      audio.muted = false;
-      audio.removeAttribute('src');
-      audio.load();
-      audioUnlocked = true;
-    })
-    .catch(() => {
-      audio.muted = false;
-      // Wasn't a real gesture, or browser denied — try again next click.
-    });
-}
-
-/** True after at least one successful unlock. Useful for diagnostics. */
-export function isAudioUnlocked(): boolean {
-  return audioUnlocked;
+  // Intentionally empty — see comment on sharedAudio above.
 }
 
 /**
@@ -291,7 +270,7 @@ export function isAudioUnlocked(): boolean {
 export function playBlob(blob: Blob, onEnded?: () => void): () => void {
   const audio = getSharedAudio();
   // Stop whatever is playing on the shared element.
-  try { audio.pause(); } catch {}
+  try { audio.pause(); } catch { /* noop */ }
   if (pendingObjectUrl) {
     URL.revokeObjectURL(pendingObjectUrl);
     pendingObjectUrl = null;
@@ -299,24 +278,34 @@ export function playBlob(blob: Blob, onEnded?: () => void): () => void {
 
   const url = URL.createObjectURL(blob);
   pendingObjectUrl = url;
+  // Muted play() is allowed on iOS after async work; we'll unmute as
+  // soon as the element transitions to actually playing.
+  audio.muted = true;
   audio.src = url;
 
   let stopped = false;
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
+    audio.muted = false; // restore for the next call
     if (pendingObjectUrl === url) {
       URL.revokeObjectURL(url);
       pendingObjectUrl = null;
     }
     onEnded?.();
   };
+  const onPlaying = () => {
+    audio.muted = false;
+    audio.removeEventListener('playing', onPlaying);
+  };
+  audio.addEventListener('playing', onPlaying);
   audio.onended = cleanup;
   audio.onerror = cleanup;
   audio.play().catch(cleanup);
 
   return () => {
-    try { audio.pause(); } catch {}
+    try { audio.pause(); } catch { /* noop */ }
+    audio.removeEventListener('playing', onPlaying);
     cleanup();
   };
 }
