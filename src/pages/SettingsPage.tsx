@@ -21,7 +21,7 @@ import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
-import { unlockAudio, isAudioUnlocked } from '../services/audioRecording';
+import { unlockAudio } from '../services/audioRecording';
 import {
   useAudioCacheSettingsStore,
   RECORDING_CAP_SEC_MIN,
@@ -1819,16 +1819,7 @@ function AudioDiagnosticCard() {
         return;
       }
 
-      // 6. Unlock check — were we able to prime audio for iOS?
-      push({
-        name: 'iOS audio unlock',
-        status: isAudioUnlocked() ? 'ok' : 'fail',
-        detail: isAudioUnlocked()
-          ? 'Shared Audio element is unlocked'
-          : 'unlockAudio() did not complete — silent priming failed',
-      });
-
-      // 7. Play test — actually call .play() (muted) and watch every
+      // 6. Play test — actually call .play() (muted) and watch every
       // relevant event. iOS deliberately doesn't fire `canplay` until
       // play() is invoked, so the previous "decode" check would always
       // time out on iOS even when audio works fine.
