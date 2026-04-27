@@ -16,6 +16,7 @@ import { IntroModal } from './components/IntroModal';
 import { ThemeToggle } from './components/ThemeToggle';
 import { SyncIndicator } from './components/SyncIndicator';
 import { SyncErrorBanner } from './components/SyncErrorBanner';
+import { InstallBanner } from './components/InstallBanner';
 import { useTutorialStore } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
 import './stores/themeStore';
@@ -152,6 +153,7 @@ function App() {
         </div>
         <div className="h-10" />
         <SyncErrorBanner />
+        <InstallBanner />
         {step === 0 && <IntroModal onDone={advance} />}
         <Routes>
           <Route

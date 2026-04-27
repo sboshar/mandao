@@ -32,6 +32,7 @@ import {
   shrinkAudioCacheTo,
   previewShrink,
 } from '../services/audioPrefetch';
+import { triggerInstall, usePlatform } from '../lib/pwaInstall';
 
 type Section = 'account' | 'srs' | 'display' | 'ai' | 'anki' | 'data';
 
@@ -1316,6 +1317,9 @@ function DataSection() {
       {/* Offline audio cache */}
       <AudioCacheCard />
 
+      {/* Install Mandao as a PWA */}
+      <InstallCard />
+
       {/* Delete account / data */}
       <SectionCard title="Danger Zone" description="Permanently delete all your data. This cannot be undone.">
         {!confirmDelete ? (
@@ -1609,6 +1613,69 @@ function AudioCacheCard() {
           </div>
         )}
       </div>
+    </SectionCard>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Install (PWA)
+// ────────────────────────────────────────────────────────────
+
+function InstallCard() {
+  const platform = usePlatform();
+
+  if (platform === 'no-install') return null;
+
+  const installed = platform === 'installed';
+  const promptable = platform === 'promptable';
+
+  const handleInstall = async () => {
+    await triggerInstall();
+    // The hook re-renders via subscribeInstallState; nothing else to do.
+  };
+
+  return (
+    <SectionCard
+      title="Install Mandao"
+      description={
+        installed
+          ? 'Mandao is installed on this device.'
+          : 'Install Mandao to keep your offline audio cache from being evicted between sessions, and to launch from your home screen / dock without browser chrome.'
+      }
+    >
+      {installed && (
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Installed ✓
+        </p>
+      )}
+      {promptable && (
+        <button
+          onClick={handleInstall}
+          className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+        >
+          Install Mandao
+        </button>
+      )}
+      {platform === 'chrome-address-bar' && (
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Click the install icon at the right side of your address bar (a small monitor with a down-arrow).
+          You can also use the Chrome menu → <strong>Cast, save, and share</strong> →{' '}
+          <strong>Install Mandao…</strong>
+        </p>
+      )}
+      {platform === 'ios-safari' && (
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Tap <strong>Share</strong> at the bottom of Safari, then{' '}
+          <strong>Add to Home Screen</strong>.
+        </p>
+      )}
+      {platform === 'macos-safari' && (
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          From Safari's menu bar, choose <strong>File</strong> →{' '}
+          <strong>Add to Dock…</strong>.
+        </p>
+      )}
     </SectionCard>
   );
 }
