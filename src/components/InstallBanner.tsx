@@ -157,16 +157,16 @@ function BannerCopy({ platform }: { platform: Platform }) {
     // cache durability (without it, ITP wipes IndexedDB after ~7 days).
     return (
       <span>
-        <strong>Install Mandao</strong> so your offline audio doesn't expire after a week: tap the Share button{' '}
-        {ShareIconSvg} at the bottom, then <strong>Add to Home Screen</strong>.
+        <strong>Install Mandao</strong>: press the Share button {ShareIconSvg} at the bottom, then{' '}
+        <strong>Add to Home Screen</strong>.
       </span>
     );
   }
   if (platform === 'ios-other-browser') {
     return (
       <span>
-        <strong>Install Mandao on iOS</strong>: open this page in Safari (Share {ShareIconSvg} →{' '}
-        <strong>Open in Safari</strong>), then tap Share → <strong>Add to Home Screen</strong>.
+        <strong>Install Mandao on iOS</strong>: open this page in Safari, press Share{' '}
+        {ShareIconSvg}, then <strong>Add to Home Screen</strong>.
       </span>
     );
   }

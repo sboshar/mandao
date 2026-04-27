@@ -1668,15 +1668,14 @@ function InstallCard() {
       )}
       {platform === 'ios-safari' && (
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          Tap the <strong>Share</strong> button (a square with an upward arrow) at the bottom of
-          Safari, then scroll down and tap <strong>Add to Home Screen</strong>.
+          Press the <strong>Share</strong> button (a square with an upward arrow) at the bottom of
+          Safari, then <strong>Add to Home Screen</strong>.
         </p>
       )}
       {platform === 'ios-other-browser' && (
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          On iOS, only Safari can install web apps to the home screen. Tap the Share button
-          in this browser, choose <strong>Open in Safari</strong>, then in Safari tap Share →{' '}
-          <strong>Add to Home Screen</strong>.
+          On iOS, only Safari can install web apps. Open this page in Safari, then press
+          Share → <strong>Add to Home Screen</strong>.
         </p>
       )}
       {platform === 'macos-safari' && (

@@ -107,10 +107,13 @@ export function getPlatform(): Platform {
   if (getDeferred()) return 'promptable';
 
   const ua = navigator.userAgent;
-  // iPadOS 13+ reports as Mac. The touch sniff is the standard workaround.
+  // iPadOS 13+ reports as Macintosh; differentiate from real desktop Mac
+  // by hardware touch points (iPad = 5, desktop Mac = 0). Don't use
+  // `ontouchend in document` — Chromium on desktop exposes touch APIs by
+  // default regardless of hardware, so that check false-positives.
   const isIOS =
     /iPhone|iPad|iPod/.test(ua) ||
-    (ua.includes('Mac') && typeof document !== 'undefined' && 'ontouchend' in document);
+    (/Macintosh/.test(ua) && (navigator.maxTouchPoints ?? 0) > 1);
   // All iOS browsers use WebKit, but Apple gates Add-to-Home-Screen to
   // Safari only — Chrome/Firefox/Edge on iOS don't have it. Detect those
   // by their Apple-mandated UA suffixes and route to a separate copy that
