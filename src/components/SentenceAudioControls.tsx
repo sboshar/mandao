@@ -10,6 +10,7 @@ import {
   type RecordingHandle,
   type RecordingResult,
 } from '../services/audioRecording';
+import { getRecordingCapMs } from '../stores/audioCacheSettingsStore';
 
 const SpeakerIcon = (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -121,20 +122,16 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     if (downloadingId === rec.id) return;
     stopAll();
 
-    let blob = rec.blob;
-    if (!blob) {
-      setDownloadingId(rec.id);
-      try {
-        const fetched = await repo.fetchAudioBlob(rec.id);
-        if (!fetched) {
-          setError('Could not load this recording.');
-          return;
-        }
-        blob = fetched;
-        await refresh();
-      } finally {
-        setDownloadingId((cur) => (cur === rec.id ? null : cur));
+    setDownloadingId(rec.id);
+    let blob: Blob | null = null;
+    try {
+      blob = await repo.fetchAudioBlob(rec.id);
+      if (!blob) {
+        setError('Could not load this recording.');
+        return;
       }
+    } finally {
+      setDownloadingId((cur) => (cur === rec.id ? null : cur));
     }
 
     setPlayingId(rec.id);
@@ -149,7 +146,18 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     setError('');
     if (pendingClip || recordHandle) return;
     try {
-      const handle = await startRecording();
+      const handle = await startRecording({
+        maxDurationMs: getRecordingCapMs(),
+        onDurationCap: () => {
+          // Auto-finalize when the cap fires; mirrors what handleStopRecord does.
+          handle.stop().then((result) => {
+            recordHandleRef.current = null;
+            setRecordHandle(null);
+            setPendingClip(result);
+            setPendingName(defaultName());
+          }).catch(() => {});
+        },
+      });
       recordHandleRef.current = handle;
       setRecordHandle(handle);
     } catch (e: any) {
@@ -179,13 +187,12 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
       id: uuid(),
       sentenceId,
       name,
-      blob: pendingClip.blob,
       mimeType: pendingClip.mimeType,
       durationMs: pendingClip.durationMs,
       source: 'manual',
       createdAt: Date.now(),
     };
-    await repo.insertAudioRecording(rec);
+    await repo.insertAudioRecording(rec, pendingClip.blob);
     setPendingClip(null);
     setPendingName('');
     await refresh();

@@ -13,6 +13,7 @@ import type {
   Deck,
   ReviewLog,
   AudioRecording,
+  AudioBlob,
   MeaningFlag,
 } from './schema';
 
@@ -268,6 +269,7 @@ export async function deleteSentenceById(id: string): Promise<void> {
       localDb.srsCards,
       localDb.reviewLogs,
       localDb.audioRecordings,
+      localDb.audioBlobs,
     ],
     async () => {
       const cards = await localDb.srsCards.where('sentenceId').equals(id).toArray();
@@ -277,6 +279,11 @@ export async function deleteSentenceById(id: string): Promise<void> {
       }
       await localDb.srsCards.where('sentenceId').equals(id).delete();
       await localDb.sentenceTokens.where('sentenceId').equals(id).delete();
+      const recs = await localDb.audioRecordings.where('sentenceId').equals(id).toArray();
+      const recIds = recs.map((r) => r.id);
+      if (recIds.length > 0) {
+        await localDb.audioBlobs.bulkDelete(recIds);
+      }
       await localDb.audioRecordings.where('sentenceId').equals(id).delete();
       await localDb.sentences.delete(id);
     }
@@ -475,6 +482,7 @@ export async function deleteAllUserData(): Promise<void> {
       localDb.decks,
       localDb.reviewLogs,
       localDb.audioRecordings,
+      localDb.audioBlobs,
     ],
     async () => {
       await Promise.all([
@@ -486,6 +494,7 @@ export async function deleteAllUserData(): Promise<void> {
         localDb.meaningLinks.clear(),
         localDb.decks.clear(),
         localDb.audioRecordings.clear(),
+        localDb.audioBlobs.clear(),
       ]);
     }
   );
@@ -526,6 +535,87 @@ export async function deleteAudioRecording(id: string): Promise<void> {
 export async function getAllAudioStoragePaths(): Promise<string[]> {
   const rows = await localDb.audioRecordings.toArray();
   return rows.map((r) => r.storagePath).filter((p): p is string => !!p);
+}
+
+export async function getAllAudioRecordings(): Promise<AudioRecording[]> {
+  return localDb.audioRecordings.toArray();
+}
+
+// ============================================================
+// Audio blobs (client-only cache for AudioRecording bytes)
+// ============================================================
+
+/** Build an AudioBlob entry with the standard mime fallback chain and
+ *  matched fetchedAt/lastPlayedAt timestamps. Centralized so the four
+ *  insert sites (insert, fetch, prefetch, migration) can't drift. */
+export function makeAudioBlobEntry(
+  recordingId: string,
+  blob: Blob,
+  mimeType?: string,
+  ts: number = Date.now(),
+): AudioBlob {
+  return {
+    recordingId,
+    blob,
+    mimeType: mimeType ?? blob.type ?? 'audio/webm',
+    sizeBytes: blob.size,
+    fetchedAt: ts,
+    lastPlayedAt: ts,
+  };
+}
+
+export async function getAudioBlob(recordingId: string): Promise<AudioBlob | undefined> {
+  return localDb.audioBlobs.get(recordingId);
+}
+
+export async function putAudioBlob(entry: AudioBlob): Promise<void> {
+  await localDb.audioBlobs.put(entry);
+}
+
+export async function touchAudioBlob(recordingId: string): Promise<void> {
+  await localDb.audioBlobs.update(recordingId, { lastPlayedAt: Date.now() });
+}
+
+export async function deleteAudioBlob(recordingId: string): Promise<void> {
+  await localDb.audioBlobs.delete(recordingId);
+}
+
+export async function deleteAudioBlobs(recordingIds: string[]): Promise<void> {
+  if (recordingIds.length === 0) return;
+  await localDb.audioBlobs.bulkDelete(recordingIds);
+}
+
+export async function clearAudioBlobs(): Promise<void> {
+  await localDb.audioBlobs.clear();
+}
+
+export async function getAudioCacheUsage(): Promise<{ totalBytes: number; count: number }> {
+  let totalBytes = 0;
+  let count = 0;
+  await localDb.audioBlobs.each((b) => {
+    totalBytes += b.sizeBytes;
+    count += 1;
+  });
+  return { totalBytes, count };
+}
+
+/** Recording IDs already cached locally — used by prefetch to skip work. */
+export async function getCachedAudioRecordingIds(): Promise<Set<string>> {
+  const ids = (await localDb.audioBlobs.toCollection().primaryKeys()) as string[];
+  return new Set(ids);
+}
+
+/** LRU eviction candidates: ascending lastPlayedAt. Each yields a sizeBytes
+ *  to stop iterating once enough has been freed. */
+export async function getAudioBlobsSortedByLru(): Promise<
+  Array<{ recordingId: string; sizeBytes: number; lastPlayedAt: number }>
+> {
+  const rows = await localDb.audioBlobs.orderBy('lastPlayedAt').toArray();
+  return rows.map((r) => ({
+    recordingId: r.recordingId,
+    sizeBytes: r.sizeBytes,
+    lastPlayedAt: r.lastPlayedAt,
+  }));
 }
 
 // ============================================================

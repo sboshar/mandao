@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
 import type { FailedOp } from '../stores/syncStore';
+import { runAudioPrefetch } from '../services/audioPrefetch';
 
 /** Sync error that preserves the Postgres code so the outbox can tell
  *  permanent (CHECK violation, missing column) apart from transient
@@ -285,18 +286,20 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
 
   const rec = await localDb.audioRecordings.get(payload.id);
   if (!rec) return;
+  const cachedBlob = await localDb.audioBlobs.get(payload.id);
   // Nothing local to upload and nothing on the server either.
-  if (!rec.blob && !rec.storagePath) return;
+  if (!cachedBlob && !rec.storagePath) return;
 
   const userId = getCachedUserIdOrThrow();
   const isFirstUpload = !rec.storagePath;
   let storagePath = rec.storagePath;
   if (isFirstUpload) {
+    if (!cachedBlob) return; // shouldn't happen: !storagePath && !cachedBlob already returned
     const ext = extensionFromMime(payload.mimeType);
     storagePath = `${userId}/${payload.id}.${ext}`;
     const { error: uploadErr } = await supabase.storage
       .from(AUDIO_BUCKET)
-      .upload(storagePath, rec.blob!, {
+      .upload(storagePath, cachedBlob.blob, {
         contentType: payload.mimeType,
         upsert: true,
       });
@@ -407,6 +410,7 @@ async function pullOnePage(): Promise<boolean> {
       localDb.decks,
       localDb.reviewLogs,
       localDb.audioRecordings,
+      localDb.audioBlobs,
       localDb.syncMeta,
     ],
     async () => {
@@ -461,13 +465,10 @@ async function pullOnePage(): Promise<boolean> {
       }
       trackRows(changes.review_logs);
 
-      // Audio recordings: server wins for metadata, but preserve any local
-      // blob (the wire row has none, and we don't want to drop cached bytes).
+      // Audio recordings: server wins for metadata. Cached bytes live in
+      // the audioBlobs table (keyed by id), so we can write rows directly.
       if (audioRows.length > 0) {
-        const mapped = audioRows.map(audioRecordingFromRow);
-        const existing = await localDb.audioRecordings.bulkGet(mapped.map((r) => r.id));
-        const merged = mapped.map((r, i) => ({ ...r, blob: existing[i]?.blob }));
-        await localDb.audioRecordings.bulkPut(merged);
+        await localDb.audioRecordings.bulkPut(audioRows.map(audioRecordingFromRow));
       }
       trackRows(audioRows);
 
@@ -482,6 +483,11 @@ async function pullOnePage(): Promise<boolean> {
             }
             await localDb.srsCards.where('sentenceId').equals(entity_id).delete();
             await localDb.sentenceTokens.where('sentenceId').equals(entity_id).delete();
+            const recs = await localDb.audioRecordings.where('sentenceId').equals(entity_id).toArray();
+            const recIds = recs.map((r) => r.id);
+            if (recIds.length > 0) {
+              await localDb.audioBlobs.bulkDelete(recIds);
+            }
             await localDb.audioRecordings.where('sentenceId').equals(entity_id).delete();
             await localDb.sentences.delete(entity_id);
             break;
@@ -516,8 +522,9 @@ async function pullOnePage(): Promise<boolean> {
             await localDb.sentenceTokens.delete(entity_id);
             break;
           case 'audio_recording':
-            // Row delete drops the local blob too; the server already wiped
-            // the Storage object via the delete trigger.
+            // The server already wiped the Storage object via the delete
+            // trigger; drop our metadata row and any cached bytes too.
+            await localDb.audioBlobs.delete(entity_id);
             await localDb.audioRecordings.delete(entity_id);
             break;
         }
@@ -576,6 +583,9 @@ export async function runSync(): Promise<void> {
     }
     // When stuck > 0, setFailed already set status='error' + errorMessage,
     // so a separate setError(...) call would duplicate the signal.
+
+    // Fire-and-forget prefetch of newly-available audio.
+    void runAudioPrefetch();
   } catch (e: any) {
     console.error('Sync failed:', e);
     store.setError(e.message || 'Sync failed');

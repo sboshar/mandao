@@ -31,6 +31,7 @@ import {
   type RecordingResult,
   type StreamingWithAudioHandle,
 } from '../services/audioRecording';
+import { getRecordingCapMs } from '../stores/audioCacheSettingsStore';
 import { pinyin as toPinyin } from 'pinyin-pro';
 import { computeTokenCoverage } from '../services/tokenCoverage';
 import { v4 as uuid } from 'uuid';
@@ -221,6 +222,11 @@ export function AddSentencePage() {
     try {
       const handle = await startStreamingRecognitionWithAudio({
         onInterim: (text) => setVoiceInterim(text),
+        maxDurationMs: getRecordingCapMs(),
+        onDurationCap: () => {
+          // Auto-finalize when the cap fires by re-running the toggle path.
+          if (streamingHandleRef.current) handleVoiceInput();
+        },
       });
       streamingHandleRef.current = handle;
       setListening(true);
@@ -558,13 +564,12 @@ export function AddSentencePage() {
           id: uuid(),
           sentenceId: createdSentenceId,
           name: pendingVoiceClipName.trim() || 'My voice',
-          blob: pendingVoiceClip.blob,
           mimeType: pendingVoiceClip.mimeType,
           durationMs: pendingVoiceClip.durationMs,
           source: 'voice-input',
           createdAt: Date.now(),
         };
-        try { await repo.insertAudioRecording(rec); } catch {}
+        try { await repo.insertAudioRecording(rec, pendingVoiceClip.blob); } catch {}
       }
 
       // Tutorial mode: seed remaining sentences in the background, then advance

@@ -8,6 +8,7 @@ import type {
   Deck,
   ReviewLog,
   AudioRecording,
+  AudioBlob,
   MeaningFlag,
 } from './schema';
 
@@ -54,6 +55,7 @@ class MandaoDb extends Dexie {
   outbox!: Table<SyncOp, number>;
   syncMeta!: Table<SyncMeta, string>;
   audioRecordings!: Table<AudioRecording, string>;
+  audioBlobs!: Table<AudioBlob, string>;
   meaningFlags!: Table<MeaningFlag, string>;
 
   constructor() {
@@ -97,6 +99,42 @@ class MandaoDb extends Dexie {
     this.version(4).stores({
       meaningFlags: 'id, meaningId, headword, flagKind, resolvedAt, createdAt',
     });
+
+    // v5: split audio bytes off audio_recordings into a client-only
+    // audioBlobs table. Keeps cache state (lastPlayedAt, sizeBytes) out of
+    // the synced row and lets us enumerate / sum / evict cleanly.
+    this.version(5)
+      .stores({
+        audioBlobs: 'recordingId, lastPlayedAt, fetchedAt',
+      })
+      .upgrade(async (tx) => {
+        const recs = await tx.table('audioRecordings').toArray();
+        const moves: AudioBlob[] = [];
+        const cleared: AudioRecording[] = [];
+        for (const rec of recs) {
+          const oldBlob = (rec as AudioRecording & { blob?: Blob }).blob;
+          if (oldBlob instanceof Blob) {
+            const ts = rec.createdAt ?? Date.now();
+            moves.push({
+              recordingId: rec.id,
+              blob: oldBlob,
+              mimeType: rec.mimeType ?? oldBlob.type ?? 'audio/webm',
+              sizeBytes: oldBlob.size,
+              fetchedAt: ts,
+              lastPlayedAt: ts,
+            });
+            // bulkPut replaces the whole row, so dropping `blob` from the
+            // copy is enough to remove it from IDB.
+            const next = { ...rec } as AudioRecording & { blob?: Blob };
+            delete next.blob;
+            cleared.push(next);
+          }
+        }
+        if (moves.length > 0) {
+          await tx.table('audioBlobs').bulkPut(moves);
+          await tx.table('audioRecordings').bulkPut(cleared);
+        }
+      });
   }
 }
 
@@ -129,6 +167,7 @@ export async function clearLocalDb(): Promise<void> {
       localDb.outbox,
       localDb.syncMeta,
       localDb.audioRecordings,
+      localDb.audioBlobs,
       localDb.meaningFlags,
     ],
     async () => {
@@ -143,6 +182,7 @@ export async function clearLocalDb(): Promise<void> {
         localDb.outbox.clear(),
         localDb.syncMeta.clear(),
         localDb.audioRecordings.clear(),
+        localDb.audioBlobs.clear(),
         localDb.meaningFlags.clear(),
       ]);
     }

@@ -56,6 +56,7 @@ export async function hydrateLocalDb(): Promise<void> {
       localDb.decks,
       localDb.reviewLogs,
       localDb.audioRecordings,
+      localDb.audioBlobs,
       localDb.syncMeta,
     ],
     async () => {
@@ -68,6 +69,9 @@ export async function hydrateLocalDb(): Promise<void> {
         localDb.decks.clear(),
         localDb.reviewLogs.clear(),
         localDb.audioRecordings.clear(),
+        // Cached bytes belong to the previous account; drop them so a
+        // re-hydration doesn't carry stale audio (and stale cap usage).
+        localDb.audioBlobs.clear(),
       ]);
 
       await Promise.all([

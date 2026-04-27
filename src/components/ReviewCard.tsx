@@ -21,6 +21,7 @@ import {
   playBlob,
   type StreamingWithAudioHandle,
 } from '../services/audioRecording';
+import { getRecordingCapMs } from '../stores/audioCacheSettingsStore';
 import { compareCharacters, matchPercent, type CharResult } from '../lib/charCompare';
 import { lookupPinyinForChars } from '../lib/pinyinLookup';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
@@ -250,6 +251,10 @@ export function ReviewCard() {
     try {
       const handle = await startStreamingRecognitionWithAudio({
         onInterim: (text) => setRecognizedText(text),
+        maxDurationMs: getRecordingCapMs(),
+        onDurationCap: () => {
+          if (streamHandleRef.current) handleSpeakMic();
+        },
       });
       streamHandleRef.current = handle;
       setIsListening(true);

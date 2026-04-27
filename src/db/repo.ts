@@ -10,7 +10,7 @@
 import * as local from './localRepo';
 import { localDb, type SyncOp } from './localDb';
 import { supabase } from '../lib/supabase';
-import { removeStorageObjects } from '../lib/audioStorage';
+import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
 import { getDeviceId, scheduleSyncSoon } from './syncEngine';
 import {
   getUserId as getRemoteUserId,
@@ -418,8 +418,16 @@ function audioUpsertPayload(rec: import('./schema').AudioRecording) {
   };
 }
 
-export async function insertAudioRecording(rec: import('./schema').AudioRecording) {
+export async function insertAudioRecording(
+  rec: import('./schema').AudioRecording,
+  blob?: Blob,
+) {
   await local.insertAudioRecording(rec);
+  if (blob) {
+    await local.putAudioBlob(
+      local.makeAudioBlobEntry(rec.id, blob, rec.mimeType, rec.createdAt),
+    );
+  }
   await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
 }
 
@@ -446,6 +454,7 @@ export async function deleteAudioRecording(id: string) {
   }
 
   await local.deleteAudioRecording(id);
+  await local.deleteAudioBlob(id);
   await enqueue({
     op: 'deleteEntity',
     payload: { entity_type: 'audio_recording', entity_id: id },
@@ -457,25 +466,34 @@ export async function deleteAudioRecording(id: string) {
 }
 
 /**
- * Lazy-fetch a recording's Blob via a short-lived signed URL and cache it
- * back into Dexie so future plays skip the network. Returns null on failure
- * (no row, no storagePath, or network error).
+ * Get a recording's Blob, hitting the audioBlobs cache first and only
+ * falling through to a Storage signed-URL fetch on miss. Updates
+ * lastPlayedAt on hit so LRU eviction can prefer cold entries. Returns
+ * null on failure (no row, no storagePath, or network error).
  */
 export async function fetchAudioBlob(id: string): Promise<Blob | null> {
+  const cached = await local.getAudioBlob(id);
+  if (cached) {
+    // Don't await — touching the LRU timestamp is a best-effort hint;
+    // a slow IDB write shouldn't delay playback.
+    void local.touchAudioBlob(id);
+    return cached.blob;
+  }
+
   const rec = await local.getAudioRecording(id);
   if (!rec?.storagePath) return null;
   // Short TTL: the URL is consumed immediately by the fetch below, so a
   // longer expiry just widens the leak window (browser history, HAR
   // exports, extensions) for what is otherwise per-user private content.
   const { data, error } = await supabase.storage
-    .from('audio-recordings')
+    .from(AUDIO_BUCKET)
     .createSignedUrl(rec.storagePath, 60);
   if (error || !data?.signedUrl) return null;
   try {
     const resp = await fetch(data.signedUrl);
     if (!resp.ok) return null;
     const blob = await resp.blob();
-    await local.updateAudioRecording(id, { blob });
+    await local.putAudioBlob(local.makeAudioBlobEntry(id, blob, rec.mimeType));
     return blob;
   } catch {
     return null;
