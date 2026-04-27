@@ -261,6 +261,55 @@ export function _getSharedAudioForDiagnostic(): HTMLAudioElement {
   return getSharedAudio();
 }
 
+/** Global debug log buffer. Populated when ?audioDebug=1 is on the URL.
+ *  A debug overlay reads this to show what's happening during playback. */
+const DEBUG_RING_SIZE = 200;
+const debugLog: string[] = [];
+const debugListeners = new Set<() => void>();
+
+function isDebugEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (sessionStorage.getItem('mandao_audio_debug') === '1') return true;
+  if (new URLSearchParams(window.location.search).get('audioDebug') === '1') {
+    sessionStorage.setItem('mandao_audio_debug', '1');
+    return true;
+  }
+  return false;
+}
+
+function debugPush(line: string) {
+  if (!isDebugEnabled()) return;
+  const stamp = new Date().toLocaleTimeString().slice(-8) + '.' + String(Date.now() % 1000).padStart(3, '0');
+  debugLog.push(`[${stamp}] ${line}`);
+  if (debugLog.length > DEBUG_RING_SIZE) debugLog.shift();
+  for (const cb of debugListeners) { try { cb(); } catch { /* noop */ } }
+}
+
+export function getAudioDebugLog(): string[] {
+  return debugLog.slice();
+}
+
+export function clearAudioDebugLog() {
+  debugLog.length = 0;
+  for (const cb of debugListeners) { try { cb(); } catch { /* noop */ } }
+}
+
+export function subscribeAudioDebug(cb: () => void): () => void {
+  debugListeners.add(cb);
+  return () => debugListeners.delete(cb);
+}
+
+export function audioDebugEnabled(): boolean {
+  return isDebugEnabled();
+}
+
+/** Write a line to the audio debug log when ?audioDebug=1 is set. No-op
+ *  in normal operation. Called from SentenceAudioControls and similar
+ *  to surface what's happening alongside playBlob's own events. */
+export function audioDebugPush(line: string): void {
+  debugPush(line);
+}
+
 /** Real 50ms silent-amplitude MP3 served from /public. iOS plays it
  *  successfully and the user hears nothing. */
 const SILENT_MP3_URL = '/silent.mp3';
@@ -296,6 +345,8 @@ export function isAudioUnlocked(): boolean {
  */
 export function playBlob(blob: Blob, onEnded?: () => void): () => void {
   const audio = getSharedAudio();
+  debugPush(`playBlob() called — blob ${blob.size}B ${blob.type}; element paused=${audio.paused} muted=${audio.muted}`);
+
   // Stop whatever is playing on the shared element.
   try { audio.pause(); } catch { /* noop */ }
   if (pendingObjectUrl) {
@@ -307,10 +358,36 @@ export function playBlob(blob: Blob, onEnded?: () => void): () => void {
   pendingObjectUrl = url;
   audio.src = url;
 
+  // Hook every interesting event when debug is on.
+  let trackedListeners: Array<{ type: string; fn: EventListener }> | null = null;
+  if (audioDebugEnabled()) {
+    trackedListeners = [];
+    const events = ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'play', 'playing', 'pause', 'ended', 'error', 'stalled', 'suspend', 'abort', 'emptied'];
+    for (const evt of events) {
+      const fn = () => {
+        let detail = '';
+        if (evt === 'error') {
+          const code = audio.error?.code;
+          detail = ` (MediaError ${code})`;
+        }
+        if (evt === 'pause') {
+          detail = ` (currentTime=${audio.currentTime.toFixed(2)}s)`;
+        }
+        debugPush(`event: ${evt}${detail}`);
+      };
+      audio.addEventListener(evt, fn);
+      trackedListeners.push({ type: evt, fn });
+    }
+  }
+
   let stopped = false;
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
+    debugPush(`cleanup() — currentTime=${audio.currentTime.toFixed(2)}s readyState=${audio.readyState}`);
+    if (trackedListeners) {
+      for (const l of trackedListeners) audio.removeEventListener(l.type, l.fn);
+    }
     if (pendingObjectUrl === url) {
       URL.revokeObjectURL(url);
       pendingObjectUrl = null;
@@ -319,9 +396,16 @@ export function playBlob(blob: Blob, onEnded?: () => void): () => void {
   };
   audio.onended = cleanup;
   audio.onerror = cleanup;
-  audio.play().catch(cleanup);
+  audio.play()
+    .then(() => debugPush(`audio.play() resolved`))
+    .catch((e: unknown) => {
+      const err = e as { name?: string; message?: string };
+      debugPush(`audio.play() rejected: ${err?.name ?? '?'} ${err?.message ?? ''}`);
+      cleanup();
+    });
 
   return () => {
+    debugPush(`stop() called externally`);
     try { audio.pause(); } catch { /* noop */ }
     cleanup();
   };
