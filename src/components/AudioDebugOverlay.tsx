@@ -21,10 +21,13 @@ export function AudioDebugOverlay() {
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    setEnabled(audioDebugEnabled());
-    if (!audioDebugEnabled()) return;
-    const refresh = () => setLog(getAudioDebugLog());
+    const refresh = () => {
+      setEnabled(audioDebugEnabled());
+      setLog(getAudioDebugLog());
+    };
     refresh();
+    // subscribeAudioDebug fires on both log events AND when
+    // setAudioDebugEnabled toggles, so we re-check enabled state too.
     return subscribeAudioDebug(refresh);
   }, []);
 
