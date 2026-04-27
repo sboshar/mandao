@@ -21,6 +21,7 @@ import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
+import { unlockAudio, isAudioUnlocked } from '../services/audioRecording';
 import {
   useAudioCacheSettingsStore,
   RECORDING_CAP_SEC_MIN,
@@ -1818,41 +1819,87 @@ function AudioDiagnosticCard() {
         return;
       }
 
-      // 6. Decode test — try to load the blob into an Audio element
+      // 6. Unlock check — were we able to prime audio for iOS?
+      push({
+        name: 'iOS audio unlock',
+        status: isAudioUnlocked() ? 'ok' : 'fail',
+        detail: isAudioUnlocked()
+          ? 'Shared Audio element is unlocked'
+          : 'unlockAudio() did not complete — silent priming failed',
+      });
+
+      // 7. Play test — actually call .play() (muted) and watch every
+      // relevant event. iOS deliberately doesn't fire `canplay` until
+      // play() is invoked, so the previous "decode" check would always
+      // time out on iOS even when audio works fine.
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      const decodeResult = await new Promise<DiagStep>((resolve) => {
-        const cleanup = () => URL.revokeObjectURL(url);
-        audio.oncanplay = () => {
-          cleanup();
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.muted = true;
+      const events: string[] = [];
+      const trackedEvents = [
+        'loadstart',
+        'loadedmetadata',
+        'loadeddata',
+        'canplay',
+        'canplaythrough',
+        'play',
+        'playing',
+        'error',
+        'stalled',
+        'suspend',
+      ];
+      for (const evt of trackedEvents) {
+        audio.addEventListener(evt, () => events.push(evt));
+      }
+      audio.src = url;
+
+      const playResult = await new Promise<DiagStep>((resolve) => {
+        const cleanup = () => {
+          try { audio.pause(); } catch {/*noop*/}
+          URL.revokeObjectURL(url);
+        };
+        audio.addEventListener('playing', () => {
           const dur = Number.isFinite(audio.duration) ? audio.duration.toFixed(2) : '?';
-          resolve({
-            name: 'Decode',
-            status: 'ok',
-            detail: `Playable (duration ${dur}s)`,
-          });
-        };
-        audio.onerror = () => {
           cleanup();
-          const code = audio.error?.code;
-          const name = code ? ERROR_CODE_NAMES[code] || 'unknown' : 'no error info';
           resolve({
-            name: 'Decode',
-            status: 'fail',
-            detail: `MediaError ${code ?? '?'} (${name})${audio.error?.message ? ' — ' + audio.error.message : ''}`,
+            name: 'Play test',
+            status: 'ok',
+            detail: `Playing • duration ${dur}s • events: ${events.join(' → ')}`,
           });
-        };
-        // Timeout in case neither event fires (rare, but seen in some iOS versions)
+        });
+        audio.addEventListener('error', () => {
+          const code = audio.error?.code;
+          const name = code ? ERROR_CODE_NAMES[code] || 'unknown' : 'no info';
+          cleanup();
+          resolve({
+            name: 'Play test',
+            status: 'fail',
+            detail: `MediaError ${code ?? '?'} (${name}) • events: ${events.join(' → ') || 'none'}`,
+          });
+        });
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch((e: unknown) => {
+            const err = e as { name?: string; message?: string };
+            cleanup();
+            resolve({
+              name: 'Play test',
+              status: 'fail',
+              detail: `play() rejected: ${err?.name ?? '?'} — ${err?.message ?? ''} • events: ${events.join(' → ') || 'none'}`,
+            });
+          });
+        }
         setTimeout(() => {
           cleanup();
           resolve({
-            name: 'Decode',
+            name: 'Play test',
             status: 'fail',
-            detail: 'Timeout after 5s — neither canplay nor error fired',
+            detail: `Timeout after 5s — events: ${events.join(' → ') || 'none'}`,
           });
         }, 5000);
       });
-      push(decodeResult);
+      push(playResult);
     } catch (e) {
       push({
         name: 'Diagnostic',
@@ -1872,6 +1919,10 @@ function AudioDiagnosticCard() {
       <div className="space-y-3">
         <button
           onClick={() => {
+            // Synchronously prime audio in the click gesture so the play
+            // step can succeed on iOS later (where async work between
+            // the click and audio.play() severs the gesture context).
+            unlockAudio();
             setSteps([]);
             run();
           }}

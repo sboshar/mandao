@@ -247,11 +247,11 @@ function getSharedAudio(): HTMLAudioElement {
   return sharedAudio;
 }
 
-/** Tiny silent MP3 (~100 bytes) used to "unlock" iOS audio on first
- *  interaction. iOS allows audio.play() inside a gesture, but only the
- *  first one — after that the element stays unlocked for the page. */
-const SILENT_MP3 =
-  'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+/** Smallest valid silent WAV (~60 bytes). WAV is the most universally
+ *  decoded format on iOS — picky MP3 frame parsing is a known pitfall
+ *  for unlock-style data URLs, so we avoid it. */
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAVFYAAFRWAAABAAgAZGF0YQAAAAA=';
 
 /**
  * Call from inside a user-gesture handler (any click / touchstart) to
@@ -262,7 +262,7 @@ export function unlockAudio(): void {
   if (audioUnlocked) return;
   const audio = getSharedAudio();
   audio.muted = true;
-  audio.src = SILENT_MP3;
+  audio.src = SILENT_WAV;
   const p = audio.play();
   // Older browsers return undefined; newer ones return a promise.
   Promise.resolve(p)
@@ -277,6 +277,11 @@ export function unlockAudio(): void {
       audio.muted = false;
       // Wasn't a real gesture, or browser denied — try again next click.
     });
+}
+
+/** True after at least one successful unlock. Useful for diagnostics. */
+export function isAudioUnlocked(): boolean {
+  return audioUnlocked;
 }
 
 /**
