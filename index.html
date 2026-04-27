@@ -4,7 +4,39 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>mandarin_app</title>
+    <!-- Drives the installed-PWA title bar color. Set inline before paint
+         so users who picked a dark theme last session don't flash light. -->
+    <meta name="theme-color" content="#f5f1eb" />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('mandao_theme');
+          if (saved === 'dark') {
+            document.documentElement.classList.add('dark');
+            var m = document.querySelector('meta[name="theme-color"]');
+            if (m) m.setAttribute('content', '#282828');
+          }
+        } catch (_) {}
+      })();
+      // Capture `beforeinstallprompt` and `appinstalled` here, before any
+      // module loads. Chrome fires the event very early — once the bundle
+      // is in flight — and a React-side listener can miss it.
+      (function () {
+        window.__pwaInstall = { deferred: null, installed: false };
+        window.addEventListener('beforeinstallprompt', function (e) {
+          e.preventDefault();
+          window.__pwaInstall.deferred = e;
+          // pwaInstall.ts subscribes to this once it loads.
+          window.dispatchEvent(new Event('__pwa_state_changed'));
+        });
+        window.addEventListener('appinstalled', function () {
+          window.__pwaInstall.installed = true;
+          window.__pwaInstall.deferred = null;
+          window.dispatchEvent(new Event('__pwa_state_changed'));
+        });
+      })();
+    </script>
+    <title>Mandao</title>
   </head>
   <body>
     <div id="root"></div>

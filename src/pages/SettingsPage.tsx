@@ -32,12 +32,7 @@ import {
   shrinkAudioCacheTo,
   previewShrink,
 } from '../services/audioPrefetch';
-import {
-  getPlatform,
-  subscribeInstallState,
-  triggerInstall,
-  type Platform,
-} from '../lib/pwaInstall';
+import { triggerInstall, usePlatform } from '../lib/pwaInstall';
 
 type Section = 'account' | 'srs' | 'display' | 'ai' | 'anki' | 'data';
 
@@ -1627,9 +1622,7 @@ function AudioCacheCard() {
 // ────────────────────────────────────────────────────────────
 
 function InstallCard() {
-  const [platform, setPlatform] = useState<Platform>(() => getPlatform());
-
-  useEffect(() => subscribeInstallState(() => setPlatform(getPlatform())), []);
+  const platform = usePlatform();
 
   if (platform === 'no-install') return null;
 
@@ -1638,9 +1631,7 @@ function InstallCard() {
 
   const handleInstall = async () => {
     await triggerInstall();
-    // After the user picks accept/dismiss the deferred prompt is consumed;
-    // re-read platform so the card reflects the new state.
-    setPlatform(getPlatform());
+    // The hook re-renders via subscribeInstallState; nothing else to do.
   };
 
   return (
@@ -1665,6 +1656,13 @@ function InstallCard() {
         >
           Install Mandao
         </button>
+      )}
+      {platform === 'chrome-address-bar' && (
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Click the install icon at the right side of your address bar (a small monitor with a down-arrow).
+          You can also use the Chrome menu → <strong>Cast, save, and share</strong> →{' '}
+          <strong>Install Mandao…</strong>
+        </p>
       )}
       {platform === 'ios-safari' && (
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>

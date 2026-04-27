@@ -1,19 +1,8 @@
 import { useEffect, useState } from 'react';
-import {
-  getPlatform,
-  subscribeInstallState,
-  triggerInstall,
-  type Platform,
-} from '../lib/pwaInstall';
+import { triggerInstall, usePlatform, type Platform } from '../lib/pwaInstall';
 import { useInstallNudgeStore } from '../stores/installNudgeStore';
 
 const HINT_TIMEOUT_MS = 5000;
-
-function usePlatform(): Platform {
-  const [platform, setPlatform] = useState(getPlatform);
-  useEffect(() => subscribeInstallState(() => setPlatform(getPlatform())), []);
-  return platform;
-}
 
 export function InstallBanner() {
   const platform = usePlatform();
@@ -107,11 +96,38 @@ export function InstallBanner() {
   );
 }
 
+const InstallIconSvg = (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    style={{ display: 'inline-block', verticalAlign: '-2px' }}
+  >
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
 function BannerCopy({ platform }: { platform: Platform }) {
   if (platform === 'promptable') {
     return (
       <span>
         <strong>Install Mandao</strong> to keep your offline audio cache from being evicted by the browser.
+      </span>
+    );
+  }
+  if (platform === 'chrome-address-bar') {
+    return (
+      <span>
+        <strong>Install Mandao</strong> for a smoother offline experience: click the install icon{' '}
+        {InstallIconSvg} in your address bar.
       </span>
     );
   }
@@ -126,8 +142,8 @@ function BannerCopy({ platform }: { platform: Platform }) {
   if (platform === 'macos-safari') {
     return (
       <span>
-        <strong>Install Mandao</strong> for a smoother offline experience: <strong>File</strong> →{' '}
-        <strong>Add to Dock</strong>.
+        <strong>Install Mandao</strong> for a smoother offline experience: in Safari's menu bar, choose{' '}
+        <strong>File</strong> → <strong>Add to Dock</strong>.
       </span>
     );
   }

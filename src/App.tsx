@@ -20,9 +20,6 @@ import { InstallBanner } from './components/InstallBanner';
 import { useTutorialStore } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
 import './stores/themeStore';
-// Side-effect import: registers the `beforeinstallprompt` listener at boot
-// so we don't miss the (one-time) event on Chromium browsers.
-import './lib/pwaInstall';
 
 const LoadingScreen = ({ message }: { message?: string }) => (
   <div className="min-h-screen flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}>
