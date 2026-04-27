@@ -36,8 +36,11 @@ export type Platform =
    *  recently installed/uninstalled and Chrome is in cooldown. We fall back
    *  to pointing at the address-bar icon. */
   | 'chrome-address-bar'
-  /** iOS Safari (or any iOS browser, since they're all WebKit) — show "Share → Add to Home Screen". */
+  /** iOS Safari proper — show "Share → Add to Home Screen". */
   | 'ios-safari'
+  /** iOS Chrome / Firefox / Edge — install requires Safari on iOS, so we
+   *  redirect users there before they can use Add to Home Screen. */
+  | 'ios-other-browser'
   /** macOS Safari 14+ — show "File → Add to Dock". */
   | 'macos-safari'
   /** Firefox / in-app browsers / anything else — no install path; hide UI. */
@@ -75,7 +78,7 @@ export function isStandalone(): boolean {
 }
 
 const DEV_OVERRIDE_KEY = 'mandao_pwa_dev_platform';
-const VALID_PLATFORMS: Platform[] = ['installed', 'promptable', 'chrome-address-bar', 'ios-safari', 'macos-safari', 'no-install'];
+const VALID_PLATFORMS: Platform[] = ['installed', 'promptable', 'chrome-address-bar', 'ios-safari', 'ios-other-browser', 'macos-safari', 'no-install'];
 
 // Run once at module load: a `?pwa=ios-safari` URL pins a platform for the
 // session via sessionStorage so it survives client-side nav. `?pwa=` clears.
@@ -108,11 +111,17 @@ export function getPlatform(): Platform {
   const isIOS =
     /iPhone|iPad|iPod/.test(ua) ||
     (ua.includes('Mac') && typeof document !== 'undefined' && 'ontouchend' in document);
-  // All iOS browsers use WebKit, but in-app browsers (Instagram, Twitter,
-  // etc.) don't have a Share menu users can install from — hide rather
-  // than mislead.
+  // All iOS browsers use WebKit, but Apple gates Add-to-Home-Screen to
+  // Safari only — Chrome/Firefox/Edge on iOS don't have it. Detect those
+  // by their Apple-mandated UA suffixes and route to a separate copy that
+  // tells the user to open in Safari first. In-app browsers (Instagram,
+  // Twitter, etc.) don't have a Share menu users can install from — hide
+  // rather than mislead.
   const isInAppBrowser = /(FBAN|FBAV|Instagram|Twitter|Line|WeChat)/i.test(ua);
-  if (isIOS && !isInAppBrowser) return 'ios-safari';
+  if (isIOS && !isInAppBrowser) {
+    const isIOSOtherBrowser = /CriOS\/|FxiOS\/|EdgiOS\//.test(ua);
+    return isIOSOtherBrowser ? 'ios-other-browser' : 'ios-safari';
+  }
 
   // Desktop Safari 14+ supports install via File → Add to Dock but doesn't
   // expose the prompt event. Detect by Safari + Mac, no iOS.
