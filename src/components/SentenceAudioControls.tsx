@@ -7,6 +7,7 @@ import {
   isAudioRecordingSupported,
   playBlob,
   startRecording,
+  unlockAudio,
   type RecordingHandle,
   type RecordingResult,
 } from '../services/audioRecording';
@@ -118,6 +119,10 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   };
 
   const playRecording = async (rec: AudioRecording) => {
+    // Synchronously, inside the click gesture: unlock iOS audio before
+    // the async fetch can sever the gesture context.
+    unlockAudio();
+
     if (playingId === rec.id) { stopAll(); return; }
     if (downloadingId === rec.id) return;
     stopAll();
