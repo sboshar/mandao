@@ -19,7 +19,6 @@ import {
 import {
   startStreamingRecognitionWithAudio,
   playBlob,
-  unlockAudio,
   type StreamingWithAudioHandle,
 } from '../services/audioRecording';
 import { getRecordingCapMs } from '../stores/audioCacheSettingsStore';
@@ -265,7 +264,6 @@ export function ReviewCard() {
   };
 
   const handlePlayRecording = () => {
-    unlockAudio();
     if (recordingBlob) playBlob(recordingBlob);
   };
 
