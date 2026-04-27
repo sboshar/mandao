@@ -67,6 +67,11 @@ interface Props {
  */
 export function SentenceAudioControls({ sentenceId, text, rate, className = '' }: Props) {
   const [recordings, setRecordings] = useState<AudioRecording[]>([]);
+  // Recording id → resolved Blob. Eagerly populated alongside recordings so
+  // play clicks can read the blob synchronously and call audio.play() inside
+  // the user-gesture context — required by iOS Safari, where any await
+  // between the click and play() rejects unmuted audio playback.
+  const [blobMap, setBlobMap] = useState<Map<string, Blob>>(new Map());
   const [playingId, setPlayingId] = useState<string | null>(null); // 'default' or recording.id
   const stopPlaybackRef = useRef<(() => void) | null>(null);
 
@@ -81,24 +86,36 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const canRecord = isAudioRecordingSupported();
 
-  const refresh = async () => {
+  const loadRecordingsAndBlobs = async (cancelledRef: { current: boolean }) => {
     const recs = await repo.getAudioRecordingsBySentence(sentenceId);
+    if (cancelledRef.current) return;
     setRecordings(recs);
+    const map = new Map<string, Blob>();
+    await Promise.all(
+      recs.map(async (r) => {
+        const blob = await repo.fetchAudioBlob(r.id);
+        if (blob) map.set(r.id, blob);
+      }),
+    );
+    if (!cancelledRef.current) setBlobMap(map);
+  };
+
+  const refresh = async () => {
+    await loadRecordingsAndBlobs({ current: false });
   };
 
   useEffect(() => {
-    let cancelled = false;
-    repo.getAudioRecordingsBySentence(sentenceId).then((recs) => {
-      if (!cancelled) setRecordings(recs);
-    });
+    const cancelledRef = { current: false };
+    loadRecordingsAndBlobs(cancelledRef);
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       stopPlaybackRef.current?.();
       stopSpeaking();
       // Release the mic if the user navigates away mid-recording.
       recordHandleRef.current?.cancel();
       recordHandleRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sentenceId]);
 
   const stopAll = () => {
@@ -118,31 +135,51 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     setPlayingId((cur) => (cur === 'default' ? null : cur));
   };
 
-  const playRecording = async (rec: AudioRecording) => {
-    // Synchronously, inside the click gesture: unlock iOS audio before
-    // the async fetch can sever the gesture context.
+  // Synchronous when the blob is already in blobMap (the common case after
+  // the eager load on mount). This keeps the click → audio.play() chain
+  // inside iOS's user-gesture context. Falls back to async fetch only if
+  // the eager load hasn't finished yet — in which case we'd lose the
+  // gesture, but at least desktop and the second tap will work.
+  const playRecording = (rec: AudioRecording) => {
+    // Belt-and-suspenders: prime the shared Audio element on iOS in case
+    // the synchronous path falls through to async.
     unlockAudio();
 
     if (playingId === rec.id) { stopAll(); return; }
-    if (downloadingId === rec.id) return;
     stopAll();
 
-    setDownloadingId(rec.id);
-    let blob: Blob | null = null;
-    try {
-      blob = await repo.fetchAudioBlob(rec.id);
-      if (!blob) {
-        setError('Could not load this recording.');
-        return;
-      }
-    } finally {
-      setDownloadingId((cur) => (cur === rec.id ? null : cur));
+    const cached = blobMap.get(rec.id);
+    if (cached) {
+      setPlayingId(rec.id);
+      stopPlaybackRef.current = playBlob(cached, () => {
+        setPlayingId((cur) => (cur === rec.id ? null : cur));
+      });
+      return;
     }
 
-    setPlayingId(rec.id);
-    stopPlaybackRef.current = playBlob(blob, () => {
-      setPlayingId((cur) => (cur === rec.id ? null : cur));
-    });
+    // Blob not yet loaded — fall back to async fetch (rare; only happens
+    // if the user taps before the eager-load effect finishes).
+    setDownloadingId(rec.id);
+    void (async () => {
+      try {
+        const blob = await repo.fetchAudioBlob(rec.id);
+        if (!blob) {
+          setError('Could not load this recording.');
+          return;
+        }
+        setBlobMap((m) => {
+          const next = new Map(m);
+          next.set(rec.id, blob);
+          return next;
+        });
+        setPlayingId(rec.id);
+        stopPlaybackRef.current = playBlob(blob, () => {
+          setPlayingId((cur) => (cur === rec.id ? null : cur));
+        });
+      } finally {
+        setDownloadingId((cur) => (cur === rec.id ? null : cur));
+      }
+    })();
   };
 
   const defaultName = () => `Recording ${recordings.length + 1}`;
