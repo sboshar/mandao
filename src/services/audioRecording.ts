@@ -47,13 +47,28 @@ export interface RecordingHandle {
   stop: () => Promise<RecordingResult>;
   /** Abort without producing a blob. */
   cancel: () => void;
+  /** True if the recorder auto-stopped because it hit `maxDurationMs`. */
+  hitDurationCap: () => boolean;
+}
+
+export interface RecordingOptions {
+  /** Hard cap on recording length. The recorder auto-stops when reached.
+   *  Keeps blob size bounded under the Storage 2 MiB cap; default lives in
+   *  the audio settings store. Pass 0 / undefined to disable. */
+  maxDurationMs?: number;
+  /** Optional callback fired when the cap auto-stop kicks in (so the UI
+   *  can finalize and surface a toast). */
+  onDurationCap?: () => void;
 }
 
 /**
  * Start recording audio from the microphone.
- * Returns a handle; call stop() to finalize and get the blob.
+ * Returns a handle; call stop() to finalize and get the blob. If
+ * `maxDurationMs` is set, the recorder auto-stops at that limit.
  */
-export async function startRecording(): Promise<RecordingHandle> {
+export async function startRecording(
+  opts: RecordingOptions = {},
+): Promise<RecordingHandle> {
   if (!isAudioRecordingSupported()) {
     throw new Error('Audio recording is not supported in this browser.');
   }
@@ -65,6 +80,7 @@ export async function startRecording(): Promise<RecordingHandle> {
   const chunks: Blob[] = [];
   const startedAt = Date.now();
   let cancelled = false;
+  let capped = false;
 
   recorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -76,26 +92,50 @@ export async function startRecording(): Promise<RecordingHandle> {
     for (const track of stream.getTracks()) track.stop();
   };
 
+  let capTimer: ReturnType<typeof setTimeout> | null = null;
+  if (opts.maxDurationMs && opts.maxDurationMs > 0) {
+    capTimer = setTimeout(() => {
+      capTimer = null;
+      if (cancelled) return;
+      if (recorder.state !== 'inactive') {
+        capped = true;
+        try { recorder.stop(); } catch {}
+        opts.onDurationCap?.();
+      }
+    }, opts.maxDurationMs);
+  }
+  const clearCapTimer = () => {
+    if (capTimer != null) {
+      clearTimeout(capTimer);
+      capTimer = null;
+    }
+  };
+
   const stop = () =>
     new Promise<RecordingResult>((resolve, reject) => {
       if (cancelled) {
+        clearCapTimer();
         reject(new Error('Recording cancelled'));
         return;
       }
       recorder.onstop = () => {
+        clearCapTimer();
         cleanupStream();
         const type = recorder.mimeType || mimeType || 'audio/webm';
         const blob = new Blob(chunks, { type });
         resolve({ blob, mimeType: type, durationMs: Date.now() - startedAt });
       };
       recorder.onerror = (e: any) => {
+        clearCapTimer();
         cleanupStream();
         reject(e?.error || new Error('Recording failed'));
       };
       if (recorder.state !== 'inactive') {
         recorder.stop();
       } else {
-        // Already stopped somehow; produce whatever we have.
+        // Already stopped (e.g. duration cap fired); produce what we have.
+        clearCapTimer();
+        cleanupStream();
         const type = recorder.mimeType || mimeType || 'audio/webm';
         resolve({ blob: new Blob(chunks, { type }), mimeType: type, durationMs: Date.now() - startedAt });
       }
@@ -103,13 +143,14 @@ export async function startRecording(): Promise<RecordingHandle> {
 
   const cancel = () => {
     cancelled = true;
+    clearCapTimer();
     try {
       if (recorder.state !== 'inactive') recorder.stop();
     } catch {}
     cleanupStream();
   };
 
-  return { stop, cancel };
+  return { stop, cancel, hitDurationCap: () => capped };
 }
 
 export interface VoiceWithAudioResult {
@@ -131,12 +172,15 @@ export interface StreamingWithAudioHandle {
  * Add Sentence.
  */
 export async function startStreamingRecognitionWithAudio(
-  opts: StreamingOptions = {}
+  opts: StreamingOptions & RecordingOptions = {}
 ): Promise<StreamingWithAudioHandle> {
   let recHandle: RecordingHandle | null = null;
   if (isAudioRecordingSupported()) {
     try {
-      recHandle = await startRecording();
+      recHandle = await startRecording({
+        maxDurationMs: opts.maxDurationMs,
+        onDurationCap: opts.onDurationCap,
+      });
     } catch {
       recHandle = null;
     }

@@ -21,6 +21,8 @@ import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 import {
   useAudioCacheSettingsStore,
+  RECORDING_CAP_SEC_MIN,
+  RECORDING_CAP_SEC_MAX,
   type AudioCacheCapMB,
 } from '../stores/audioCacheSettingsStore';
 import { getAudioCacheUsage } from '../db/localRepo';
@@ -1364,11 +1366,15 @@ function formatMB(bytes: number): string {
 function AudioCacheCard() {
   const capMB = useAudioCacheSettingsStore((s) => s.capMB);
   const setCapMB = useAudioCacheSettingsStore((s) => s.setCapMB);
+  const recordingCapSec = useAudioCacheSettingsStore((s) => s.recordingCapSec);
+  const setRecordingCapSec = useAudioCacheSettingsStore((s) => s.setRecordingCapSec);
   const [usage, setUsage] = useState<{ totalBytes: number; count: number }>({
     totalBytes: 0,
     count: 0,
   });
   const [clearing, setClearing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'download' | 'clear' | null>(null);
 
   const refresh = useCallback(async () => {
     const u = await getAudioCacheUsage();
@@ -1385,6 +1391,7 @@ function AudioCacheCard() {
 
   const handleClear = async () => {
     setClearing(true);
+    setConfirmAction(null);
     try {
       await clearAudioCache();
       await refresh();
@@ -1395,8 +1402,14 @@ function AudioCacheCard() {
   };
 
   const handlePrefetchNow = async () => {
-    await runAudioPrefetch();
-    await refresh();
+    setDownloading(true);
+    setConfirmAction(null);
+    try {
+      await runAudioPrefetch();
+      await refresh();
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -1452,24 +1465,86 @@ function AudioCacheCard() {
           </p>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={handlePrefetchNow}
-            className="px-3 py-1.5 rounded-lg text-sm transition-colors"
-            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-          >
-            Download missing now
-          </button>
-          <button
-            onClick={handleClear}
-            disabled={clearing || usage.count === 0}
-            className="px-3 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50"
-            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-          >
-            {clearing ? 'Clearing…' : 'Clear cache'}
-          </button>
-        </div>
+        {/* Recording duration cap */}
+        <NumberInput
+          label="Max recording length (seconds)"
+          value={recordingCapSec}
+          onChange={(v) => setRecordingCapSec(v)}
+          min={RECORDING_CAP_SEC_MIN}
+          max={RECORDING_CAP_SEC_MAX}
+          step={1}
+          hint={`Recordings auto-stop at this length. Allowed range: ${RECORDING_CAP_SEC_MIN}–${RECORDING_CAP_SEC_MAX}s.`}
+        />
+
+        {/* Actions with inline confirmation */}
+        {confirmAction === null && (
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setConfirmAction('download')}
+              disabled={downloading}
+              className="px-3 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50"
+              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+            >
+              {downloading ? 'Downloading…' : 'Download missing now'}
+            </button>
+            <button
+              onClick={() => setConfirmAction('clear')}
+              disabled={clearing || usage.count === 0}
+              className="px-3 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50"
+              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+            >
+              {clearing ? 'Clearing…' : 'Clear cache'}
+            </button>
+          </div>
+        )}
+
+        {confirmAction === 'download' && (
+          <div className="space-y-2">
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              This will fetch missing recordings up to your storage limit and may use significant network bandwidth.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handlePrefetchNow}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+              >
+                Download
+              </button>
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="px-3 py-1.5 rounded-lg text-sm transition-colors"
+                style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {confirmAction === 'clear' && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium" style={{ color: 'var(--danger, #e53e3e)' }}>
+              Clear all cached audio? Recordings will be re-downloaded from the server next time you play them.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleClear}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                style={{ background: 'var(--danger, #e53e3e)', color: '#fff' }}
+              >
+                Clear cache
+              </button>
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="px-3 py-1.5 rounded-lg text-sm transition-colors"
+                style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </SectionCard>
   );

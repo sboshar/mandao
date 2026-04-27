@@ -31,6 +31,7 @@ import {
   type RecordingResult,
   type StreamingWithAudioHandle,
 } from '../services/audioRecording';
+import { getRecordingCapMs } from '../stores/audioCacheSettingsStore';
 import { pinyin as toPinyin } from 'pinyin-pro';
 import { computeTokenCoverage } from '../services/tokenCoverage';
 import { v4 as uuid } from 'uuid';
@@ -221,6 +222,11 @@ export function AddSentencePage() {
     try {
       const handle = await startStreamingRecognitionWithAudio({
         onInterim: (text) => setVoiceInterim(text),
+        maxDurationMs: getRecordingCapMs(),
+        onDurationCap: () => {
+          // Auto-finalize when the cap fires by re-running the toggle path.
+          if (streamingHandleRef.current) handleVoiceInput();
+        },
       });
       streamingHandleRef.current = handle;
       setListening(true);

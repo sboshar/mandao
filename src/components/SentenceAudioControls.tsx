@@ -10,6 +10,7 @@ import {
   type RecordingHandle,
   type RecordingResult,
 } from '../services/audioRecording';
+import { getRecordingCapMs } from '../stores/audioCacheSettingsStore';
 
 const SpeakerIcon = (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -145,7 +146,18 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     setError('');
     if (pendingClip || recordHandle) return;
     try {
-      const handle = await startRecording();
+      const handle = await startRecording({
+        maxDurationMs: getRecordingCapMs(),
+        onDurationCap: () => {
+          // Auto-finalize when the cap fires; mirrors what handleStopRecord does.
+          handle.stop().then((result) => {
+            recordHandleRef.current = null;
+            setRecordHandle(null);
+            setPendingClip(result);
+            setPendingName(defaultName());
+          }).catch(() => {});
+        },
+      });
       recordHandleRef.current = handle;
       setRecordHandle(handle);
     } catch (e: any) {
