@@ -120,7 +120,18 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   const stopAll = () => {
     stopPlaybackRef.current?.();
     stopPlaybackRef.current = null;
-    stopSpeaking();
+    // Only cancel speechSynthesis when there's actually speech to cancel.
+    // Calling speechSynthesis.cancel() on iOS — even with no active
+    // speech — briefly resets the shared audio session, which aborts a
+    // freshly-started HTMLMediaElement playback. That was silencing
+    // every Browse / Cards recording tap on iPhone.
+    if (
+      typeof window !== 'undefined' &&
+      window.speechSynthesis &&
+      (window.speechSynthesis.speaking || window.speechSynthesis.pending)
+    ) {
+      stopSpeaking();
+    }
     setPlayingId(null);
   };
 
