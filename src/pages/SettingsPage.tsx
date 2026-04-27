@@ -1640,7 +1640,9 @@ function InstallCard() {
       description={
         installed
           ? 'Mandao is installed on this device.'
-          : 'Install Mandao to keep your offline audio cache from being evicted between sessions, and to launch from your home screen / dock without browser chrome.'
+          : platform === 'ios-safari' || platform === 'ios-other-browser'
+            ? "Install Mandao to your home screen so its offline audio cache isn't auto-evicted by iOS Safari."
+            : 'Install Mandao to launch it from your home screen / dock without browser chrome.'
       }
     >
       {installed && (
@@ -1666,7 +1668,14 @@ function InstallCard() {
       )}
       {platform === 'ios-safari' && (
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          Tap <strong>Share</strong> at the bottom of Safari, then{' '}
+          Tap the <strong>Share</strong> button (a square with an upward arrow) at the bottom of
+          Safari, then scroll down and tap <strong>Add to Home Screen</strong>.
+        </p>
+      )}
+      {platform === 'ios-other-browser' && (
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          On iOS, only Safari can install web apps to the home screen. Tap the Share button
+          in this browser, choose <strong>Open in Safari</strong>, then in Safari tap Share →{' '}
           <strong>Add to Home Screen</strong>.
         </p>
       )}
