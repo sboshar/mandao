@@ -26,7 +26,12 @@ import {
   type AudioCacheCapMB,
 } from '../stores/audioCacheSettingsStore';
 import { getAudioCacheUsage } from '../db/localRepo';
-import { runAudioPrefetch, clearAudioCache } from '../services/audioPrefetch';
+import {
+  runAudioPrefetch,
+  clearAudioCache,
+  shrinkAudioCacheTo,
+  previewShrink,
+} from '../services/audioPrefetch';
 
 type Section = 'account' | 'srs' | 'display' | 'ai' | 'anki' | 'data';
 
@@ -1375,6 +1380,11 @@ function AudioCacheCard() {
   const [clearing, setClearing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'download' | 'clear' | null>(null);
+  const [pendingCap, setPendingCap] = useState<{
+    cap: AudioCacheCapMB;
+    evictCount: number;
+    freedBytes: number;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     const u = await getAudioCacheUsage();
@@ -1412,10 +1422,36 @@ function AudioCacheCard() {
     }
   };
 
+  const handleCapClick = async (next: AudioCacheCapMB) => {
+    if (next === capMB) return;
+    const nextBytes = next * 1024 * 1024;
+    // Raising the cap (or no current pressure) — apply immediately.
+    if (nextBytes >= usage.totalBytes) {
+      setCapMB(next);
+      return;
+    }
+    // Lowering below current usage — preview evictions and confirm.
+    const preview = await previewShrink(nextBytes);
+    if (preview.evictCount === 0) {
+      setCapMB(next);
+      return;
+    }
+    setPendingCap({ cap: next, evictCount: preview.evictCount, freedBytes: preview.freedBytes });
+  };
+
+  const handleConfirmShrink = async () => {
+    if (!pendingCap) return;
+    const targetBytes = pendingCap.cap * 1024 * 1024;
+    setCapMB(pendingCap.cap);
+    setPendingCap(null);
+    await shrinkAudioCacheTo(targetBytes);
+    await refresh();
+  };
+
   return (
     <SectionCard
       title="Offline Audio"
-      description="Recordings cached on this device for instant, offline playback."
+      description="Recordings stored on this device play instantly and work offline. A larger cache covers more cards without a network round-trip; a smaller one saves device space but requires re-downloading recordings when you play them."
     >
       <div className="space-y-4">
         {/* Usage bar */}
@@ -1449,7 +1485,7 @@ function AudioCacheCard() {
             {CAP_OPTIONS.map((opt) => (
               <button
                 key={opt}
-                onClick={() => setCapMB(opt)}
+                onClick={() => handleCapClick(opt)}
                 className="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors"
                 style={{
                   background: capMB === opt ? 'var(--accent)' : 'var(--bg-inset)',
@@ -1463,6 +1499,33 @@ function AudioCacheCard() {
           <p className="mt-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
             When the cap is reached, the least-recently-played recordings are evicted first.
           </p>
+          {pendingCap && (
+            <div className="mt-3 p-3 rounded-lg space-y-2" style={{ background: 'var(--bg-inset)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--danger, #e53e3e)' }}>
+                Lower to {pendingCap.cap} MB?
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                {pendingCap.evictCount.toLocaleString()}{' '}
+                {pendingCap.evictCount === 1 ? 'recording' : 'recordings'} ({formatMB(pendingCap.freedBytes)}) will be evicted from this device. They can be re-downloaded later.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleConfirmShrink}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                  style={{ background: 'var(--danger, #e53e3e)', color: '#fff' }}
+                >
+                  Lower limit
+                </button>
+                <button
+                  onClick={() => setPendingCap(null)}
+                  className="px-3 py-1.5 rounded-lg text-sm transition-colors"
+                  style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Recording duration cap */}

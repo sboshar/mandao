@@ -205,3 +205,31 @@ function isQuotaExceeded(e: unknown): boolean {
 export async function clearAudioCache(): Promise<void> {
   await local.clearAudioBlobs();
 }
+
+/** Shrink cache to a target byte size by LRU-evicting the oldest-played
+ *  entries. No-op if already under the target. Returns the bytes freed. */
+export async function shrinkAudioCacheTo(targetBytes: number): Promise<number> {
+  const before = (await local.getAudioCacheUsage()).totalBytes;
+  const after = await evictToTarget(targetBytes);
+  return Math.max(0, before - after);
+}
+
+/** Preview what shrinking would evict, without actually doing it. Used by
+ *  the Settings UI to show "X recordings (Y MB) will be deleted" in the
+ *  confirmation prompt. */
+export async function previewShrink(targetBytes: number): Promise<{ evictCount: number; freedBytes: number }> {
+  const usage = await local.getAudioCacheUsage();
+  if (usage.totalBytes <= targetBytes) return { evictCount: 0, freedBytes: 0 };
+
+  const sorted = await local.getAudioBlobsSortedByLru();
+  let evictCount = 0;
+  let freedBytes = 0;
+  let running = usage.totalBytes;
+  for (const entry of sorted) {
+    if (running <= targetBytes) break;
+    evictCount += 1;
+    freedBytes += entry.sizeBytes;
+    running -= entry.sizeBytes;
+  }
+  return { evictCount, freedBytes };
+}
