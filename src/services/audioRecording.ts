@@ -254,6 +254,13 @@ function getSharedAudio(): HTMLAudioElement {
   return sharedAudio;
 }
 
+/** Diagnostic-only escape hatch: lets the audio diagnostic attach listeners
+ *  to the same Audio element the real playback path uses. Don't call this
+ *  from production UI; use playBlob/unlockAudio. */
+export function _getSharedAudioForDiagnostic(): HTMLAudioElement {
+  return getSharedAudio();
+}
+
 /** Real 50ms silent-amplitude MP3 served from /public. iOS plays it
  *  successfully and the user hears nothing. */
 const SILENT_MP3_URL = '/silent.mp3';
