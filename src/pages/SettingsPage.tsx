@@ -21,7 +21,7 @@ import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
-import { unlockAudio } from '../services/audioRecording';
+import { unlockAudio, isAudioUnlocked } from '../services/audioRecording';
 import {
   useAudioCacheSettingsStore,
   RECORDING_CAP_SEC_MIN,
@@ -1819,7 +1819,19 @@ function AudioDiagnosticCard() {
         return;
       }
 
-      // 6. Play test — actually call .play() (muted) and watch every
+      // 6. Unlock check — did the silent-MP3 primer succeed?
+      // The diagnostic button calls unlockAudio() synchronously; if the
+      // shared Audio element ended up authorized, real playback will
+      // work even after the awaits in step 4–5 lost the gesture context.
+      push({
+        name: 'iOS audio unlock',
+        status: isAudioUnlocked() ? 'ok' : 'fail',
+        detail: isAudioUnlocked()
+          ? 'Shared Audio element is user-authorized'
+          : 'Silent-MP3 primer never resolved — element will be locked for unmuted plays',
+      });
+
+      // 7. Play test — actually call .play() (muted) and watch every
       // relevant event. iOS deliberately doesn't fire `canplay` until
       // play() is invoked, so the previous "decode" check would always
       // time out on iOS even when audio works fine.

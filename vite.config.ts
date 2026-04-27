@@ -13,7 +13,7 @@ export default defineConfig({
       // prompt + offline behavior can be exercised locally without
       // running a production build.
       devOptions: { enabled: true },
-      includeAssets: ['cedict.txt', 'favicon.svg', 'icon-192.png', 'icon-512.png'],
+      includeAssets: ['cedict.txt', 'favicon.svg', 'icon-192.png', 'icon-512.png', 'silent.mp3'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         runtimeCaching: [

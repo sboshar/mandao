@@ -229,22 +229,22 @@ export function formatDuration(ms: number | undefined): string {
  * Single shared Audio element for all blob playback.
  *
  * iOS Safari rejects audio.play() for unmuted audio when the call doesn't
- * happen inside a user-gesture event handler. Our playback path always
- * has an `await fetchAudioBlob()` between the click and play(), which
- * loses the gesture context.
+ * happen inside a user-gesture event handler — and our playback path
+ * always has an `await fetchAudioBlob()` between the click and play(),
+ * which loses the gesture.
  *
- * BUT iOS allows muted playback even after the gesture is lost. Once the
- * element is actually playing (muted), unmuting it doesn't trigger a
- * fresh gesture check. So we start every play muted and unmute as soon
- * as the `playing` event fires. Audible audio after a ~50ms blip of
- * silence — which is still better than no audio at all.
+ * The fix: prime the element with a real (silent-amplitude) MP3 played
+ * UNMUTED inside the user gesture. iOS counts that as a "real" play and
+ * marks the element as user-authorized. Subsequent play() calls on the
+ * same element are then allowed even after async work.
  *
- * (Earlier we tried priming the element with a silent WAV data URL in
- * the gesture, but iOS rejects 0-byte data-URL audio specifically; the
- * priming would silently fail and leave the element locked.)
+ * (Earlier attempts: a 0-data-byte WAV data URL — iOS rejects those;
+ * a muted-then-unmute trick — iOS silently keeps the element muted
+ * because un-mute outside a gesture isn't honored.)
  */
 let sharedAudio: HTMLAudioElement | null = null;
 let pendingObjectUrl: string | null = null;
+let audioUnlocked = false;
 
 function getSharedAudio(): HTMLAudioElement {
   if (!sharedAudio) {
@@ -254,13 +254,33 @@ function getSharedAudio(): HTMLAudioElement {
   return sharedAudio;
 }
 
+/** Real 50ms silent-amplitude MP3 served from /public. iOS plays it
+ *  successfully and the user hears nothing. */
+const SILENT_MP3_URL = '/silent.mp3';
+
 /**
- * No-op kept for back-compat with existing call sites. The muted-then-
- * unmute pattern in playBlob handles iOS unlocking inline; an explicit
- * unlock primer is no longer needed.
+ * Call from inside a user-gesture handler before any async work that
+ * needs to be followed by audio.play(). The first call primes the
+ * shared Audio element by playing a silent MP3 so iOS authorizes
+ * subsequent plays. No-op once unlocked.
  */
 export function unlockAudio(): void {
-  // Intentionally empty — see comment on sharedAudio above.
+  if (audioUnlocked) return;
+  const audio = getSharedAudio();
+  audio.src = SILENT_MP3_URL;
+  audio.play().then(() => {
+    // Element is now user-authorized for the rest of the page.
+    audioUnlocked = true;
+    audio.pause();
+  }).catch(() => {
+    // Wasn't a real gesture, network blocked, or browser denied —
+    // try again on next interaction.
+  });
+}
+
+/** True after at least one successful unlock. Used by the diagnostic. */
+export function isAudioUnlocked(): boolean {
+  return audioUnlocked;
 }
 
 /**
@@ -278,34 +298,24 @@ export function playBlob(blob: Blob, onEnded?: () => void): () => void {
 
   const url = URL.createObjectURL(blob);
   pendingObjectUrl = url;
-  // Muted play() is allowed on iOS after async work; we'll unmute as
-  // soon as the element transitions to actually playing.
-  audio.muted = true;
   audio.src = url;
 
   let stopped = false;
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
-    audio.muted = false; // restore for the next call
     if (pendingObjectUrl === url) {
       URL.revokeObjectURL(url);
       pendingObjectUrl = null;
     }
     onEnded?.();
   };
-  const onPlaying = () => {
-    audio.muted = false;
-    audio.removeEventListener('playing', onPlaying);
-  };
-  audio.addEventListener('playing', onPlaying);
   audio.onended = cleanup;
   audio.onerror = cleanup;
   audio.play().catch(cleanup);
 
   return () => {
     try { audio.pause(); } catch { /* noop */ }
-    audio.removeEventListener('playing', onPlaying);
     cleanup();
   };
 }
