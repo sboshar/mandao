@@ -558,13 +558,12 @@ export function AddSentencePage() {
           id: uuid(),
           sentenceId: createdSentenceId,
           name: pendingVoiceClipName.trim() || 'My voice',
-          blob: pendingVoiceClip.blob,
           mimeType: pendingVoiceClip.mimeType,
           durationMs: pendingVoiceClip.durationMs,
           source: 'voice-input',
           createdAt: Date.now(),
         };
-        try { await repo.insertAudioRecording(rec); } catch {}
+        try { await repo.insertAudioRecording(rec, pendingVoiceClip.blob); } catch {}
       }
 
       // Tutorial mode: seed remaining sentences in the background, then advance

@@ -121,20 +121,16 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
     if (downloadingId === rec.id) return;
     stopAll();
 
-    let blob = rec.blob;
-    if (!blob) {
-      setDownloadingId(rec.id);
-      try {
-        const fetched = await repo.fetchAudioBlob(rec.id);
-        if (!fetched) {
-          setError('Could not load this recording.');
-          return;
-        }
-        blob = fetched;
-        await refresh();
-      } finally {
-        setDownloadingId((cur) => (cur === rec.id ? null : cur));
+    setDownloadingId(rec.id);
+    let blob: Blob | null = null;
+    try {
+      blob = await repo.fetchAudioBlob(rec.id);
+      if (!blob) {
+        setError('Could not load this recording.');
+        return;
       }
+    } finally {
+      setDownloadingId((cur) => (cur === rec.id ? null : cur));
     }
 
     setPlayingId(rec.id);
@@ -179,13 +175,12 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
       id: uuid(),
       sentenceId,
       name,
-      blob: pendingClip.blob,
       mimeType: pendingClip.mimeType,
       durationMs: pendingClip.durationMs,
       source: 'manual',
       createdAt: Date.now(),
     };
-    await repo.insertAudioRecording(rec);
+    await repo.insertAudioRecording(rec, pendingClip.blob);
     setPendingClip(null);
     setPendingName('');
     await refresh();

@@ -76,19 +76,18 @@ export interface Sentence {
  * User- or voice-captured audio clip attached to a sentence.
  * Multiple recordings per sentence are supported; each has a user-given name.
  *
- * The blob lives in IndexedDB; the server row points at a Storage object.
- * Invariant: at least one of `blob` or `storagePath` is always set.
- *   - Locally-created (pre-upload): blob set, storagePath undefined.
- *   - Pulled from server (pre-play): storagePath set, blob undefined.
- *   - After first play on a pulled row: both set (blob cached).
+ * The metadata row syncs with the server; the actual bytes live in the
+ * `audioBlobs` table (client-only cache, see AudioBlob below).
+ * Invariant: at least one of an audioBlobs entry or `storagePath` exists.
+ *   - Locally-created (pre-upload): audioBlobs entry, no storagePath.
+ *   - Pulled from server (pre-play): storagePath, no audioBlobs entry.
+ *   - After first play / prefetch on a pulled row: both.
  */
 export interface AudioRecording {
   id: string;
   sentenceId: string;
   /** User-facing label, e.g. "My voice", "Native speaker". */
   name: string;
-  /** Raw audio data. Undefined until lazily fetched on rows pulled from the server. */
-  blob?: Blob;
   /** Path inside the `audio-recordings` Storage bucket, e.g. `{user_id}/{id}.webm`. */
   storagePath?: string;
   mimeType: string;
@@ -98,6 +97,23 @@ export interface AudioRecording {
   createdAt: number;
   updatedAt?: number;
   usn?: number;
+}
+
+/**
+ * Client-only cache entry for an AudioRecording's bytes. Keyed by recordingId.
+ * Never synced to the server. Used both for offline playback (cached on
+ * fetch / prefetch) and as the staging area for locally-recorded clips that
+ * haven't been uploaded yet.
+ */
+export interface AudioBlob {
+  recordingId: string;
+  blob: Blob;
+  mimeType: string;
+  sizeBytes: number;
+  /** When the blob first landed in the cache (createdAt for local clips, fetch time for pulled ones). */
+  fetchedAt: number;
+  /** Updated on each play; tiebreaks LRU eviction. Initialized to fetchedAt. */
+  lastPlayedAt: number;
 }
 
 /** Junction table: links sentences to meanings, preserving token order. */

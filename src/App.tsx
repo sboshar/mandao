@@ -68,6 +68,12 @@ function App() {
   // Separate effect so it is not torn down by the hydration effect's cleanup.
   useEffect(() => {
     if (!userId || !ready) return;
+    // Best-effort: ask the browser to mark our IndexedDB as persistent so
+    // cached audio survives storage pressure / iOS ITP eviction. Granted
+    // heuristically; we don't gate anything on the result.
+    if (navigator.storage?.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
     startSyncListeners();
     runSync();
     return () => stopSyncListeners();

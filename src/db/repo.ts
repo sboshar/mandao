@@ -418,8 +418,22 @@ function audioUpsertPayload(rec: import('./schema').AudioRecording) {
   };
 }
 
-export async function insertAudioRecording(rec: import('./schema').AudioRecording) {
+export async function insertAudioRecording(
+  rec: import('./schema').AudioRecording,
+  blob?: Blob,
+) {
   await local.insertAudioRecording(rec);
+  if (blob) {
+    const ts = rec.createdAt ?? Date.now();
+    await local.putAudioBlob({
+      recordingId: rec.id,
+      blob,
+      mimeType: rec.mimeType ?? blob.type ?? 'audio/webm',
+      sizeBytes: blob.size,
+      fetchedAt: ts,
+      lastPlayedAt: ts,
+    });
+  }
   await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
 }
 
@@ -446,6 +460,7 @@ export async function deleteAudioRecording(id: string) {
   }
 
   await local.deleteAudioRecording(id);
+  await local.deleteAudioBlob(id);
   await enqueue({
     op: 'deleteEntity',
     payload: { entity_type: 'audio_recording', entity_id: id },
@@ -457,11 +472,20 @@ export async function deleteAudioRecording(id: string) {
 }
 
 /**
- * Lazy-fetch a recording's Blob via a short-lived signed URL and cache it
- * back into Dexie so future plays skip the network. Returns null on failure
- * (no row, no storagePath, or network error).
+ * Get a recording's Blob, hitting the audioBlobs cache first and only
+ * falling through to a Storage signed-URL fetch on miss. Updates
+ * lastPlayedAt on hit so LRU eviction can prefer cold entries. Returns
+ * null on failure (no row, no storagePath, or network error).
  */
 export async function fetchAudioBlob(id: string): Promise<Blob | null> {
+  const cached = await local.getAudioBlob(id);
+  if (cached) {
+    // Don't await — touching the LRU timestamp is a best-effort hint;
+    // a slow IDB write shouldn't delay playback.
+    void local.touchAudioBlob(id);
+    return cached.blob;
+  }
+
   const rec = await local.getAudioRecording(id);
   if (!rec?.storagePath) return null;
   // Short TTL: the URL is consumed immediately by the fetch below, so a
@@ -475,7 +499,15 @@ export async function fetchAudioBlob(id: string): Promise<Blob | null> {
     const resp = await fetch(data.signedUrl);
     if (!resp.ok) return null;
     const blob = await resp.blob();
-    await local.updateAudioRecording(id, { blob });
+    const now = Date.now();
+    await local.putAudioBlob({
+      recordingId: id,
+      blob,
+      mimeType: rec.mimeType ?? blob.type ?? 'audio/webm',
+      sizeBytes: blob.size,
+      fetchedAt: now,
+      lastPlayedAt: now,
+    });
     return blob;
   } catch {
     return null;

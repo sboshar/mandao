@@ -459,17 +459,17 @@ export async function importFromApkg(
               continue;
             }
             const mimeType = mimeFromAudioFilename(resolved.filename);
-            const blob = await resolved.entry.async('blob');
+            const rawBlob = await resolved.entry.async('blob');
+            const blob = rawBlob.type ? rawBlob : new Blob([rawBlob], { type: mimeType });
             const rec: AudioRecording = {
               id: uuid(),
               sentenceId,
               name: audioLabel,
-              blob: blob.type ? blob : new Blob([blob], { type: mimeType }),
               mimeType,
               source: 'manual',
               createdAt: Date.now(),
             };
-            await repo.insertAudioRecording(rec);
+            await repo.insertAudioRecording(rec, blob);
           }
         }
 
