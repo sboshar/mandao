@@ -351,30 +351,21 @@ export function isAudioUnlocked(): boolean {
 /**
  * Play an audio blob. Returns a stop() function. Revokes the object URL
  * when playback ends or is stopped.
+ *
+ * Creates a fresh Audio element per call. Tried sharing one element
+ * across plays to preserve iOS gesture authorization — turned out iOS
+ * Safari poisons the element after the first play and rejects every
+ * subsequent play() with NotSupportedError, no matter how aggressively
+ * we reset src/load. The original async-vs-gesture problem that
+ * motivated sharing is already solved by the eager blobMap in
+ * SentenceAudioControls (no await between click and playBlob), so a
+ * fresh element each time is both simpler and reliable.
  */
 export function playBlob(blob: Blob, onEnded?: () => void): () => void {
-  const audio = getSharedAudio();
-  debugPush(`playBlob() called — blob ${blob.size}B ${blob.type}; element paused=${audio.paused} muted=${audio.muted}`);
-
-  // Bring the element fully back to a clean state before assigning a
-  // new source. iOS Safari rejects subsequent plays with
-  // NotSupportedError when the element's prior src was set (and
-  // especially after the previous URL was revoked) — the transition
-  // from the old src to the new one trips an internal "source isn't
-  // ready" check that surfaces as the play() promise rejecting. The
-  // remove+load pair forces the element to discard the old source
-  // synchronously so the new src is the only thing in flight.
-  try { audio.pause(); } catch { /* noop */ }
-  audio.removeAttribute('src');
-  try { audio.load(); } catch { /* noop */ }
-
-  if (pendingObjectUrl) {
-    URL.revokeObjectURL(pendingObjectUrl);
-    pendingObjectUrl = null;
-  }
-
+  debugPush(`playBlob() called — blob ${blob.size}B ${blob.type}`);
   const url = URL.createObjectURL(blob);
-  pendingObjectUrl = url;
+  const audio = new Audio();
+  audio.preload = 'auto';
   audio.src = url;
 
   // Hook every interesting event when debug is on.
@@ -407,10 +398,7 @@ export function playBlob(blob: Blob, onEnded?: () => void): () => void {
     if (trackedListeners) {
       for (const l of trackedListeners) audio.removeEventListener(l.type, l.fn);
     }
-    if (pendingObjectUrl === url) {
-      URL.revokeObjectURL(url);
-      pendingObjectUrl = null;
-    }
+    URL.revokeObjectURL(url);
     onEnded?.();
   };
   audio.onended = cleanup;
