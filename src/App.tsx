@@ -31,6 +31,7 @@ function App() {
   const [ready, setReady] = useState(false);
   const [hydrating, setHydrating] = useState(false);
   const [hydrationError, setHydrationError] = useState<string | null>(null);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const step = useTutorialStore((s) => s.step);
   const advance = useTutorialStore((s) => s.advance);
   const { user, loading: authLoading, needsPasswordReset, initialize, signOut } = useAuthStore();
@@ -143,7 +144,7 @@ function App() {
             Settings
           </Link>
           <button
-            onClick={signOut}
+            onClick={() => setConfirmSignOut(true)}
             className="px-2 sm:px-2.5 py-1 rounded-md text-xs transition-colors"
             style={{ color: 'var(--text-tertiary)' }}
           >
@@ -155,6 +156,12 @@ function App() {
         <SyncErrorBanner />
         <InstallBanner />
         {step === 0 && <IntroModal onDone={advance} />}
+        {confirmSignOut && (
+          <SignOutConfirm
+            onConfirm={() => { setConfirmSignOut(false); signOut(); }}
+            onCancel={() => setConfirmSignOut(false)}
+          />
+        )}
         <Routes>
           <Route
             path="/"
@@ -174,6 +181,41 @@ function App() {
         </Routes>
       </div>
     </BrowserRouter>
+  );
+}
+
+function SignOutConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0, 0, 0, 0.5)' }}
+      onClick={onCancel}
+    >
+      <div
+        className="surface rounded-lg p-5 max-w-xs w-full space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+          Sign out of Mandao?
+        </p>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 rounded text-sm transition-colors"
+            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-3 py-1.5 rounded text-sm font-medium transition-colors"
+            style={{ background: 'var(--accent)', color: 'var(--text-inverted)' }}
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
