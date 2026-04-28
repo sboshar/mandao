@@ -26,6 +26,8 @@ import {
   isAudioUnlocked,
   playBlob,
   _getSharedAudioForDiagnostic,
+  audioDebugEnabled,
+  setAudioDebugEnabled,
 } from '../services/audioRecording';
 import {
   useAudioCacheSettingsStore,
@@ -1722,6 +1724,7 @@ function AudioDiagnosticCard() {
   const [running, setRunning] = useState(false);
   const [realPathLog, setRealPathLog] = useState<string[]>([]);
   const [realPathRunning, setRealPathRunning] = useState(false);
+  const [debugOn, setDebugOn] = useState(audioDebugEnabled);
   // Eagerly-loaded blob mirrors how SentenceAudioControls populates its
   // blobMap on mount, so the "no unlock, sync" test can reproduce the
   // exact synchronous code path that fails in Browse.
@@ -2083,6 +2086,28 @@ function AudioDiagnosticCard() {
       description="Walks through the audio pipeline (auth, signed URL, fetch, decode) and reports each step's result. Useful when recordings won't play on a particular device."
     >
       <div className="space-y-3">
+        <div
+          className="flex items-center justify-between p-2 rounded"
+          style={{ background: 'var(--bg-inset)' }}
+        >
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            Floating debug overlay (live audio events)
+          </span>
+          <button
+            onClick={() => {
+              setAudioDebugEnabled(!debugOn);
+              setDebugOn(!debugOn);
+            }}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            style={{
+              background: debugOn ? 'var(--danger, #e53e3e)' : 'var(--accent)',
+              color: 'var(--text-inverted)',
+            }}
+          >
+            {debugOn ? 'Disable' : 'Enable'}
+          </button>
+        </div>
+
         <button
           onClick={() => {
             // Synchronously prime audio in the click gesture so the play

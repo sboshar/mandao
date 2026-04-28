@@ -310,6 +310,15 @@ export function audioDebugPush(line: string): void {
   debugPush(line);
 }
 
+/** Imperative toggle for the floating audio debug overlay. Flipping
+ *  this from a button bypasses the URL-flag friction on mobile. */
+export function setAudioDebugEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  if (enabled) sessionStorage.setItem('mandao_audio_debug', '1');
+  else sessionStorage.removeItem('mandao_audio_debug');
+  for (const cb of debugListeners) { try { cb(); } catch { /* noop */ } }
+}
+
 /** Real 50ms silent-amplitude MP3 served from /public. iOS plays it
  *  successfully and the user hears nothing. */
 const SILENT_MP3_URL = '/silent.mp3';
