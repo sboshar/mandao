@@ -360,17 +360,24 @@ export function GraphPage() {
       if (e.touches.length < 2) lastAngleRef.current = null;
     };
 
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: false });
-    el.addEventListener('touchend', onTouchEnd, { passive: true });
-    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    // Capture phase — react-force-graph's d3-zoom listens on the inner
+    // canvas; capturing on our wrapper means we see the events before
+    // its handlers, regardless of any propagation stopping.
+    el.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+    el.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+    el.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { capture: true, passive: true });
     return () => {
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-      el.removeEventListener('touchend', onTouchEnd);
-      el.removeEventListener('touchcancel', onTouchEnd);
+      el.removeEventListener('touchstart', onTouchStart, { capture: true });
+      el.removeEventListener('touchmove', onTouchMove, { capture: true });
+      el.removeEventListener('touchend', onTouchEnd, { capture: true });
+      el.removeEventListener('touchcancel', onTouchEnd, { capture: true });
     };
-  }, []);
+    // The wrapper div is only mounted once `loading` flips false (it
+    // sits inside the same conditional as the canvas). Re-run when that
+    // happens so we actually attach to the live element rather than the
+    // null ref captured during the loading phase.
+  }, [loading]);
 
   useEffect(() => {
     function updateSize() {
