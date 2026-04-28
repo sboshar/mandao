@@ -132,7 +132,7 @@ async function fetchAndStore(rec: AudioRecording): Promise<number> {
     return 0;
   }
 
-  const entry = local.makeAudioBlobEntry(rec.id, blob, rec.mimeType);
+  const entry = await local.makeAudioBlobEntry(rec.id, blob, rec.mimeType);
 
   try {
     await local.putAudioBlob(entry);
