@@ -9,6 +9,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // We register the SW ourselves in src/lib/pwaUpdate.ts so we can
+      // re-check on visibilitychange and auto-reload on controllerchange.
+      injectRegister: false,
       // Serve the manifest + service worker in `vite dev` so install
       // prompt + offline behavior can be exercised locally without
       // running a production build.

@@ -5,6 +5,9 @@ import App from './App.tsx'
 import { runAuditInConsole, runRepairInConsole } from './lib/auditPinyin'
 import { runCleanOrphanedAudioInConsole } from './lib/cleanOrphanedAudio'
 import { runCleanOrphanedMeaningsInConsole } from './lib/cleanOrphanedMeanings'
+import { initPwaAutoUpdate } from './lib/pwaUpdate'
+
+initPwaAutoUpdate()
 
 const w = window as unknown as {
   __auditPinyin?: () => Promise<unknown>
