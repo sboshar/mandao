@@ -356,8 +356,18 @@ export function playBlob(blob: Blob, onEnded?: () => void): () => void {
   const audio = getSharedAudio();
   debugPush(`playBlob() called — blob ${blob.size}B ${blob.type}; element paused=${audio.paused} muted=${audio.muted}`);
 
-  // Stop whatever is playing on the shared element.
+  // Bring the element fully back to a clean state before assigning a
+  // new source. iOS Safari rejects subsequent plays with
+  // NotSupportedError when the element's prior src was set (and
+  // especially after the previous URL was revoked) — the transition
+  // from the old src to the new one trips an internal "source isn't
+  // ready" check that surfaces as the play() promise rejecting. The
+  // remove+load pair forces the element to discard the old source
+  // synchronously so the new src is the only thing in flight.
   try { audio.pause(); } catch { /* noop */ }
+  audio.removeAttribute('src');
+  try { audio.load(); } catch { /* noop */ }
+
   if (pendingObjectUrl) {
     URL.revokeObjectURL(pendingObjectUrl);
     pendingObjectUrl = null;
