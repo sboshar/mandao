@@ -6,7 +6,7 @@ const HINT_TIMEOUT_MS = 5000;
 
 export function InstallBanner() {
   const platform = usePlatform();
-  const dismissedAt = useInstallNudgeStore((s) => s.dismissedAt);
+  const dismissed = useInstallNudgeStore((s) => s.dismissed);
   const dismiss = useInstallNudgeStore((s) => s.dismiss);
   const [showHint, setShowHint] = useState(false);
 
@@ -18,7 +18,7 @@ export function InstallBanner() {
 
   if (platform === 'installed' || platform === 'no-install') return null;
   // Permanently dismissed — but render the hint window if a dismiss just happened.
-  if (dismissedAt !== null && !showHint) return null;
+  if (dismissed && !showHint) return null;
 
   const handleDismiss = () => {
     dismiss();

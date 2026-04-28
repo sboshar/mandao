@@ -225,79 +225,25 @@ export function formatDuration(ms: number | undefined): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-/**
- * Single shared Audio element for all blob playback.
- *
- * iOS Safari rejects audio.play() for unmuted audio when the call doesn't
- * happen inside a user-gesture event handler — and our playback path
- * always has an `await fetchAudioBlob()` between the click and play(),
- * which loses the gesture.
- *
- * The fix: prime the element with a real (silent-amplitude) MP3 played
- * UNMUTED inside the user gesture. iOS counts that as a "real" play and
- * marks the element as user-authorized. Subsequent play() calls on the
- * same element are then allowed even after async work.
- *
- * (Earlier attempts: a 0-data-byte WAV data URL — iOS rejects those;
- * a muted-then-unmute trick — iOS silently keeps the element muted
- * because un-mute outside a gesture isn't honored.)
- */
+// Single shared Audio element across all blob playback. Lazily
+// constructed on first call. iOS WebKit's audio session policy is more
+// permissive when reusing the same element across plays.
 let sharedAudio: HTMLAudioElement | null = null;
 let pendingObjectUrl: string | null = null;
-let audioUnlocked = false;
-
-function getSharedAudio(): HTMLAudioElement {
-  if (!sharedAudio) {
-    sharedAudio = new Audio();
-    sharedAudio.preload = 'auto';
-  }
-  return sharedAudio;
-}
-
-/** Real 50ms silent-amplitude MP3 served from /public. iOS plays it
- *  successfully and the user hears nothing. */
-const SILENT_MP3_URL = '/silent.mp3';
-
-/**
- * Call from inside a user-gesture handler before any async work that
- * needs to be followed by audio.play(). The first call primes the
- * shared Audio element by playing a silent MP3 so iOS authorizes
- * subsequent plays. No-op once unlocked.
- */
-export function unlockAudio(): void {
-  if (audioUnlocked) return;
-  const audio = getSharedAudio();
-  audio.src = SILENT_MP3_URL;
-  audio.play().then(() => {
-    // Element is now user-authorized for the rest of the page.
-    audioUnlocked = true;
-    audio.pause();
-  }).catch(() => {
-    // Wasn't a real gesture, network blocked, or browser denied —
-    // try again on next interaction.
-  });
-}
-
-/** True after at least one successful unlock. Used by the diagnostic. */
-export function isAudioUnlocked(): boolean {
-  return audioUnlocked;
-}
 
 /**
  * Play an audio blob. Returns a stop() function. Revokes the object URL
  * when playback ends or is stopped.
  */
 export function playBlob(blob: Blob, onEnded?: () => void): () => void {
-  const audio = getSharedAudio();
+  if (!sharedAudio) {
+    sharedAudio = new Audio();
+    sharedAudio.preload = 'auto';
+  }
+  const audio = sharedAudio;
 
-  // Bring the element fully back to a clean state before assigning a
-  // new source. iOS Safari rejects subsequent plays with
-  // NotSupportedError when the element's prior src was set (and
-  // especially after the previous URL was revoked) — the transition
-  // from the old src to the new one trips an internal "source isn't
-  // ready" check that surfaces as the play() promise rejecting. The
-  // remove+load pair forces the element to discard the old source
-  // synchronously so the new src is the only thing in flight.
+  // Reset element state before assigning a new source. Defensive
+  // against iOS WebKit transitioning awkwardly between blob URLs.
   try { audio.pause(); } catch { /* noop */ }
   audio.removeAttribute('src');
   try { audio.load(); } catch { /* noop */ }
