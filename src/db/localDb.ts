@@ -114,15 +114,23 @@ class MandaoDb extends Dexie {
         for (const rec of recs) {
           const oldBlob = (rec as AudioRecording & { blob?: Blob }).blob;
           if (oldBlob instanceof Blob) {
-            const ts = rec.createdAt ?? Date.now();
-            moves.push({
-              recordingId: rec.id,
-              blob: oldBlob,
-              mimeType: rec.mimeType ?? oldBlob.type ?? 'audio/webm',
-              sizeBytes: oldBlob.size,
-              fetchedAt: ts,
-              lastPlayedAt: ts,
-            });
+            try {
+              const data = await oldBlob.arrayBuffer();
+              if (data.byteLength > 0) {
+                const ts = rec.createdAt ?? Date.now();
+                moves.push({
+                  recordingId: rec.id,
+                  data,
+                  mimeType: rec.mimeType ?? oldBlob.type ?? 'audio/webm',
+                  sizeBytes: data.byteLength,
+                  fetchedAt: ts,
+                  lastPlayedAt: ts,
+                });
+              }
+            } catch {
+              // Blob body already evicted by WebKit — drop, the row will
+              // re-download from Storage on next play.
+            }
             // bulkPut replaces the whole row, so dropping `blob` from the
             // copy is enough to remove it from IDB.
             const next = { ...rec } as AudioRecording & { blob?: Blob };
@@ -132,8 +140,61 @@ class MandaoDb extends Dexie {
         }
         if (moves.length > 0) {
           await tx.table('audioBlobs').bulkPut(moves);
+        }
+        if (cleared.length > 0) {
           await tx.table('audioRecordings').bulkPut(cleared);
         }
+      });
+
+    // v6: rewrite audioBlobs entries that still carry a Blob in `blob` to
+    // store an ArrayBuffer in `data`. iOS WebKit evicts Blob bodies
+    // (sidecar files) separately from their IDB records — surfacing as
+    // `audio.play()` rejecting with NotSupportedError on previously-good
+    // entries — while ArrayBuffers live inside the record itself and
+    // can't be evicted independently. Bumping the schema version forces
+    // every existing client to re-shape its cache. See the AudioBlob
+    // type comment in src/db/schema.ts for details.
+    this.version(6)
+      .stores({
+        // No index changes; bumping version + this upgrade is the point.
+        audioBlobs: 'recordingId, lastPlayedAt, fetchedAt',
+      })
+      .upgrade(async (tx) => {
+        const table = tx.table('audioBlobs');
+        const rows = await table.toArray();
+        const updates: AudioBlob[] = [];
+        const drops: string[] = [];
+        for (const row of rows) {
+          // Already in new shape — nothing to do.
+          if (row.data instanceof ArrayBuffer) continue;
+          const oldBlob = (row as AudioBlob & { blob?: Blob }).blob;
+          if (!(oldBlob instanceof Blob)) {
+            // Neither shape — corrupt row, drop it.
+            drops.push(row.recordingId);
+            continue;
+          }
+          try {
+            const data = await oldBlob.arrayBuffer();
+            if (data.byteLength === 0) {
+              drops.push(row.recordingId);
+              continue;
+            }
+            updates.push({
+              recordingId: row.recordingId,
+              data,
+              mimeType: row.mimeType ?? oldBlob.type ?? 'audio/webm',
+              sizeBytes: data.byteLength,
+              fetchedAt: row.fetchedAt,
+              lastPlayedAt: row.lastPlayedAt,
+            });
+          } catch {
+            // Blob body has been evicted — there's nothing to migrate.
+            // Drop the metadata row so the next play re-fetches fresh.
+            drops.push(row.recordingId);
+          }
+        }
+        if (drops.length > 0) await table.bulkDelete(drops);
+        if (updates.length > 0) await table.bulkPut(updates);
       });
   }
 }

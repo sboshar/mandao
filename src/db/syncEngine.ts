@@ -15,6 +15,7 @@ import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
 import type { FailedOp } from '../stores/syncStore';
 import { runAudioPrefetch } from '../services/audioPrefetch';
+import { audioBlobToBlob } from './localRepo';
 
 /** Sync error that preserves the Postgres code so the outbox can tell
  *  permanent (CHECK violation, missing column) apart from transient
@@ -299,7 +300,7 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
     storagePath = `${userId}/${payload.id}.${ext}`;
     const { error: uploadErr } = await supabase.storage
       .from(AUDIO_BUCKET)
-      .upload(storagePath, cachedBlob.blob, {
+      .upload(storagePath, audioBlobToBlob(cachedBlob), {
         contentType: payload.mimeType,
         upsert: true,
       });

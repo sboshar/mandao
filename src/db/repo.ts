@@ -425,7 +425,7 @@ export async function insertAudioRecording(
   await local.insertAudioRecording(rec);
   if (blob) {
     await local.putAudioBlob(
-      local.makeAudioBlobEntry(rec.id, blob, rec.mimeType, rec.createdAt),
+      await local.makeAudioBlobEntry(rec.id, blob, rec.mimeType, rec.createdAt),
     );
   }
   await enqueue({ op: 'upsertAudioRecording', payload: audioUpsertPayload(rec) });
@@ -473,12 +473,16 @@ export async function deleteAudioRecording(id: string) {
  */
 export async function fetchAudioBlob(id: string): Promise<Blob | null> {
   const cached = await local.getAudioBlob(id);
-  if (cached) {
+  if (cached && cached.data && cached.data.byteLength > 0) {
     // Don't await — touching the LRU timestamp is a best-effort hint;
     // a slow IDB write shouldn't delay playback.
     void local.touchAudioBlob(id);
-    return cached.blob;
+    return local.audioBlobToBlob(cached);
   }
+  // If the cache row exists but the data is missing/empty (shouldn't
+  // happen with ArrayBuffer storage but defensive against migration
+  // edge cases), drop it so the fetch path replaces it cleanly.
+  if (cached) await local.deleteAudioBlob(id);
 
   const rec = await local.getAudioRecording(id);
   if (!rec?.storagePath) return null;
@@ -493,7 +497,7 @@ export async function fetchAudioBlob(id: string): Promise<Blob | null> {
     const resp = await fetch(data.signedUrl);
     if (!resp.ok) return null;
     const blob = await resp.blob();
-    await local.putAudioBlob(local.makeAudioBlobEntry(id, blob, rec.mimeType));
+    await local.putAudioBlob(await local.makeAudioBlobEntry(id, blob, rec.mimeType));
     return blob;
   } catch {
     return null;

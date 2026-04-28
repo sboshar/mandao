@@ -104,10 +104,19 @@ export interface AudioRecording {
  * Never synced to the server. Used both for offline playback (cached on
  * fetch / prefetch) and as the staging area for locally-recorded clips that
  * haven't been uploaded yet.
+ *
+ * Bytes are stored as an `ArrayBuffer` rather than a `Blob` deliberately:
+ * iOS WebKit stores Blob bodies as separate sidecar files alongside the
+ * IndexedDB record and evicts those bodies independently from the record
+ * under storage / memory pressure. The result is a record whose `blob`
+ * field is a `Blob` object whose backing bytes have been freed —
+ * `audio.play()` then rejects with `NotSupportedError`. ArrayBuffers live
+ * inside the IDB record itself, so they can't be evicted separately.
+ * Reconstruct the `Blob` from `data` + `mimeType` at playback time.
  */
 export interface AudioBlob {
   recordingId: string;
-  blob: Blob;
+  data: ArrayBuffer;
   mimeType: string;
   sizeBytes: number;
   /** When the blob first landed in the cache (createdAt for local clips, fetch time for pulled ones). */
