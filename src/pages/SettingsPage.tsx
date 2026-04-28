@@ -9,7 +9,6 @@ import {
 import { useAuthStore } from '../stores/authStore';
 import { useSyncStore } from '../stores/syncStore';
 import { runSync } from '../db/syncEngine';
-import { useThemeStore } from '../stores/themeStore';
 import { useFSRSSettingsStore } from '../stores/fsrsSettingsStore';
 import { generateCompletion } from '../services/aiProvider';
 import { isAIConfigured } from '../services/aiProvider';
@@ -34,12 +33,11 @@ import {
 } from '../services/audioPrefetch';
 import { triggerInstall, usePlatform } from '../lib/pwaInstall';
 
-type Section = 'account' | 'srs' | 'display' | 'ai' | 'anki' | 'data';
+type Section = 'account' | 'srs' | 'ai' | 'anki' | 'data';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'account', label: 'Account' },
   { id: 'srs', label: 'SRS' },
-  { id: 'display', label: 'Display' },
   { id: 'ai', label: 'AI' },
   { id: 'anki', label: 'Anki' },
   { id: 'data', label: 'Data' },
@@ -69,16 +67,16 @@ export function SettingsPage() {
         </button>
       </div>
 
-      {/* Section tabs */}
+      {/* Section tabs — five tabs share the row equally, no horizontal scroll. */}
       <div
-        className="flex gap-1 mb-6 p-1 rounded-lg overflow-x-auto"
+        className="flex gap-1 mb-6 p-1 rounded-lg w-full"
         style={{ background: 'var(--bg-inset)' }}
       >
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             onClick={() => setSection(s.id)}
-            className="flex-1 py-1.5 px-3 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
+            className="flex-1 min-w-0 py-1.5 px-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap"
             style={{
               background: section === s.id ? 'var(--bg-surface)' : 'transparent',
               color: section === s.id ? 'var(--text-primary)' : 'var(--text-tertiary)',
@@ -93,7 +91,6 @@ export function SettingsPage() {
       {/* Section content */}
       {section === 'account' && <AccountSection />}
       {section === 'srs' && <SRSSection />}
-      {section === 'display' && <DisplaySection />}
       {section === 'ai' && <AISection />}
       {section === 'anki' && <AnkiSection />}
       {section === 'data' && <DataSection />}
@@ -446,39 +443,6 @@ function SRSSection() {
           >
             Reset to defaults
           </button>
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────
-// Display
-// ────────────────────────────────────────────────────────────
-
-function DisplaySection() {
-  const { theme, setTheme } = useThemeStore();
-
-  return (
-    <div className="space-y-5">
-      <SectionCard title="Appearance">
-        <div>
-          <label className="block text-sm font-medium mb-2">Theme</label>
-          <div className="flex gap-2">
-            {(['light', 'dark'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTheme(t)}
-                className="flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors"
-                style={{
-                  background: theme === t ? 'var(--accent)' : 'var(--bg-inset)',
-                  color: theme === t ? '#fff' : 'var(--text-secondary)',
-                }}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
         </div>
       </SectionCard>
     </div>
