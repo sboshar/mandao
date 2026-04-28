@@ -131,6 +131,9 @@ async function fetchAndStore(rec: AudioRecording): Promise<number> {
   } catch {
     return 0;
   }
+  // Don't cache empty responses — a 0-byte entry forces every play to
+  // re-fetch with no convergence.
+  if (blob.size === 0) return 0;
 
   const entry = await local.makeAudioBlobEntry(rec.id, blob, rec.mimeType);
 

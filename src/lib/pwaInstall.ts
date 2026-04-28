@@ -146,7 +146,7 @@ export function getPlatform(): Platform {
 
 export function subscribeInstallState(cb: () => void): () => void {
   listeners.add(cb);
-  return () => listeners.delete(cb);
+  return () => { listeners.delete(cb); };
 }
 
 /** React hook: subscribes to platform / install-state changes and re-renders. */
