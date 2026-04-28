@@ -11,7 +11,7 @@
  *   - graves: delete from local Dexie
  */
 import { supabase } from '../lib/supabase';
-import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
+import { AUDIO_BUCKET } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
 import type { FailedOp } from '../stores/syncStore';
 import { runAudioPrefetch } from '../services/audioPrefetch';
@@ -321,8 +321,13 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
       // Only clean up the Storage object we ourselves just uploaded. If
       // this was a metadata-only push, the cascade from the deleted
       // sentence already removed the object via the delete trigger.
+      // Best-effort: a leaked orphan can be reaped by backfill later.
       if (isFirstUpload) {
-        await removeStorageObjects([storagePath]);
+        try {
+          await supabase.storage.from(AUDIO_BUCKET).remove([storagePath!]);
+        } catch (cleanupErr) {
+          console.warn('Orphan upload cleanup failed', cleanupErr);
+        }
       }
       await localDb.audioRecordings.delete(payload.id);
       return;

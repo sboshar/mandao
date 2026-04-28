@@ -393,14 +393,10 @@ export async function deleteAllUserData(): Promise<void> {
   await localDb.syncMeta.delete('schemaVersion');
   await enqueue({ op: 'deleteAllData', payload: {} });
   // Storage cleanup is enqueued so it survives offline / tab-close instead
-  // of fire-and-forget. Chunked so a 1000+-recording wipe doesn't put a
-  // single huge payload on one outbox row.
-  const STORAGE_CHUNK = 500;
-  for (let i = 0; i < audioPaths.length; i += STORAGE_CHUNK) {
-    await enqueue({
-      op: 'deleteStorageObjects',
-      payload: { paths: audioPaths.slice(i, i + STORAGE_CHUNK) },
-    });
+  // of fire-and-forget. The push handler chunks at Supabase's 1000-key
+  // limit, so we don't pre-chunk here.
+  if (audioPaths.length > 0) {
+    await enqueue({ op: 'deleteStorageObjects', payload: { paths: audioPaths } });
   }
 }
 
