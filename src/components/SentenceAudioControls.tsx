@@ -7,7 +7,6 @@ import {
   isAudioRecordingSupported,
   playBlob,
   startRecording,
-  audioDebugPush,
   type RecordingHandle,
   type RecordingResult,
 } from '../services/audioRecording';
@@ -105,11 +104,9 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   };
 
   useEffect(() => {
-    audioDebugPush(`SentenceAudioControls mount for ${sentenceId.slice(0, 8)}`);
     const cancelledRef = { current: false };
     loadRecordingsAndBlobs(cancelledRef);
     return () => {
-      audioDebugPush(`SentenceAudioControls UNMOUNT for ${sentenceId.slice(0, 8)} — calling stopPlaybackRef`);
       cancelledRef.current = true;
       stopPlaybackRef.current?.();
       stopSpeaking();
@@ -160,7 +157,6 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
   // unlockAudio, the first thing iOS sees on this element is the user's
   // blob play, which it accepts cleanly.
   const playRecording = (rec: AudioRecording) => {
-    audioDebugPush(`playRecording clicked: ${rec.name} (${rec.id.slice(0, 8)}); playingId=${playingId}; cached=${blobMap.has(rec.id)}; blobMap.size=${blobMap.size}`);
     if (playingId === rec.id) { stopAll(); return; }
     stopAll();
 

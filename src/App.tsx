@@ -17,7 +17,6 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { SyncIndicator } from './components/SyncIndicator';
 import { SyncErrorBanner } from './components/SyncErrorBanner';
 import { InstallBanner } from './components/InstallBanner';
-import { AudioDebugOverlay } from './components/AudioDebugOverlay';
 import { useTutorialStore } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
 import './stores/themeStore';
@@ -180,7 +179,6 @@ function App() {
           <Route path="/auth/callback" element={<Navigate to="/" replace />} />
           <Route path="/reset-password" element={<Navigate to="/" replace />} />
         </Routes>
-        <AudioDebugOverlay />
       </div>
     </BrowserRouter>
   );
