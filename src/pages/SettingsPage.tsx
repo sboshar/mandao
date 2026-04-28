@@ -21,12 +21,7 @@ import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
-import {
-  unlockAudio,
-  isAudioUnlocked,
-  audioDebugEnabled,
-  setAudioDebugEnabled,
-} from '../services/audioRecording';
+import { unlockAudio, isAudioUnlocked } from '../services/audioRecording';
 import {
   useAudioCacheSettingsStore,
   RECORDING_CAP_SEC_MIN,
@@ -1720,7 +1715,6 @@ const ERROR_CODE_NAMES: Record<number, string> = {
 function AudioDiagnosticCard() {
   const [steps, setSteps] = useState<DiagStep[]>([]);
   const [running, setRunning] = useState(false);
-  const [debugOn, setDebugOn] = useState(audioDebugEnabled);
 
   const run = async () => {
     setRunning(true);
@@ -1926,29 +1920,6 @@ function AudioDiagnosticCard() {
       description="Walks through the audio pipeline (auth, signed URL, fetch, decode) and reports each step's result. Useful when recordings won't play on a particular device."
     >
       <div className="space-y-3">
-        <div
-          className="flex items-center justify-between p-2 rounded"
-          style={{ background: 'var(--bg-inset)' }}
-        >
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Floating debug overlay (live audio events)
-          </span>
-          <button
-            onClick={() => {
-              const next = !debugOn;
-              setAudioDebugEnabled(next);
-              setDebugOn(next);
-            }}
-            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
-            style={{
-              background: debugOn ? 'var(--danger, #e53e3e)' : 'var(--accent)',
-              color: 'var(--text-inverted)',
-            }}
-          >
-            {debugOn ? 'Disable' : 'Enable'}
-          </button>
-        </div>
-
         <button
           onClick={() => {
             // Synchronously prime audio in the click gesture so the play
