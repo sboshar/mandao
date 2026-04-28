@@ -21,14 +21,7 @@ import type { Deck } from '../db/schema';
 import { localDb } from '../db/localDb';
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
-import {
-  unlockAudio,
-  isAudioUnlocked,
-  playBlob,
-  _getSharedAudioForDiagnostic,
-  audioDebugEnabled,
-  setAudioDebugEnabled,
-} from '../services/audioRecording';
+import { unlockAudio, isAudioUnlocked } from '../services/audioRecording';
 import {
   useAudioCacheSettingsStore,
   RECORDING_CAP_SEC_MIN,
@@ -1722,165 +1715,6 @@ const ERROR_CODE_NAMES: Record<number, string> = {
 function AudioDiagnosticCard() {
   const [steps, setSteps] = useState<DiagStep[]>([]);
   const [running, setRunning] = useState(false);
-  const [realPathLog, setRealPathLog] = useState<string[]>([]);
-  const [realPathRunning, setRealPathRunning] = useState(false);
-  const [debugOn, setDebugOn] = useState(audioDebugEnabled);
-  // Eagerly-loaded blob mirrors how SentenceAudioControls populates its
-  // blobMap on mount, so the "no unlock, sync" test can reproduce the
-  // exact synchronous code path that fails in Browse.
-  const [preFetchedBlob, setPreFetchedBlob] = useState<Blob | null>(null);
-  const [syncTestLog, setSyncTestLog] = useState<string[]>([]);
-  const [syncTestRunning, setSyncTestRunning] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const recs = await localDb.audioRecordings.toArray();
-      const rec =
-        recs.find((r) => r.storagePath && r.mimeType === 'audio/mpeg') ||
-        recs.find((r) => r.storagePath);
-      if (!rec) return;
-      const cached = await localDb.audioBlobs.get(rec.id);
-      if (cached?.blob && !cancelled) setPreFetchedBlob(cached.blob);
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  /** Mirrors Browse's playRecording exactly: no unlockAudio, no awaits.
-   *  Click → playBlob(preFetched, ...) on the shared element. If this
-   *  works, the bug is something specific to SentenceAudioControls's
-   *  React context (state updates, useEffect, parent re-renders). If it
-   *  fails, the bug is in the bare playBlob path itself. */
-  const runSyncNoUnlockTest = () => {
-    if (syncTestRunning) return;
-    if (!preFetchedBlob) {
-      setSyncTestLog(['No pre-fetched blob — wait for the diagnostic to load and try again']);
-      return;
-    }
-    setSyncTestRunning(true);
-    setSyncTestLog([]);
-    const log: string[] = [];
-    const append = (line: string) => {
-      log.push(`[${new Date().toLocaleTimeString().slice(-8)}] ${line}`);
-      setSyncTestLog([...log]);
-    };
-
-    const audio = _getSharedAudioForDiagnostic();
-    const trackedEvents = [
-      'loadstart', 'loadedmetadata', 'loadeddata', 'canplay',
-      'canplaythrough', 'play', 'playing', 'pause', 'ended',
-      'error', 'stalled', 'suspend',
-    ];
-    const listeners: Array<{ type: string; fn: EventListener }> = [];
-    for (const evt of trackedEvents) {
-      const fn = () => {
-        let detail = '';
-        if (evt === 'error') {
-          const code = audio.error?.code;
-          detail = ` (MediaError ${code} ${ERROR_CODE_NAMES[code as 1|2|3|4] || '?'})`;
-        }
-        append(`event: ${evt}${detail}`);
-      };
-      audio.addEventListener(evt, fn);
-      listeners.push({ type: evt, fn });
-    }
-
-    append(`Calling playBlob synchronously, no unlockAudio…`);
-    const stop = playBlob(preFetchedBlob, () => append('onEnded callback fired'));
-
-    setTimeout(() => {
-      append(`Final: paused=${audio.paused} muted=${audio.muted} currentTime=${audio.currentTime.toFixed(2)}s readyState=${audio.readyState}`);
-      stop();
-      for (const l of listeners) audio.removeEventListener(l.type, l.fn);
-      setSyncTestRunning(false);
-    }, 5000);
-  };
-
-  /** Test play exactly the way the real Browse / Cards path does:
-   *  unlockAudio() (in click) → look up cached blob → playBlob() on the
-   *  SHARED Audio element. Logs every event from the shared element so
-   *  we can see what iOS is doing without console access. */
-  const runRealPathTest = () => {
-    if (realPathRunning) return;
-    setRealPathRunning(true);
-    setRealPathLog([]);
-    const log: string[] = [];
-    const append = (line: string) => {
-      log.push(`[${new Date().toLocaleTimeString().slice(-8)}] ${line}`);
-      setRealPathLog([...log]);
-    };
-
-    // 1. Synchronously, in the click gesture: unlock + start playback.
-    unlockAudio();
-    append(`unlockAudio() called (was unlocked: ${isAudioUnlocked()})`);
-
-    // 2. Pick a cached blob synchronously from Dexie via a sync-ish path.
-    //    We can't avoid the await for the cache lookup, but the first
-    //    play after this won't be in gesture either — that's the point
-    //    of the test: does it work despite that?
-    void (async () => {
-      try {
-        const recs = await localDb.audioRecordings.toArray();
-        const rec =
-          recs.find((r) => r.storagePath && r.mimeType === 'audio/mpeg') ||
-          recs.find((r) => r.storagePath);
-        if (!rec) {
-          append('FAIL: no recording with storagePath');
-          setRealPathRunning(false);
-          return;
-        }
-        append(`Picked recording: ${rec.name} (${rec.mimeType})`);
-
-        const cached = await localDb.audioBlobs.get(rec.id);
-        const blob = cached?.blob;
-        if (!blob) {
-          append('FAIL: blob not in audioBlobs cache (would need network fetch)');
-          setRealPathRunning(false);
-          return;
-        }
-        append(`Got cached blob: ${(blob.size / 1024).toFixed(1)} KB ${blob.type}`);
-
-        // 3. Attach listeners to the SHARED audio element. This is what
-        //    the real playback path uses, and what we want to observe.
-        const audio = _getSharedAudioForDiagnostic();
-        const trackedEvents = [
-          'loadstart', 'loadedmetadata', 'loadeddata', 'canplay',
-          'canplaythrough', 'play', 'playing', 'pause', 'ended',
-          'error', 'stalled', 'suspend', 'volumechange',
-        ];
-        const listeners: Array<{ type: string; fn: EventListener }> = [];
-        for (const evt of trackedEvents) {
-          const fn = () => {
-            let detail = '';
-            if (evt === 'error') {
-              const code = audio.error?.code;
-              detail = ` (MediaError ${code} ${ERROR_CODE_NAMES[code as 1|2|3|4] || '?'})`;
-            }
-            if (evt === 'volumechange') {
-              detail = ` (muted=${audio.muted}, volume=${audio.volume})`;
-            }
-            append(`event: ${evt}${detail}`);
-          };
-          audio.addEventListener(evt, fn);
-          listeners.push({ type: evt, fn });
-        }
-
-        append(`Calling playBlob… element state: muted=${audio.muted} paused=${audio.paused}`);
-        const stop = playBlob(blob, () => append('playBlob onEnded callback fired'));
-
-        // 4. After 5s, snapshot final state and clean up.
-        setTimeout(() => {
-          append(`Final state: paused=${audio.paused} muted=${audio.muted} currentTime=${audio.currentTime.toFixed(2)}s duration=${Number.isFinite(audio.duration) ? audio.duration.toFixed(2) : '?'}s readyState=${audio.readyState}`);
-          stop();
-          for (const l of listeners) audio.removeEventListener(l.type, l.fn);
-          setRealPathRunning(false);
-        }, 5000);
-      } catch (e) {
-        append(`EXCEPTION: ${e instanceof Error ? e.message : String(e)}`);
-        setRealPathRunning(false);
-      }
-    })();
-  };
 
   const run = async () => {
     setRunning(true);
@@ -2086,28 +1920,6 @@ function AudioDiagnosticCard() {
       description="Walks through the audio pipeline (auth, signed URL, fetch, decode) and reports each step's result. Useful when recordings won't play on a particular device."
     >
       <div className="space-y-3">
-        <div
-          className="flex items-center justify-between p-2 rounded"
-          style={{ background: 'var(--bg-inset)' }}
-        >
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Floating debug overlay (live audio events)
-          </span>
-          <button
-            onClick={() => {
-              setAudioDebugEnabled(!debugOn);
-              setDebugOn(!debugOn);
-            }}
-            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
-            style={{
-              background: debugOn ? 'var(--danger, #e53e3e)' : 'var(--accent)',
-              color: 'var(--text-inverted)',
-            }}
-          >
-            {debugOn ? 'Disable' : 'Enable'}
-          </button>
-        </div>
-
         <button
           onClick={() => {
             // Synchronously prime audio in the click gesture so the play
@@ -2144,63 +1956,6 @@ function AudioDiagnosticCard() {
             ))}
           </ol>
         )}
-
-        <div className="pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-          <p className="text-xs mb-2" style={{ color: 'var(--text-tertiary)' }}>
-            Reproduces the real Browse / Cards click→play path against the
-            shared Audio element and logs every event. Useful when the
-            standard diagnostic passes but real playback fails.
-          </p>
-          <button
-            onClick={runRealPathTest}
-            disabled={realPathRunning}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-          >
-            {realPathRunning ? 'Listening (5s)…' : 'Test play (real path)'}
-          </button>
-          {realPathLog.length > 0 && (
-            <ol
-              className="mt-3 text-xs font-mono space-y-0.5 p-3 rounded-lg"
-              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-            >
-              {realPathLog.map((line, i) => (
-                <li key={i} style={{ wordBreak: 'break-word' }}>{line}</li>
-              ))}
-            </ol>
-          )}
-        </div>
-
-        <div className="pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-          <p className="text-xs mb-2" style={{ color: 'var(--text-tertiary)' }}>
-            Mirrors Browse exactly: no unlockAudio, no awaits between click
-            and play. If this works but Browse doesn't, the bug is React /
-            component state. If both fail, the bare playBlob path needs
-            something to authorize the element.
-          </p>
-          <button
-            onClick={runSyncNoUnlockTest}
-            disabled={syncTestRunning || !preFetchedBlob}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-            style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-          >
-            {syncTestRunning
-              ? 'Listening (5s)…'
-              : preFetchedBlob
-                ? 'Test play (no unlock, sync)'
-                : 'Loading blob…'}
-          </button>
-          {syncTestLog.length > 0 && (
-            <ol
-              className="mt-3 text-xs font-mono space-y-0.5 p-3 rounded-lg"
-              style={{ background: 'var(--bg-inset)', color: 'var(--text-secondary)' }}
-            >
-              {syncTestLog.map((line, i) => (
-                <li key={i} style={{ wordBreak: 'break-word' }}>{line}</li>
-              ))}
-            </ol>
-          )}
-        </div>
       </div>
     </SectionCard>
   );
