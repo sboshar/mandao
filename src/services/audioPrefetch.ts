@@ -77,28 +77,30 @@ async function prefetchInternal(): Promise<void> {
 
   if (ordered.length === 0) return;
 
-  // Track running total against the cap, refreshed from the table so we
-  // include whatever is already cached.
-  let { totalBytes } = await local.getAudioCacheUsage();
-
-  // Worker pool: pull from the queue and fetch each in turn.
+  // Worker pool: pull from the queue and fetch each in turn. We re-read
+  // total bytes from the table on every iteration instead of mutating a
+  // shared counter — concurrent workers' fetches and evictions would
+  // make the counter drift (e.g., worker A's evict already reflects
+  // worker B's just-written blob, then B does counter+=size and double-
+  // counts itself), causing the cap to be over- or under-respected.
   const queue = ordered.slice();
   const workers: Promise<void>[] = [];
   for (let i = 0; i < CONCURRENCY; i++) {
     workers.push(
       (async () => {
         while (queue.length > 0) {
-          if (totalBytes >= cap) break;
+          const usage = await local.getAudioCacheUsage();
+          if (usage.totalBytes >= cap) break;
           const rec = queue.shift();
           if (!rec) break;
           try {
             const fetchedSize = await fetchAndStore(rec);
             if (fetchedSize > 0) {
-              totalBytes += fetchedSize;
-              if (totalBytes > cap) {
+              const post = await local.getAudioCacheUsage();
+              if (post.totalBytes > cap) {
                 // Evict back below the cap (with a small margin) before
                 // letting more inflights finish.
-                totalBytes = await evictToTarget(Math.floor(cap * 0.9));
+                await evictToTarget(Math.floor(cap * 0.9));
               }
             }
           } catch (e) {

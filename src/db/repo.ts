@@ -10,7 +10,7 @@
 import * as local from './localRepo';
 import { localDb, type SyncOp } from './localDb';
 import { supabase } from '../lib/supabase';
-import { AUDIO_BUCKET, removeStorageObjects } from '../lib/audioStorage';
+import { AUDIO_BUCKET } from '../lib/audioStorage';
 import { getDeviceId, scheduleSyncSoon } from './syncEngine';
 import {
   getUserId as getRemoteUserId,
@@ -224,7 +224,9 @@ export async function deleteSentenceById(id: string): Promise<void> {
     payload: { entity_type: 'sentence', entity_id: id },
   });
   await enqueueOrphanDeletes(orphanedMeanings, orphanedLinks);
-  await removeStorageObjects(audioPaths);
+  if (audioPaths.length > 0) {
+    await enqueue({ op: 'deleteStorageObjects', payload: { paths: audioPaths } });
+  }
 }
 
 export async function deleteSentencesBySource(source: string): Promise<void> {
@@ -390,7 +392,16 @@ export async function deleteAllUserData(): Promise<void> {
   await localDb.syncMeta.delete('lastUsn');
   await localDb.syncMeta.delete('schemaVersion');
   await enqueue({ op: 'deleteAllData', payload: {} });
-  await removeStorageObjects(audioPaths);
+  // Storage cleanup is enqueued so it survives offline / tab-close instead
+  // of fire-and-forget. Chunked so a 1000+-recording wipe doesn't put a
+  // single huge payload on one outbox row.
+  const STORAGE_CHUNK = 500;
+  for (let i = 0; i < audioPaths.length; i += STORAGE_CHUNK) {
+    await enqueue({
+      op: 'deleteStorageObjects',
+      payload: { paths: audioPaths.slice(i, i + STORAGE_CHUNK) },
+    });
+  }
 }
 
 // ============================================================
@@ -457,10 +468,16 @@ export async function deleteAudioRecording(id: string) {
     op: 'deleteEntity',
     payload: { entity_type: 'audio_recording', entity_id: id },
   });
-  // Clean up the Storage blob. The server's AFTER DELETE trigger no
-  // longer can (platform change — migration 009 swallowed the error
-  // so deletes stop failing), so the client handles it explicitly.
-  await removeStorageObjects([rec?.storagePath]);
+  // Storage cleanup goes through the outbox so an offline delete doesn't
+  // silently leave the bucket object orphaned. The server's AFTER DELETE
+  // trigger no longer cleans Storage (migration 009 swallowed the error
+  // so deletes stop failing), so the client owns this explicitly.
+  if (rec?.storagePath) {
+    await enqueue({
+      op: 'deleteStorageObjects',
+      payload: { paths: [rec.storagePath] },
+    });
+  }
 }
 
 /**

@@ -203,6 +203,9 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
     case 'upsertAudioRecording':
       await pushSequential(ops, pushUpsertAudioRecording);
       break;
+    case 'deleteStorageObjects':
+      await pushSequential(ops, pushDeleteStorageObjects);
+      break;
   }
 }
 
@@ -329,6 +332,25 @@ async function pushUpsertAudioRecording(op: SyncOp): Promise<void> {
 
   if (isFirstUpload) {
     await localDb.audioRecordings.update(payload.id, { storagePath });
+  }
+}
+
+/**
+ * Drop the listed Storage objects. Throws on transport errors so the
+ * outbox retries (the whole reason this isn't a fire-and-forget call
+ * from repo.ts). Missing objects are not errors — Supabase Storage's
+ * remove() silently skips paths it can't find — so a partial cleanup
+ * still drains the op cleanly.
+ */
+async function pushDeleteStorageObjects(op: SyncOp): Promise<void> {
+  const paths = (op.payload as { paths?: string[] })?.paths;
+  if (!paths || paths.length === 0) return;
+  // Supabase caps remove() at 1000 keys per request.
+  const BATCH = 1000;
+  for (let i = 0; i < paths.length; i += BATCH) {
+    const chunk = paths.slice(i, i + BATCH);
+    const { error } = await supabase.storage.from(AUDIO_BUCKET).remove(chunk);
+    if (error) throw syncErrorFrom(error);
   }
 }
 
