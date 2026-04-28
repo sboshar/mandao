@@ -273,6 +273,15 @@ export function GraphPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
 
+  // Two-finger rotate gesture (mobile). When the user puts two fingers
+  // on the canvas and rotates them in opposite directions, we rotate the
+  // entire graph wrapper by the angular delta between the touches. Pure
+  // pan (both fingers translating together) leaves the angle untouched
+  // and so contributes no rotation — exactly the desired behavior.
+  const [rotationDeg, setRotationDeg] = useState(0);
+  const lastAngleRef = useRef<number | null>(null);
+  const rotateWrapperRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     buildGraphData().then((data) => {
       setGraphData(data);
@@ -316,6 +325,51 @@ export function GraphPage() {
     const observer = new MutationObserver(() => setColors(getThemeColors()));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     return () => observer.disconnect();
+  }, []);
+
+  // Attach native touch listeners with passive:false so we can block
+  // the page-level pinch-zoom while the user is rotating the graph.
+  // React's synthetic event system installs touchmove as passive,
+  // which makes preventDefault a no-op there.
+  useEffect(() => {
+    const el = rotateWrapperRef.current;
+    if (!el) return;
+
+    const angleBetween = (t0: Touch, t1: Touch) =>
+      (Math.atan2(t1.clientY - t0.clientY, t1.clientX - t0.clientX) * 180) / Math.PI;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        lastAngleRef.current = angleBetween(e.touches[0], e.touches[1]);
+      } else {
+        lastAngleRef.current = null;
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || lastAngleRef.current == null) return;
+      e.preventDefault();
+      const curr = angleBetween(e.touches[0], e.touches[1]);
+      let delta = curr - lastAngleRef.current;
+      // Normalize wrap-around (e.g. -179 → 179 should read as +2°, not -358°).
+      if (delta > 180) delta -= 360;
+      else if (delta < -180) delta += 360;
+      lastAngleRef.current = curr;
+      setRotationDeg((r) => r + delta);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) lastAngleRef.current = null;
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
   }, []);
 
   useEffect(() => {
@@ -622,6 +676,15 @@ export function GraphPage() {
             No data yet. Add some sentences first.
           </div>
         ) : (
+          <div
+            ref={rotateWrapperRef}
+            className="absolute inset-0"
+            style={{
+              transform: `rotate(${rotationDeg}deg)`,
+              transformOrigin: '50% 50%',
+              touchAction: 'none',
+            }}
+          >
           <ForceGraph2D
             ref={fgRef as any}
             width={dimensions.width}
@@ -651,6 +714,7 @@ export function GraphPage() {
               fgRef.current?.zoomToFit(500, 80);
             }}
           />
+          </div>
         )}
       </div>
 
