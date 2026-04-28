@@ -23,7 +23,8 @@ export type SyncOpType =
   | 'deleteEntity'
   | 'deleteAllData'
   | 'updateTags'
-  | 'upsertAudioRecording';
+  | 'upsertAudioRecording'
+  | 'deleteStorageObjects';
 
 export interface SyncOp {
   id?: number;

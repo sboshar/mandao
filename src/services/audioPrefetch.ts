@@ -77,30 +77,28 @@ async function prefetchInternal(): Promise<void> {
 
   if (ordered.length === 0) return;
 
-  // Track running total against the cap, refreshed from the table so we
-  // include whatever is already cached.
-  let { totalBytes } = await local.getAudioCacheUsage();
-
-  // Worker pool: pull from the queue and fetch each in turn.
+  // Worker pool: pull from the queue and fetch each in turn. We re-read
+  // total bytes from the table on every iteration instead of mutating a
+  // shared counter — concurrent workers' fetches and evictions would
+  // make the counter drift (e.g., worker A's evict already reflects
+  // worker B's just-written blob, then B does counter+=size and double-
+  // counts itself), causing the cap to be over- or under-respected.
   const queue = ordered.slice();
   const workers: Promise<void>[] = [];
   for (let i = 0; i < CONCURRENCY; i++) {
     workers.push(
       (async () => {
         while (queue.length > 0) {
-          if (totalBytes >= cap) break;
+          const usage = await local.getAudioCacheUsage();
+          if (usage.totalBytes >= cap) break;
           const rec = queue.shift();
           if (!rec) break;
           try {
-            const fetchedSize = await fetchAndStore(rec);
-            if (fetchedSize > 0) {
-              totalBytes += fetchedSize;
-              if (totalBytes > cap) {
-                // Evict back below the cap (with a small margin) before
-                // letting more inflights finish.
-                totalBytes = await evictToTarget(Math.floor(cap * 0.9));
-              }
-            }
+            await fetchAndStore(rec);
+            // Always trim back to the soft target after a fetch — evictToTarget
+            // is a no-op when already under target, so this collapses the
+            // separate over-cap check + evict into one call.
+            await evictToTarget(Math.floor(cap * 0.9));
           } catch (e) {
             // Best-effort. One bad URL/network blip shouldn't kill the pass.
             console.warn(`Prefetch failed for recording ${rec.id}:`, e);
@@ -112,28 +110,29 @@ async function prefetchInternal(): Promise<void> {
   await Promise.all(workers);
 }
 
-/** Fetch a single recording's bytes and store them. Returns sizeBytes on
- *  success, 0 on skip/failure. Throws only on QuotaExceededError so the
- *  caller can react. */
-async function fetchAndStore(rec: AudioRecording): Promise<number> {
-  if (!rec.storagePath) return 0;
+/** Fetch a single recording's bytes and store them. All failure modes
+ *  (no storagePath, signed-URL error, network blip, quota exceeded after
+ *  one retry) are swallowed — the next prefetch pass will pick up where
+ *  this one left off. */
+async function fetchAndStore(rec: AudioRecording): Promise<void> {
+  if (!rec.storagePath) return;
 
   const { data, error } = await supabase.storage
     .from(AUDIO_BUCKET)
     .createSignedUrl(rec.storagePath, SIGNED_URL_TTL_SECONDS);
-  if (error || !data?.signedUrl) return 0;
+  if (error || !data?.signedUrl) return;
 
   let blob: Blob;
   try {
     const resp = await fetch(data.signedUrl);
-    if (!resp.ok) return 0;
+    if (!resp.ok) return;
     blob = await resp.blob();
   } catch {
-    return 0;
+    return;
   }
   // Don't cache empty responses — a 0-byte entry forces every play to
   // re-fetch with no convergence.
-  if (blob.size === 0) return 0;
+  if (blob.size === 0) return;
 
   const entry = await local.makeAudioBlobEntry(rec.id, blob, rec.mimeType);
 
@@ -146,13 +145,10 @@ async function fetchAndStore(rec: AudioRecording): Promise<number> {
       try {
         await local.putAudioBlob(entry);
       } catch {
-        return 0;
+        // give up — next pass will retry
       }
-    } else {
-      return 0;
     }
   }
-  return entry.sizeBytes;
 }
 
 /** Pick LRU entries to evict to bring the cache at or below `targetBytes`.
