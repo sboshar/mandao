@@ -66,6 +66,7 @@
   --state-learning: #cb7b37;
   --state-review: #448361;
   --state-relearning: #9065b0;
+  --state-due: #b8517a;
 }
 
 .dark {
@@ -123,6 +124,7 @@
   --state-learning: #e6a35c;
   --state-review: #6bc490;
   --state-relearning: #b98cd1;
+  --state-due: #e88aac;
 }
 
 /* ============================================================

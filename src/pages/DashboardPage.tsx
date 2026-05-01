@@ -84,10 +84,11 @@ export function DashboardPage() {
       {/* Default Deck */}
       <div className="mb-10">
         <div className="flex items-baseline justify-between mb-2">
-          <div className="flex gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+          <div className="flex gap-3 text-xs flex-wrap" style={{ color: 'var(--text-secondary)' }}>
             <span style={{ color: 'var(--state-new)' }}>{states.newCount} new</span>
             <span style={{ color: 'var(--state-learning)' }}>{states.learningCount} learning</span>
             <span style={{ color: 'var(--state-review)' }}>{states.reviewCount} review</span>
+            <span style={{ color: 'var(--state-due)' }}>{dueForMode} due (today)</span>
           </div>
         </div>
         <div className="flex gap-1 mb-3 flex-wrap">
