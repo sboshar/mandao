@@ -1,27 +1,9 @@
 import { defineConfig } from 'vite'
-import { execSync } from 'node:child_process'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// Build identifier surfaced in the UI so we can confirm at a glance
-// which commit the running PWA / browser tab is on. Vercel sets
-// VERCEL_GIT_COMMIT_SHA on prod builds; locally we fall back to git.
-const BUILD_SHA = (() => {
-  if (process.env.VERCEL_GIT_COMMIT_SHA) {
-    return process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)
-  }
-  try {
-    return execSync('git rev-parse --short HEAD').toString().trim()
-  } catch {
-    return 'dev'
-  }
-})()
-
 export default defineConfig({
-  define: {
-    __BUILD_SHA__: JSON.stringify(BUILD_SHA),
-  },
   plugins: [
     react(),
     tailwindcss(),
