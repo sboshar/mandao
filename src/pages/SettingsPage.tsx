@@ -94,6 +94,15 @@ export function SettingsPage() {
       {section === 'ai' && <AISection />}
       {section === 'anki' && <AnkiSection />}
       {section === 'data' && <DataSection />}
+
+      {/* Build stamp — lets us confirm at a glance which commit the
+          running app / installed PWA is actually on. */}
+      <div
+        className="mt-8 text-center text-xs"
+        style={{ color: 'var(--text-tertiary)' }}
+      >
+        build {__BUILD_SHA__}
+      </div>
     </div>
   );
 }
