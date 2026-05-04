@@ -337,16 +337,39 @@ export async function getAllDecks(): Promise<Deck[]> {
   return local.getAllDecks();
 }
 
+// Module-level mirror of the syncMeta flag. Avoids a Dexie read on every
+// page mount once we've enqueued the upsert at least once. Reset on
+// deleteAllUserData (and naturally on app reload, where we read once).
+let defaultDeckSyncedCache: boolean | null = null;
+
+export function resetDefaultDeckSyncedCache(): void {
+  defaultDeckSyncedCache = null;
+}
+
 export async function ensureDefaultDeck(): Promise<string> {
   // Prefer cached ID to avoid network call (works offline).
   // Falls through to getUser() only if cache is cold (rare at startup).
+  let userId: string;
   try {
-    const userId = getCachedUserIdOrThrow();
-    return local.ensureDefaultDeck(userId);
+    userId = getCachedUserIdOrThrow();
   } catch {
-    const userId = await getRemoteUserId();
-    return local.ensureDefaultDeck(userId);
+    userId = await getRemoteUserId();
   }
+  const { deckId, deck, created } = await local.ensureDefaultDeck(userId);
+
+  // Heal devices that pre-date this flag: enqueue if we just created the
+  // deck, or if we never recorded a sync. The server upsert is idempotent.
+  if (defaultDeckSyncedCache === null) {
+    const row = await localDb.syncMeta.get('defaultDeckSynced');
+    defaultDeckSyncedCache = row !== undefined;
+  }
+  if (created || !defaultDeckSyncedCache) {
+    await enqueue({ op: 'upsertDeck', payload: deck });
+    await localDb.syncMeta.put({ key: 'defaultDeckSynced', value: 1 });
+    defaultDeckSyncedCache = true;
+  }
+
+  return deckId;
 }
 
 // ============================================================
@@ -391,6 +414,10 @@ export async function deleteAllUserData(): Promise<void> {
   await localDb.syncMeta.delete('lastHydratedAt');
   await localDb.syncMeta.delete('lastUsn');
   await localDb.syncMeta.delete('schemaVersion');
+  // delete_all_user_data drops the server-side default deck, so the next
+  // ensureDefaultDeck call must re-enqueue an upsert.
+  await localDb.syncMeta.delete('defaultDeckSynced');
+  resetDefaultDeckSyncedCache();
   await enqueue({ op: 'deleteAllData', payload: {} });
   // Storage cleanup is enqueued so it survives offline / tab-close instead
   // of fire-and-forget. The push handler chunks at Supabase's 1000-key

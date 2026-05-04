@@ -24,7 +24,8 @@ export type SyncOpType =
   | 'deleteAllData'
   | 'updateTags'
   | 'upsertAudioRecording'
-  | 'deleteStorageObjects';
+  | 'deleteStorageObjects'
+  | 'upsertDeck';
 
 export interface SyncOp {
   id?: number;

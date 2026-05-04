@@ -77,6 +77,18 @@ export function deckFromRow(r: any): Deck {
   };
 }
 
+export function deckToRow(deck: Deck, userId: string) {
+  return {
+    id: deck.id,
+    user_id: userId,
+    name: deck.name,
+    description: deck.description,
+    new_cards_per_day: deck.newCardsPerDay,
+    reviews_per_day: deck.reviewsPerDay,
+    created_at: deck.createdAt,
+  };
+}
+
 export function reviewLogFromRow(r: any): ReviewLog {
   return {
     id: r.id, cardId: r.card_id, rating: r.rating,

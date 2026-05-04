@@ -13,6 +13,7 @@
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
+import type { Deck } from './schema';
 import type { FailedOp } from '../stores/syncStore';
 import { runAudioPrefetch } from '../services/audioPrefetch';
 import { audioBlobToBlob } from './localRepo';
@@ -56,6 +57,7 @@ import {
   reviewLogFromRow,
   audioRecordingFromRow,
   audioRecordingToRow,
+  deckToRow,
 } from './mappers';
 import { getCachedUserIdOrThrow } from './remoteRepo';
 import {
@@ -205,6 +207,9 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
       break;
     case 'deleteStorageObjects':
       await pushSequential(ops, pushDeleteStorageObjects);
+      break;
+    case 'upsertDeck':
+      await pushSequential(ops, pushUpsertDeck);
       break;
   }
 }
@@ -357,6 +362,15 @@ async function pushDeleteStorageObjects(op: SyncOp): Promise<void> {
     const { error } = await supabase.storage.from(AUDIO_BUCKET).remove(chunk);
     if (error) throw syncErrorFrom(error);
   }
+}
+
+async function pushUpsertDeck(op: SyncOp): Promise<void> {
+  const userId = getCachedUserIdOrThrow();
+  const { error } = await supabase.from('decks').upsert(
+    deckToRow(op.payload as Deck, userId),
+    { onConflict: 'id', ignoreDuplicates: true },
+  );
+  if (error) throw syncErrorFrom(error);
 }
 
 async function pushUpdateTags(op: SyncOp): Promise<void> {

@@ -416,20 +416,24 @@ export async function getAllDecks(): Promise<Deck[]> {
   return localDb.decks.toArray();
 }
 
-export async function ensureDefaultDeck(userId: string): Promise<string> {
+export async function ensureDefaultDeck(
+  userId: string,
+): Promise<{ deckId: string; deck: Deck; created: boolean }> {
   const deckId = 'default-' + userId;
   const existing = await localDb.decks.get(deckId);
-  if (!existing) {
-    await localDb.decks.put({
-      id: deckId,
-      name: 'Default',
-      description: 'Default deck',
-      newCardsPerDay: 20,
-      reviewsPerDay: 200,
-      createdAt: Date.now(),
-    });
+  if (existing) {
+    return { deckId, deck: existing, created: false };
   }
-  return deckId;
+  const deck: Deck = {
+    id: deckId,
+    name: 'Default',
+    description: 'Default deck',
+    newCardsPerDay: 20,
+    reviewsPerDay: 200,
+    createdAt: Date.now(),
+  };
+  await localDb.decks.put(deck);
+  return { deckId, deck, created: true };
 }
 
 // ============================================================

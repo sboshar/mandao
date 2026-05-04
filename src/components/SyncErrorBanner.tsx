@@ -11,6 +11,7 @@ const OP_LABELS: Record<SyncOpType, string> = {
   updateTags: 'tag update',
   upsertAudioRecording: 'audio upload',
   deleteStorageObjects: 'audio cleanup',
+  upsertDeck: 'deck',
 };
 
 export function SyncErrorBanner() {
