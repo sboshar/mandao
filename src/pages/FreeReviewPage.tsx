@@ -47,7 +47,8 @@ export function FreeReviewPage() {
   // Clear shared review store on unmount so /review later doesn't see free-review state.
   useEffect(() => () => reset(), []);
 
-  // Clear the "no cards match for this mode" message when the user switches modes.
+  // `empty` reflects the last start() attempt against the previous mode;
+  // a mode change invalidates it, otherwise the stale banner persists.
   useEffect(() => {
     setEmpty(false);
   }, [mode]);

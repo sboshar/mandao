@@ -6,32 +6,13 @@ import {
   getFreeReviewQueue,
 } from './srs';
 import type { SrsCard, ReviewMode } from '../db/schema';
+import { card } from '../test/factories';
 
 vi.mock('../db/repo', () => ({
   getSrsCardsByDeckAndStates: vi.fn(),
 }));
 
 import * as repo from '../db/repo';
-
-function card(overrides: Partial<SrsCard>): SrsCard {
-  return {
-    id: 'c',
-    sentenceId: 's',
-    deckId: 'd',
-    reviewMode: 'en-to-zh' as ReviewMode,
-    due: 0,
-    stability: 0,
-    difficulty: 0,
-    elapsedDays: 0,
-    scheduledDays: 0,
-    reps: 0,
-    lapses: 0,
-    state: 0,
-    lastReview: null,
-    createdAt: 0,
-    ...overrides,
-  };
-}
 
 describe('sentenceMasteryFromCards', () => {
   it('returns 0 when a sentence has no cards', () => {
