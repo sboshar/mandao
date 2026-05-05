@@ -114,6 +114,17 @@ export function DashboardPage() {
         >
           {dueForMode > 0 ? `Study (${dueForMode} cards)` : 'No cards due'}
         </button>
+        <button
+          onClick={() => navigate('/free-review')}
+          className="mt-2 w-full py-2 rounded-lg text-xs font-medium transition-colors"
+          style={{
+            background: 'transparent',
+            color: 'var(--text-secondary)',
+            border: '1px solid var(--border-strong)',
+          }}
+        >
+          Free review (no schedule effect)
+        </button>
       </div>
 
       {/* Quick actions — ghost buttons */}

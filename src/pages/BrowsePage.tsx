@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
@@ -18,6 +18,11 @@ import type { SentenceToken, Meaning, SrsCard } from '../db/schema';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
+
+/** Strip diacritics, digits, whitespace; lowercase. Lets "hua" match "huā". */
+function normalizePinyin(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[\s0-9]/g, '');
+}
 
 const SORT_DIMENSION_LABELS: Record<ReviewMode, string> = {
   'en-to-zh': 'EN→ZH',
@@ -79,6 +84,9 @@ export function BrowsePage() {
   const [cardsBySentence, setCardsBySentence] = useState<Map<string, SrsCard[]>>(new Map());
   const [sortMode, setSortMode] = useState<'newest' | 'best-known' | 'least-known'>('newest');
   const [sortDimension, setSortDimension] = useState<'overall' | ReviewMode>('overall');
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     repo.getSentencesOrderByCreatedDesc().then(setSentences);
@@ -111,16 +119,27 @@ export function BrowsePage() {
   };
 
   const filteredSentences = useMemo(() => {
-    const base = filterTags.length > 0
+    let base = filterTags.length > 0
       ? sentences.filter((s) => filterTags.some((t) => s.tags?.includes(t)))
       : sentences;
+    const q = search.trim();
+    if (q) {
+      const qLower = q.toLowerCase();
+      const qPinyin = normalizePinyin(q);
+      base = base.filter((s) =>
+        s.chinese.includes(q) ||
+        s.english.toLowerCase().includes(qLower) ||
+        normalizePinyin(s.pinyin).includes(qPinyin) ||
+        normalizePinyin(s.pinyinSandhi).includes(qPinyin)
+      );
+    }
     if (sortMode === 'newest') return base;
     const scored = [...base];
     scored.sort((a, b) => sortMode === 'best-known'
       ? masteryOf(b.id) - masteryOf(a.id)
       : masteryOf(a.id) - masteryOf(b.id));
     return scored;
-  }, [sentences, filterTags, sortMode, sortDimension, cardsBySentence]);
+  }, [sentences, filterTags, search, sortMode, sortDimension, cardsBySentence]);
 
   const handleDelete = async (sentenceId: string) => {
     await deleteSentence(sentenceId);
@@ -168,13 +187,35 @@ export function BrowsePage() {
         </button>
         <h1 className="text-xl font-bold">Browse</h1>
         {sentences.length > 0 ? (
-          <button
-            onClick={() => setShowDeleteAll(true)}
-            className="px-3 py-1 rounded text-sm transition-colors"
-            style={{ background: 'var(--bg-inset)', color: 'var(--danger)' }}
-          >
-            Delete All
-          </button>
+          <div className="flex gap-1">
+            <button
+              onClick={() => {
+                const next = !searchOpen;
+                setSearchOpen(next);
+                if (!next) setSearch('');
+                else setTimeout(() => searchInputRef.current?.focus(), 0);
+              }}
+              aria-label="Toggle search"
+              aria-pressed={searchOpen}
+              className="px-2.5 py-1 rounded text-sm transition-colors flex items-center"
+              style={{
+                background: 'var(--bg-inset)',
+                color: searchOpen || search ? 'var(--accent)' : 'var(--text-secondary)',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setShowDeleteAll(true)}
+              className="px-3 py-1 rounded text-sm transition-colors"
+              style={{ background: 'var(--bg-inset)', color: 'var(--danger)' }}
+            >
+              Delete All
+            </button>
+          </div>
         ) : (
           <div className="w-20" />
         )}
@@ -190,6 +231,50 @@ export function BrowsePage() {
         You'll see that 花 has two separate meaning entries. You can also click on the
         <strong> shì</strong> pinyin to see all characters that share that sound.
       </TutorialBanner>
+
+      {sentences.length > 0 && searchOpen && (
+        <div className="mb-3 relative">
+          <div
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: 'var(--text-tertiary)' }}
+            aria-hidden
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </div>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search Chinese, pinyin, or English"
+            className="w-full pl-9 pr-9 py-2 rounded-full text-sm outline-none transition-colors"
+            style={{
+              background: 'var(--bg-inset)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border)',
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center surface-hover transition-colors"
+              style={{ color: 'var(--text-tertiary)' }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
 
       {sentences.length > 0 && (
         <div className="mb-4 space-y-2">

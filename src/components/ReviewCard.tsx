@@ -36,7 +36,7 @@ const SPEED_OPTIONS = [
 ] as const;
 
 export function ReviewCard() {
-  const { currentCard, isFlipped, flip, next, prev, remaining, undoInfo, clearUndo } = useReviewStore();
+  const { currentCard, isFlipped, flip, next, prev, remaining, undoInfo, clearUndo, isFreeReview, requeueCurrent } = useReviewStore();
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
   const [editingTags, setEditingTags] = useState(false);
@@ -149,7 +149,9 @@ export function ReviewCard() {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3" style={{ color: 'var(--text-tertiary)' }}>
         {remaining() === 0
-          ? 'No cards to review. Add some sentences first!'
+          ? isFreeReview
+            ? 'All done — nothing left in this free-review session.'
+            : 'No cards to review. Add some sentences first!'
           : 'Loading...'}
         {remaining() === 0 && undoInfo && (
           <button
@@ -279,6 +281,70 @@ export function ReviewCard() {
       setPendingRating(null);
     }
   };
+
+  const handleGotIt = () => {
+    setRateError(null);
+    next();
+  };
+  const handleAgainLater = () => {
+    setRateError(null);
+    requeueCurrent();
+  };
+
+  const actionBar = isFreeReview ? (
+    <div className="mt-6 grid grid-cols-2 gap-2">
+      <button
+        onClick={handleAgainLater}
+        className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+        style={{
+          background: 'color-mix(in srgb, var(--rating-again) 15%, var(--bg-surface))',
+          color: 'var(--rating-again)',
+        }}
+        title="Send this card to the back of the queue"
+      >
+        Again later
+      </button>
+      <button
+        onClick={handleGotIt}
+        className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+        style={{
+          background: 'color-mix(in srgb, var(--rating-good) 15%, var(--bg-surface))',
+          color: 'var(--rating-good)',
+        }}
+      >
+        Got it
+      </button>
+    </div>
+  ) : (
+    <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {([
+        { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
+        { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
+        { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
+        { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
+      ]).map((btn) => {
+        const isSelected = pendingRating === btn.rating;
+        const isDisabled = pendingRating !== null || undoing;
+        return (
+          <button
+            key={btn.rating}
+            onClick={() => handleRate(btn.rating)}
+            disabled={isDisabled}
+            className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+            style={{
+              background: isSelected
+                ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
+                : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
+              color: isSelected ? 'var(--text-inverted)' : btn.color,
+              opacity: isDisabled && !isSelected ? 0.4 : 1,
+            }}
+          >
+            {btn.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -441,36 +507,9 @@ export function ReviewCard() {
 
               {/* Rating buttons — appear once a comparison exists; user grades themselves */}
               {comparison ? (
-                <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {([
-                    { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
-                    { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
-                    { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
-                    { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
-                  ]).map((btn) => {
-                    const isSelected = pendingRating === btn.rating;
-                    const isDisabled = pendingRating !== null || undoing;
-                    return (
-                      <button
-                        key={btn.rating}
-                        onClick={() => handleRate(btn.rating)}
-                        disabled={isDisabled}
-                        className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
-                        style={{
-                          background: isSelected
-                            ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
-                            : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
-                          color: isSelected ? 'var(--text-inverted)' : btn.color,
-                          opacity: isDisabled && !isSelected ? 0.4 : 1,
-                        }}
-                      >
-                        {btn.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                actionBar
               ) : (
-                undoInfo && (
+                !isFreeReview && undoInfo && (
                   <button
                     onClick={handleUndo}
                     disabled={undoing || pendingRating !== null}
@@ -738,35 +777,7 @@ export function ReviewCard() {
               </p>
             )}
 
-            {/* Rating buttons */}
-            <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {([
-                { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
-                { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
-                { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
-                { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
-              ]).map((btn) => {
-                const isSelected = pendingRating === btn.rating;
-                const isDisabled = pendingRating !== null || undoing;
-                return (
-                  <button
-                    key={btn.rating}
-                    onClick={() => handleRate(btn.rating)}
-                    disabled={isDisabled}
-                    className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
-                    style={{
-                      background: isSelected
-                        ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
-                        : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
-                      color: isSelected ? 'var(--text-inverted)' : btn.color,
-                      opacity: isDisabled && !isSelected ? 0.4 : 1,
-                    }}
-                  >
-                    {btn.label}
-                  </button>
-                );
-              })}
-            </div>
+            {actionBar}
           </>
         )}
         </>

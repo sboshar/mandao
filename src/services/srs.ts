@@ -195,6 +195,52 @@ export async function getReviewQueue(
   return [...duelearning, ...dueReview, ...dueNew];
 }
 
+export interface FreeReviewQueueArgs {
+  deckId: string;
+  mode: ReviewMode | 'both';
+  /** Restrict to these sentence IDs (e.g. selected on BrowsePage). */
+  sentenceIds?: string[] | null;
+  /** Restrict to sentences carrying any of these tags. Ignored if sentenceIds is set. */
+  tagFilter?: string[] | null;
+  shuffle?: boolean;
+  /** Optional cap on queue length. */
+  limit?: number | null;
+}
+
+/**
+ * Build a queue for free review. Unlike {@link getReviewQueue} this ignores
+ * due dates and daily limits — the user is opting in to drill specific cards.
+ * Cards returned here are NEVER passed to FSRS scheduling; the caller must
+ * skip {@link reviewCard} writes.
+ */
+export async function getFreeReviewQueue(args: FreeReviewQueueArgs): Promise<SrsCard[]> {
+  const { deckId, mode, sentenceIds, tagFilter, shuffle = true, limit } = args;
+
+  let restrictSentenceIds: Set<string> | null = null;
+  if (sentenceIds && sentenceIds.length > 0) {
+    restrictSentenceIds = new Set(sentenceIds);
+  } else if (tagFilter && tagFilter.length > 0) {
+    const tagged = await repo.getSentencesByTags(tagFilter);
+    restrictSentenceIds = new Set(tagged.map((s) => s.id));
+  }
+
+  const all = await repo.getSrsCardsByDeckAndStates(deckId, [0, 1, 2, 3]);
+  let filtered = all.filter((c) => mode === 'both' || c.reviewMode === mode);
+  if (restrictSentenceIds) {
+    filtered = filtered.filter((c) => restrictSentenceIds!.has(c.sentenceId));
+  }
+
+  if (shuffle) {
+    for (let i = filtered.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+    }
+  }
+
+  if (limit && limit > 0) filtered = filtered.slice(0, limit);
+  return filtered;
+}
+
 /** Get counts for dashboard display */
 export async function getDueCounts(
   deckId: string

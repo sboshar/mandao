@@ -5,6 +5,7 @@ import { hydrateLocalDb, isHydrated } from './db/hydrate';
 import { runSync, startSyncListeners, stopSyncListeners } from './db/syncEngine';
 import { DashboardPage } from './pages/DashboardPage';
 import { ReviewPage } from './pages/ReviewPage';
+import { FreeReviewPage } from './pages/FreeReviewPage';
 import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
@@ -171,6 +172,7 @@ function App() {
           />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/review/:deckId" element={<ReviewPage />} />
+          <Route path="/free-review" element={<FreeReviewPage />} />
           <Route path="/add" element={<AddSentencePage />} />
           <Route path="/browse" element={<BrowsePage />} />
           <Route path="/graph" element={<GraphPage />} />
