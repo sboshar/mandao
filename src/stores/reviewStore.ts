@@ -69,6 +69,12 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   requeueCurrent: () => {
     const { queue, currentIndex } = get();
     if (currentIndex >= queue.length) return;
+    // Only one unconsumed card left: requeueing would put it right back at currentIndex
+    // and trap the user. Treat "Again later" as "next" and end the session instead.
+    if (queue.length - currentIndex <= 1) {
+      set({ currentIndex: queue.length, isFlipped: false, undoInfo: null });
+      return;
+    }
     const card = queue[currentIndex];
     const next = [...queue.slice(0, currentIndex), ...queue.slice(currentIndex + 1), card];
     // currentIndex stays — what's now at this slot is the next card.

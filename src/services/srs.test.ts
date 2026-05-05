@@ -1,6 +1,17 @@
-import { describe, it, expect } from 'vitest';
-import { sentenceMasteryFromCards, sentenceMasteryForMode, groupCardsBySentence } from './srs';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  sentenceMasteryFromCards,
+  sentenceMasteryForMode,
+  groupCardsBySentence,
+  getFreeReviewQueue,
+} from './srs';
 import type { SrsCard, ReviewMode } from '../db/schema';
+
+vi.mock('../db/repo', () => ({
+  getSrsCardsByDeckAndStates: vi.fn(),
+}));
+
+import * as repo from '../db/repo';
 
 function card(overrides: Partial<SrsCard>): SrsCard {
   return {
@@ -79,5 +90,125 @@ describe('groupCardsBySentence', () => {
     const grouped = groupCardsBySentence(cards);
     expect(grouped.get('s1')?.map((c) => c.id)).toEqual(['a', 'c']);
     expect(grouped.get('s2')?.map((c) => c.id)).toEqual(['b']);
+  });
+});
+
+describe('getFreeReviewQueue', () => {
+  const mockedRepo = vi.mocked(repo);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns [] when sentenceIds is empty', async () => {
+    const result = await getFreeReviewQueue({
+      deckId: 'd1',
+      mode: 'both',
+      sentenceIds: [],
+    });
+    expect(result).toEqual([]);
+    expect(mockedRepo.getSrsCardsByDeckAndStates).not.toHaveBeenCalled();
+  });
+
+  it('ignores due dates — includes cards due far in the future', async () => {
+    const farFuture = Date.now() + 1000 * 60 * 60 * 24 * 365; // 1 year
+    const cards = [
+      card({ id: 'c1', sentenceId: 's1', due: farFuture, state: 2 }),
+      card({ id: 'c2', sentenceId: 's2', due: farFuture, state: 2 }),
+    ];
+    mockedRepo.getSrsCardsByDeckAndStates.mockResolvedValue(cards);
+
+    const result = await getFreeReviewQueue({
+      deckId: 'd1',
+      mode: 'both',
+      sentenceIds: ['s1', 's2'],
+      shuffle: false,
+    });
+    expect(result).toHaveLength(2);
+    expect(result.map((c) => c.id).sort()).toEqual(['c1', 'c2']);
+  });
+
+  it('filters to sentenceIds', async () => {
+    const cards = [
+      card({ id: 'c1', sentenceId: 's1' }),
+      card({ id: 'c2', sentenceId: 's2' }),
+      card({ id: 'c3', sentenceId: 's3' }),
+      card({ id: 'c4', sentenceId: 's4' }),
+      card({ id: 'c5', sentenceId: 's5' }),
+    ];
+    mockedRepo.getSrsCardsByDeckAndStates.mockResolvedValue(cards);
+
+    const result = await getFreeReviewQueue({
+      deckId: 'd1',
+      mode: 'both',
+      sentenceIds: ['s2', 's4'],
+      shuffle: false,
+    });
+    expect(result.map((c) => c.id).sort()).toEqual(['c2', 'c4']);
+  });
+
+  it("filters by mode when not 'both'", async () => {
+    const cards: SrsCard[] = [
+      card({ id: 'c1', sentenceId: 's1', reviewMode: 'en-to-zh' }),
+      card({ id: 'c2', sentenceId: 's1', reviewMode: 'zh-to-en' }),
+      card({ id: 'c3', sentenceId: 's2', reviewMode: 'en-to-zh' }),
+      card({ id: 'c4', sentenceId: 's2', reviewMode: 'listen-type' }),
+    ];
+    mockedRepo.getSrsCardsByDeckAndStates.mockResolvedValue(cards);
+
+    const result = await getFreeReviewQueue({
+      deckId: 'd1',
+      mode: 'en-to-zh',
+      sentenceIds: ['s1', 's2'],
+      shuffle: false,
+    });
+    expect(result.map((c) => c.id).sort()).toEqual(['c1', 'c3']);
+    expect(result.every((c) => c.reviewMode === 'en-to-zh')).toBe(true);
+  });
+
+  it("includes all modes when mode is 'both'", async () => {
+    const allModes: ReviewMode[] = [
+      'en-to-zh',
+      'zh-to-en',
+      'py-to-en-zh',
+      'listen-type',
+      'speak',
+    ];
+    const cards: SrsCard[] = allModes.map((m, i) =>
+      card({ id: `c${i}`, sentenceId: 's1', reviewMode: m }),
+    );
+    mockedRepo.getSrsCardsByDeckAndStates.mockResolvedValue(cards);
+
+    const result = await getFreeReviewQueue({
+      deckId: 'd1',
+      mode: 'both',
+      sentenceIds: ['s1'],
+      shuffle: false,
+    });
+    const presentModes = new Set(result.map((c) => c.reviewMode));
+    for (const m of allModes) {
+      expect(presentModes.has(m)).toBe(true);
+    }
+  });
+
+  it('respects limit', async () => {
+    const cards = [
+      card({ id: 'c1', sentenceId: 's1' }),
+      card({ id: 'c2', sentenceId: 's2' }),
+      card({ id: 'c3', sentenceId: 's3' }),
+      card({ id: 'c4', sentenceId: 's4' }),
+      card({ id: 'c5', sentenceId: 's5' }),
+    ];
+    mockedRepo.getSrsCardsByDeckAndStates.mockResolvedValue(cards);
+
+    const result = await getFreeReviewQueue({
+      deckId: 'd1',
+      mode: 'both',
+      sentenceIds: ['s1', 's2', 's3', 's4', 's5'],
+      shuffle: false,
+      limit: 3,
+    });
+    expect(result.length).toBeLessThanOrEqual(3);
+    expect(result).toHaveLength(3);
   });
 });

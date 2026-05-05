@@ -47,6 +47,11 @@ export function FreeReviewPage() {
   // Clear shared review store on unmount so /review later doesn't see free-review state.
   useEffect(() => () => reset(), []);
 
+  // Clear the "no cards match for this mode" message when the user switches modes.
+  useEffect(() => {
+    setEmpty(false);
+  }, [mode]);
+
   const toggleCart = (sentenceId: string) => {
     setEmpty(false);
     setCart((prev) => {
@@ -74,6 +79,20 @@ export function FreeReviewPage() {
     }
     return base;
   }, [sentences, filterTags, search]);
+
+  const allFilteredInCart =
+    filteredSentences.length > 0 && filteredSentences.every((s) => cart.has(s.id));
+
+  const toggleAllFiltered = () => {
+    if (filteredSentences.length === 0) return;
+    setEmpty(false);
+    setCart((prev) => {
+      const next = new Set(prev);
+      if (allFilteredInCart) filteredSentences.forEach((s) => next.delete(s.id));
+      else filteredSentences.forEach((s) => next.add(s.id));
+      return next;
+    });
+  };
 
   const start = async () => {
     if (loading || cart.size === 0) return;
@@ -132,6 +151,25 @@ export function FreeReviewPage() {
           onChange={setFilterTags}
           className="mb-3"
         />
+
+        {filteredSentences.length > 0 && (
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              {filteredSentences.length} match{filteredSentences.length === 1 ? '' : 'es'}
+            </span>
+            <button
+              onClick={toggleAllFiltered}
+              className="text-xs px-2.5 py-1 rounded-full transition-colors"
+              style={
+                allFilteredInCart
+                  ? { background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }
+                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
+              }
+            >
+              {allFilteredInCart ? 'Deselect all' : 'Select all'}
+            </button>
+          </div>
+        )}
 
         {/* Sentence list */}
         <div className="space-y-1.5">
