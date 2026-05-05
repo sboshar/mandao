@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { deleteTutorialSentences } from '../services/ingestion';
+import { hasNonTutorialSentence } from '../db/repo';
 
 /**
  * Tutorial steps:
@@ -45,3 +46,16 @@ export const useTutorialStore = create<TutorialState>((set) => ({
     set({ step: MAX_STEP as TutorialStep });
   },
 }));
+
+/**
+ * Skip the tutorial on devices where the user already has data, so a
+ * returning user signing in on a fresh browser doesn't get re-onboarded.
+ * No-op if any explicit progress is already persisted on this device —
+ * we don't want to advance a user mid-tutorial.
+ */
+export async function initTutorialFromUserData(): Promise<void> {
+  if (localStorage.getItem(STORAGE_KEY) !== null) return;
+  if (!(await hasNonTutorialSentence())) return;
+  localStorage.setItem(STORAGE_KEY, String(MAX_STEP));
+  useTutorialStore.setState({ step: MAX_STEP as TutorialStep });
+}

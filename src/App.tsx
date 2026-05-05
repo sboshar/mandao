@@ -17,7 +17,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { SyncIndicator } from './components/SyncIndicator';
 import { SyncErrorBanner } from './components/SyncErrorBanner';
 import { InstallBanner } from './components/InstallBanner';
-import { useTutorialStore } from './stores/tutorialStore';
+import { useTutorialStore, initTutorialFromUserData } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
 import './stores/themeStore';
 
@@ -56,6 +56,7 @@ function App() {
           setHydrating(false);
         }
         await loadCedict();
+        await initTutorialFromUserData();
         if (!cancelled) setReady(true);
       } catch (e: any) {
         if (cancelled) return;

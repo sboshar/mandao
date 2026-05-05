@@ -246,6 +246,13 @@ export async function getSentencesCount(): Promise<number> {
   return localDb.sentences.count();
 }
 
+export async function hasNonTutorialSentence(): Promise<boolean> {
+  const row = await localDb.sentences
+    .filter((s) => s.source !== 'tutorial')
+    .first();
+  return row !== undefined;
+}
+
 export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {
   if (ids.length === 0) return [];
   const unique = [...new Set(ids)];
