@@ -11,7 +11,7 @@ interface ReviewState {
   isFlipped: boolean;
   isLoading: boolean;
   undoInfo: UndoInfo | null;
-  /** When true, ratings/actions must NOT write to FSRS. Set by FreeReviewPage. */
+  /** When true, ratings/actions must NOT write to FSRS. */
   isFreeReview: boolean;
 
   setQueue: (cards: SrsCard[], opts?: { freeReview?: boolean }) => void;

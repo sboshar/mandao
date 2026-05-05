@@ -198,12 +198,8 @@ export async function getReviewQueue(
 export interface FreeReviewQueueArgs {
   deckId: string;
   mode: ReviewMode | 'both';
-  /** Restrict to these sentence IDs (e.g. selected on BrowsePage). */
-  sentenceIds?: string[] | null;
-  /** Restrict to sentences carrying any of these tags. Ignored if sentenceIds is set. */
-  tagFilter?: string[] | null;
+  sentenceIds: string[];
   shuffle?: boolean;
-  /** Optional cap on queue length. */
   limit?: number | null;
 }
 
@@ -214,21 +210,14 @@ export interface FreeReviewQueueArgs {
  * skip {@link reviewCard} writes.
  */
 export async function getFreeReviewQueue(args: FreeReviewQueueArgs): Promise<SrsCard[]> {
-  const { deckId, mode, sentenceIds, tagFilter, shuffle = true, limit } = args;
+  const { deckId, mode, sentenceIds, shuffle = true, limit } = args;
+  if (sentenceIds.length === 0) return [];
 
-  let restrictSentenceIds: Set<string> | null = null;
-  if (sentenceIds && sentenceIds.length > 0) {
-    restrictSentenceIds = new Set(sentenceIds);
-  } else if (tagFilter && tagFilter.length > 0) {
-    const tagged = await repo.getSentencesByTags(tagFilter);
-    restrictSentenceIds = new Set(tagged.map((s) => s.id));
-  }
-
+  const restrict = new Set(sentenceIds);
   const all = await repo.getSrsCardsByDeckAndStates(deckId, [0, 1, 2, 3]);
-  let filtered = all.filter((c) => mode === 'both' || c.reviewMode === mode);
-  if (restrictSentenceIds) {
-    filtered = filtered.filter((c) => restrictSentenceIds!.has(c.sentenceId));
-  }
+  let filtered = all.filter(
+    (c) => (mode === 'both' || c.reviewMode === mode) && restrict.has(c.sentenceId)
+  );
 
   if (shuffle) {
     for (let i = filtered.length - 1; i > 0; i--) {

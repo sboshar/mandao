@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import * as repo from '../db/repo';
 import type { Sentence } from '../db/schema';
@@ -16,13 +16,11 @@ import { useTutorialStore } from '../stores/tutorialStore';
 import { TutorialBanner } from '../components/TutorialBanner';
 import type { SentenceToken, Meaning, SrsCard } from '../db/schema';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
+import { normalizePinyin } from '../lib/pinyinCompare';
+import { TagFilterRow } from '../components/TagFilterRow';
+import { SearchInput } from '../components/SearchInput';
 
 type TokenWithMeaning = SentenceToken & { meaning: Meaning };
-
-/** Strip diacritics, digits, whitespace; lowercase. Lets "hua" match "huā". */
-function normalizePinyin(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[\s0-9]/g, '');
-}
 
 const SORT_DIMENSION_LABELS: Record<ReviewMode, string> = {
   'en-to-zh': 'EN→ZH',
@@ -77,7 +75,6 @@ export function BrowsePage() {
   const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [filterTags, setFilterTags] = useState<string[]>([]);
-  const [showFilter, setShowFilter] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [deleteAllInput, setDeleteAllInput] = useState('');
@@ -86,7 +83,6 @@ export function BrowsePage() {
   const [sortDimension, setSortDimension] = useState<'overall' | ReviewMode>('overall');
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     repo.getSentencesOrderByCreatedDesc().then(setSentences);
@@ -110,12 +106,6 @@ export function BrowsePage() {
       prev.map((s) => (s.id === sentenceId ? { ...s, tags: newTags } : s))
     );
     getAllTags().then(setAllTags);
-  };
-
-  const toggleFilterTag = (tag: string) => {
-    setFilterTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-    );
   };
 
   const filteredSentences = useMemo(() => {
@@ -193,7 +183,6 @@ export function BrowsePage() {
                 const next = !searchOpen;
                 setSearchOpen(next);
                 if (!next) setSearch('');
-                else setTimeout(() => searchInputRef.current?.focus(), 0);
               }}
               aria-label="Toggle search"
               aria-pressed={searchOpen}
@@ -233,47 +222,13 @@ export function BrowsePage() {
       </TutorialBanner>
 
       {sentences.length > 0 && searchOpen && (
-        <div className="mb-3 relative">
-          <div
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-            style={{ color: 'var(--text-tertiary)' }}
-            aria-hidden
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </div>
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search Chinese, pinyin, or English"
-            className="w-full pl-9 pr-9 py-2 rounded-full text-sm outline-none transition-colors"
-            style={{
-              background: 'var(--bg-inset)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border)',
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch('')}
-              aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center surface-hover transition-colors"
-              style={{ color: 'var(--text-tertiary)' }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          )}
-        </div>
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search Chinese, pinyin, or English"
+          autoFocus
+          className="mb-3"
+        />
       )}
 
       {sentences.length > 0 && (
@@ -321,47 +276,12 @@ export function BrowsePage() {
         </div>
       )}
 
-      {allTags.length > 0 && (
-        <div className="mb-4">
-          <button
-            onClick={() => setShowFilter(!showFilter)}
-            className="text-xs px-2.5 py-1 rounded-full transition-colors"
-            style={filterTags.length > 0
-              ? { background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }
-              : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
-            }
-          >
-            Filter by tag{filterTags.length > 0 ? ` (${filterTags.length})` : ''} {showFilter ? '\u25B2' : '\u25BC'}
-          </button>
-          {showFilter && (
-            <div className="flex flex-wrap items-center gap-1.5 mt-2">
-              <button
-                onClick={() => setFilterTags([])}
-                className="px-2 py-0.5 text-xs rounded-full transition-colors"
-                style={filterTags.length === 0
-                  ? { background: 'var(--text-primary)', color: 'var(--bg-surface)' }
-                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
-                }
-              >
-                All
-              </button>
-              {allTags.map((tag) => (
-                <button
-                  key={tag}
-                  onClick={() => toggleFilterTag(tag)}
-                  className="px-2 py-0.5 text-xs rounded-full transition-colors"
-                  style={filterTags.includes(tag)
-                    ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
-                    : { background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-surface))', color: 'var(--accent)' }
-                  }
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <TagFilterRow
+        allTags={allTags}
+        selected={filterTags}
+        onChange={setFilterTags}
+        className="mb-4"
+      />
 
       {sentences.length === 0 ? (
         <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>

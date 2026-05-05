@@ -146,13 +146,13 @@ export function ReviewCard() {
   };
 
   if (!card || !sentence) {
+    let message: string;
+    if (remaining() > 0) message = 'Loading...';
+    else if (isFreeReview) message = 'All done — nothing left in this free-review session.';
+    else message = 'No cards to review. Add some sentences first!';
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3" style={{ color: 'var(--text-tertiary)' }}>
-        {remaining() === 0
-          ? isFreeReview
-            ? 'All done — nothing left in this free-review session.'
-            : 'No cards to review. Add some sentences first!'
-          : 'Loading...'}
+        {message}
         {remaining() === 0 && undoInfo && (
           <button
             onClick={handleUndo}

@@ -5,6 +5,14 @@
  * and plain letters (ni hao) all compare sensibly.
  */
 
+/**
+ * Strip diacritics, digits, whitespace; lowercase. Lets a typed substring
+ * match across either pinyin format ("hua" matches "huā" and "hua1").
+ */
+export function normalizePinyin(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[\s0-9]/g, '');
+}
+
 // ---- tone-mark ↔ tone-number mapping -----------------------------------
 
 const DIACRITIC_TO_BASE: Record<string, [string, number]> = {
