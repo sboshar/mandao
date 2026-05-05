@@ -675,8 +675,9 @@ function AnkiSection() {
     return () => window.removeEventListener('mouseup', handler);
   }, []);
 
-  // Find which notes already exist in the app so we can disable their rows.
-  // Recomputes when the user picks a different Chinese field.
+  // Pre-check which Anki notes are already in the app so the picker can
+  // disable them. Mirrors the runtime dedup at ankiApkg.ts (exact `chinese`
+  // match) so what's dimmed here matches what import would skip.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -684,23 +685,18 @@ function AnkiSection() {
         if (!cancelled) setExistingNoteIds(new Set());
         return;
       }
-      const keys = apkgInfo.notes
-        .map((n) => (n.fields[chineseField] ?? '').trim())
-        .filter((k) => k.length > 0);
-      const unique = Array.from(new Set(keys));
-      const matched = new Set<string>();
-      if (unique.length > 0) {
-        const rows = await localDb.sentences.where('chinese').anyOf(unique).toArray();
-        for (const r of rows) matched.add(r.chinese);
-      }
+      const chineseOf = (n: typeof apkgInfo.notes[number]) =>
+        (n.fields[chineseField] ?? '').trim();
+      const keys = apkgInfo.notes.map(chineseOf).filter((k) => k.length > 0);
+      const rows = await repo.getSentencesByChineseList(keys);
       if (cancelled) return;
+      const matched = new Set(rows.map((r) => r.chinese));
       const existing = new Set<number>();
       for (const note of apkgInfo.notes) {
-        const c = (note.fields[chineseField] ?? '').trim();
+        const c = chineseOf(note);
         if (c && matched.has(c)) existing.add(note.id);
       }
       setExistingNoteIds(existing);
-      // Drop any existing-note IDs from the current selection.
       setSelectedNotes((prev) => {
         if (prev.size === 0) return prev;
         let changed = false;
@@ -937,7 +933,13 @@ function AnkiSection() {
               </span>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setSelectedNotes(new Set(apkgInfo.notes.filter(n => !existingNoteIds.has(n.id)).map(n => n.id)))}
+                  onClick={() => setSelectedNotes(
+                    new Set(
+                      apkgInfo.notes
+                        .filter((n) => !existingNoteIds.has(n.id))
+                        .map((n) => n.id),
+                    ),
+                  )}
                   className="text-xs px-2 py-1 rounded transition-colors"
                   style={{ color: 'var(--accent)' }}
                 >
@@ -979,20 +981,20 @@ function AnkiSection() {
                 const display = note.fields[displayField] ?? '';
                 const isSelected = selectedNotes.has(note.id);
                 const isExisting = existingNoteIds.has(note.id);
+                const showSelected = isSelected && !isExisting;
 
                 return (
                   <div
                     key={note.id}
                     className={`flex items-center gap-3 px-3 py-2.5 ${isExisting ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                     style={{
-                      background: !isExisting && isSelected ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-surface))' : 'transparent',
+                      background: showSelected ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-surface))' : 'transparent',
                       borderBottom: '1px solid var(--border)',
                       opacity: isExisting ? 0.45 : 1,
                     }}
                     onMouseDown={isExisting ? undefined : (e) => {
                       e.preventDefault();
                       if (e.shiftKey && lastClickedIdx.current !== null) {
-                        // Shift-click: select range, skipping already-imported notes
                         const from = Math.min(lastClickedIdx.current, idx);
                         const to = Math.max(lastClickedIdx.current, idx);
                         setSelectedNotes(prev => {
@@ -1029,11 +1031,11 @@ function AnkiSection() {
                     <div
                       className="shrink-0 w-4 h-4 rounded border flex items-center justify-center"
                       style={{
-                        borderColor: !isExisting && isSelected ? 'var(--accent)' : 'var(--border)',
-                        background: !isExisting && isSelected ? 'var(--accent)' : 'transparent',
+                        borderColor: showSelected ? 'var(--accent)' : 'var(--border)',
+                        background: showSelected ? 'var(--accent)' : 'transparent',
                       }}
                     >
-                      {!isExisting && isSelected && (
+                      {showSelected && (
                         <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="2 6 5 9 10 3" />
                         </svg>

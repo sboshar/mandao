@@ -143,6 +143,10 @@ export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {
   return local.getSentencesByIds(ids);
 }
 
+export async function getSentencesByChineseList(chineseTexts: string[]): Promise<Sentence[]> {
+  return local.getSentencesByChineseList(chineseTexts);
+}
+
 export async function insertSentence(sentence: Sentence): Promise<void> {
   await local.insertSentence(sentence);
   // Enqueued as part of ingestBundle by the ingestion service.
