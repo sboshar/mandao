@@ -257,6 +257,12 @@ export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {
   return localDb.sentences.where('id').anyOf(unique).toArray();
 }
 
+export async function getSentencesByChineseList(chineseTexts: string[]): Promise<Sentence[]> {
+  if (chineseTexts.length === 0) return [];
+  const unique = [...new Set(chineseTexts)];
+  return localDb.sentences.where('chinese').anyOf(unique).toArray();
+}
+
 export async function insertSentence(sentence: Sentence): Promise<void> {
   await localDb.sentences.put(sentence);
 }

@@ -662,6 +662,7 @@ function AnkiSection() {
   const [audioField, setAudioField] = useState<number | null>(null);
   const [audioName, setAudioName] = useState('anki');
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
+  const [existingNoteIds, setExistingNoteIds] = useState<Set<number>>(new Set());
   const lastClickedIdx = useRef<number | null>(null);
   const dragSelectMode = useRef<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -673,6 +674,41 @@ function AnkiSection() {
     window.addEventListener('mouseup', handler);
     return () => window.removeEventListener('mouseup', handler);
   }, []);
+
+  // Pre-check which Anki notes are already in the app so the picker can
+  // disable them. Mirrors the runtime dedup at ankiApkg.ts (exact `chinese`
+  // match) so what's dimmed here matches what import would skip.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!apkgInfo) {
+        if (!cancelled) setExistingNoteIds(new Set());
+        return;
+      }
+      const chineseOf = (n: typeof apkgInfo.notes[number]) =>
+        (n.fields[chineseField] ?? '').trim();
+      const keys = apkgInfo.notes.map(chineseOf).filter((k) => k.length > 0);
+      const rows = await repo.getSentencesByChineseList(keys);
+      if (cancelled) return;
+      const matched = new Set(rows.map((r) => r.chinese));
+      const existing = new Set<number>();
+      for (const note of apkgInfo.notes) {
+        const c = chineseOf(note);
+        if (c && matched.has(c)) existing.add(note.id);
+      }
+      setExistingNoteIds(existing);
+      setSelectedNotes((prev) => {
+        if (prev.size === 0) return prev;
+        let changed = false;
+        const next = new Set(prev);
+        for (const id of existing) {
+          if (next.delete(id)) changed = true;
+        }
+        return changed ? next : prev;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [apkgInfo, chineseField]);
 
   const handleAnkiExport = async (format: 'text' | 'apkg') => {
     setAnkiExporting(true);
@@ -888,11 +924,22 @@ function AnkiSection() {
             {/* Select all / none */}
             <div className="flex items-center justify-between">
               <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                {selectedNotes.size} of {apkgInfo.notes.length} selected
+                {selectedNotes.size} of {apkgInfo.notes.length - existingNoteIds.size} selected
+                {existingNoteIds.size > 0 && (
+                  <span style={{ color: 'var(--text-tertiary)' }}>
+                    {' · '}{existingNoteIds.size} already imported
+                  </span>
+                )}
               </span>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setSelectedNotes(new Set(apkgInfo.notes.map(n => n.id)))}
+                  onClick={() => setSelectedNotes(
+                    new Set(
+                      apkgInfo.notes
+                        .filter((n) => !existingNoteIds.has(n.id))
+                        .map((n) => n.id),
+                    ),
+                  )}
                   className="text-xs px-2 py-1 rounded transition-colors"
                   style={{ color: 'var(--accent)' }}
                 >
@@ -933,25 +980,28 @@ function AnkiSection() {
               {apkgInfo.notes.map((note, idx) => {
                 const display = note.fields[displayField] ?? '';
                 const isSelected = selectedNotes.has(note.id);
+                const isExisting = existingNoteIds.has(note.id);
+                const showSelected = isSelected && !isExisting;
 
                 return (
                   <div
                     key={note.id}
-                    className="flex items-center gap-3 px-3 py-2.5 cursor-pointer"
+                    className={`flex items-center gap-3 px-3 py-2.5 ${isExisting ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                     style={{
-                      background: isSelected ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-surface))' : 'transparent',
+                      background: showSelected ? 'color-mix(in srgb, var(--accent) 8%, var(--bg-surface))' : 'transparent',
                       borderBottom: '1px solid var(--border)',
+                      opacity: isExisting ? 0.45 : 1,
                     }}
-                    onMouseDown={(e) => {
+                    onMouseDown={isExisting ? undefined : (e) => {
                       e.preventDefault();
                       if (e.shiftKey && lastClickedIdx.current !== null) {
-                        // Shift-click: select range
                         const from = Math.min(lastClickedIdx.current, idx);
                         const to = Math.max(lastClickedIdx.current, idx);
                         setSelectedNotes(prev => {
                           const next = new Set(prev);
                           for (let j = from; j <= to; j++) {
-                            next.add(apkgInfo.notes[j].id);
+                            const nid = apkgInfo.notes[j].id;
+                            if (!existingNoteIds.has(nid)) next.add(nid);
                           }
                           return next;
                         });
@@ -968,7 +1018,7 @@ function AnkiSection() {
                       }
                       lastClickedIdx.current = idx;
                     }}
-                    onMouseEnter={() => {
+                    onMouseEnter={isExisting ? undefined : () => {
                       if (dragSelectMode.current === null) return;
                       setSelectedNotes(prev => {
                         const next = new Set(prev);
@@ -981,19 +1031,24 @@ function AnkiSection() {
                     <div
                       className="shrink-0 w-4 h-4 rounded border flex items-center justify-center"
                       style={{
-                        borderColor: isSelected ? 'var(--accent)' : 'var(--border)',
-                        background: isSelected ? 'var(--accent)' : 'transparent',
+                        borderColor: showSelected ? 'var(--accent)' : 'var(--border)',
+                        background: showSelected ? 'var(--accent)' : 'transparent',
                       }}
                     >
-                      {isSelected && (
+                      {showSelected && (
                         <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="2 6 5 9 10 3" />
                         </svg>
                       )}
                     </div>
-                    <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                    <span className="text-sm flex-1 min-w-0 truncate" style={{ color: 'var(--text-primary)' }}>
                       {display || <span style={{ color: 'var(--text-tertiary)' }}>(empty)</span>}
                     </span>
+                    {isExisting && (
+                      <span className="text-xs shrink-0" style={{ color: 'var(--text-tertiary)' }}>
+                        Already imported
+                      </span>
+                    )}
                   </div>
                 );
               })}
