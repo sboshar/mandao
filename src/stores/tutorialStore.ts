@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { deleteTutorialSentences } from '../services/ingestion';
-import { hasNonTutorialSentence } from '../db/repo';
+import { hasSentenceNotFromSource } from '../db/repo';
+import { TUTORIAL_SOURCE } from '../data/tutorialSentences';
 
 /**
  * Tutorial steps:
@@ -53,9 +54,9 @@ export const useTutorialStore = create<TutorialState>((set) => ({
  * No-op if any explicit progress is already persisted on this device —
  * we don't want to advance a user mid-tutorial.
  */
-export async function initTutorialFromUserData(): Promise<void> {
+export async function skipTutorialIfReturningUser(): Promise<void> {
   if (localStorage.getItem(STORAGE_KEY) !== null) return;
-  if (!(await hasNonTutorialSentence())) return;
+  if (!(await hasSentenceNotFromSource(TUTORIAL_SOURCE))) return;
   localStorage.setItem(STORAGE_KEY, String(MAX_STEP));
   useTutorialStore.setState({ step: MAX_STEP as TutorialStep });
 }

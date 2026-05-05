@@ -1,11 +1,13 @@
 import type { SentenceInput } from '../services/ingestion';
 
+export const TUTORIAL_SOURCE = 'tutorial';
+
 /** The first sentence is the one users walk through adding manually. */
 export const TUTORIAL_SENTENCES: SentenceInput[] = [
   {
     chinese: '她花了很多钱买花。',
     english: 'She spent a lot of money buying flowers.',
-    source: 'tutorial',
+    source: TUTORIAL_SOURCE,
     tokens: [
       { surfaceForm: '她', pinyinNumeric: 'ta1', english: 'she', partOfSpeech: 'pronoun' },
       { surfaceForm: '花', pinyinNumeric: 'hua1', english: 'to spend', partOfSpeech: 'verb' },
@@ -20,7 +22,7 @@ export const TUTORIAL_SENTENCES: SentenceInput[] = [
   {
     chinese: '你好！你是哪国人？',
     english: 'Hello! What country are you from?',
-    source: 'tutorial',
+    source: TUTORIAL_SOURCE,
     tokens: [
       { surfaceForm: '你', pinyinNumeric: 'ni3', english: 'you', partOfSpeech: 'pronoun' },
       { surfaceForm: '好', pinyinNumeric: 'hao3', english: 'good', partOfSpeech: 'adj' },
@@ -34,7 +36,7 @@ export const TUTORIAL_SENTENCES: SentenceInput[] = [
   {
     chinese: '这件事不是他做的。',
     english: 'This matter was not something he did.',
-    source: 'tutorial',
+    source: TUTORIAL_SOURCE,
     tokens: [
       { surfaceForm: '这', pinyinNumeric: 'zhe4', english: 'this', partOfSpeech: 'pronoun' },
       { surfaceForm: '件', pinyinNumeric: 'jian4', english: 'measure word for matters', partOfSpeech: 'measure' },

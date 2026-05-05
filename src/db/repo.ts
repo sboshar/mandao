@@ -139,8 +139,8 @@ export async function getSentencesCount(): Promise<number> {
   return local.getSentencesCount();
 }
 
-export async function hasNonTutorialSentence(): Promise<boolean> {
-  return local.hasNonTutorialSentence();
+export async function hasSentenceNotFromSource(source: string): Promise<boolean> {
+  return local.hasSentenceNotFromSource(source);
 }
 
 export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {

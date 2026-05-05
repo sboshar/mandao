@@ -246,10 +246,8 @@ export async function getSentencesCount(): Promise<number> {
   return localDb.sentences.count();
 }
 
-export async function hasNonTutorialSentence(): Promise<boolean> {
-  const row = await localDb.sentences
-    .filter((s) => s.source !== 'tutorial')
-    .first();
+export async function hasSentenceNotFromSource(source: string): Promise<boolean> {
+  const row = await localDb.sentences.where('source').notEqual(source).first();
   return row !== undefined;
 }
 
