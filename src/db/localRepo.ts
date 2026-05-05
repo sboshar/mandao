@@ -246,6 +246,11 @@ export async function getSentencesCount(): Promise<number> {
   return localDb.sentences.count();
 }
 
+export async function hasSentenceNotFromSource(source: string): Promise<boolean> {
+  const row = await localDb.sentences.where('source').notEqual(source).first();
+  return row !== undefined;
+}
+
 export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {
   if (ids.length === 0) return [];
   const unique = [...new Set(ids)];

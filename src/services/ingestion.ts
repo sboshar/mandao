@@ -21,6 +21,7 @@ import type {
   MeaningFlag,
 } from '../db/schema';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
+import { TUTORIAL_SOURCE } from '../data/tutorialSentences';
 
 /**
  * Accumulator for tracking newly created entities during ingestion,
@@ -499,7 +500,7 @@ export { updateSentenceTags } from '../db/repo';
 /** Delete all tutorial sentences and their associated tokens and SRS cards */
 export async function deleteTutorialSentences(): Promise<void> {
   // Sentence deletion cascades to tokens, SRS cards, and review logs.
-  await repo.deleteSentencesBySource('tutorial');
+  await repo.deleteSentencesBySource(TUTORIAL_SOURCE);
 }
 
 /** Get all meanings that share the same pinyin (for pinyin card) */

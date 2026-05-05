@@ -139,6 +139,10 @@ export async function getSentencesCount(): Promise<number> {
   return local.getSentencesCount();
 }
 
+export async function hasSentenceNotFromSource(source: string): Promise<boolean> {
+  return local.hasSentenceNotFromSource(source);
+}
+
 export async function getSentencesByIds(ids: string[]): Promise<Sentence[]> {
   return local.getSentencesByIds(ids);
 }
