@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { useReviewStore } from '../stores/reviewStore';
-import { getReviewQueue } from '../services/srs';
+import { getReviewQueue, getStudyAheadQueue } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
@@ -37,16 +37,15 @@ export function ReviewPage() {
     getAllTags().then(setAllTags);
   }, []);
 
-  const startReview = async (selectedMode: ModeOption) => {
+  const startReview = async (selectedMode: ModeOption, studyAhead?: number | 'all') => {
     setLoading(true);
     setLoadingMode(selectedMode);
     try {
       const effectiveDeckId = deckId ?? (await ensureDefaultDeck());
-      const queue = await getReviewQueue(
-        effectiveDeckId,
-        selectedMode,
-        filterTags.length > 0 ? filterTags : null
-      );
+      const tags = filterTags.length > 0 ? filterTags : null;
+      const queue = studyAhead !== undefined
+        ? await getStudyAheadQueue(effectiveDeckId, selectedMode, tags, studyAhead === 'all' ? undefined : studyAhead)
+        : await getReviewQueue(effectiveDeckId, selectedMode, tags);
       setQueue(queue);
       setStarted(true);
     } finally {
@@ -58,10 +57,15 @@ export function ReviewPage() {
   // Auto-start if mode passed via query param from dashboard
   useEffect(() => {
     const modeParam = searchParams.get('mode') as ModeOption | null;
+    const aheadParam = searchParams.get('ahead');
     if (modeParam && !autoStarted.current) {
       autoStarted.current = true;
       setMode(modeParam);
-      startReview(modeParam);
+      const studyAhead: number | 'all' | undefined =
+        aheadParam === null ? undefined :
+        aheadParam === 'all' ? 'all' :
+        Math.max(0, parseInt(aheadParam, 10) || 0);
+      startReview(modeParam, studyAhead);
     }
   }, []);
 

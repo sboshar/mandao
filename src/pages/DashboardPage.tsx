@@ -5,6 +5,7 @@ import * as repo from '../db/repo';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { useAuthStore } from '../stores/authStore';
+import { addNewLimitBumpToday, addReviewLimitBumpToday } from '../lib/dailyLimits';
 import type { ReviewMode } from '../db/schema';
 
 type ModeOption = ReviewMode | 'all';
@@ -19,6 +20,30 @@ const MODE_LABEL: Record<ModeOption, string> = {
   'speak': 'Speak',
 };
 
+interface CustomStudyRowProps<T extends string | number> {
+  label: string;
+  options: { label: string; value: T }[];
+  onPick: (value: T) => void;
+}
+
+function CustomStudyRow<T extends string | number>({ label, options, onPick }: CustomStudyRowProps<T>) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs flex-1" style={{ color: 'var(--text-secondary)' }}>{label}</span>
+      {options.map((opt) => (
+        <button
+          key={opt.label}
+          onClick={() => onPick(opt.value)}
+          className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
+          style={{ background: 'transparent', color: 'var(--accent)', border: '1px solid var(--accent)' }}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -26,6 +51,8 @@ export function DashboardPage() {
   const [mode, setMode] = useState<ModeOption>('all');
   const [totalSentences, setTotalSentences] = useState(0);
   const [totalMeanings, setTotalMeanings] = useState(0);
+  const [deckId, setDeckId] = useState<string | null>(null);
+  const [reloadFlag, setReloadFlag] = useState(0);
 
   const tutorialStep = useTutorialStore((s) => s.step);
   const advanceTutorial = useTutorialStore((s) => s.advance);
@@ -33,21 +60,38 @@ export function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     async function load() {
-      const deckId = await repo.ensureDefaultDeck();
-      setBreakdown(await getDueBreakdown(deckId));
+      const id = await repo.ensureDefaultDeck();
+      setDeckId(id);
+      setBreakdown(await getDueBreakdown(id));
       setTotalSentences(await repo.getSentencesCount());
       setTotalMeanings(await repo.getMeaningsCount());
     }
     load();
-  }, [user]);
+  }, [user, reloadFlag]);
 
-  const states = breakdown?.byModeAndState[mode] ?? { newCount: 0, learningCount: 0, reviewCount: 0 };
+  const states = breakdown?.byModeAndState[mode] ?? {
+    newCount: 0, learningCount: 0, reviewCount: 0,
+    newBacklog: 0, reviewBacklog: 0, futureCount: 0,
+  };
   const dueForMode = states.newCount + states.learningCount + states.reviewCount;
+  const reviewParam = mode === 'all' ? 'both' : mode;
+
+  const bumpNew = (n: number) => {
+    if (!deckId) return;
+    addNewLimitBumpToday(deckId, n);
+    setReloadFlag((f) => f + 1);
+  };
+  const bumpReview = (n: number) => {
+    if (!deckId) return;
+    addReviewLimitBumpToday(deckId, n);
+    setReloadFlag((f) => f + 1);
+  };
+  const goStudyAhead = (ahead: string) => {
+    navigate(`/review?mode=${reviewParam}&ahead=${ahead}`);
+  };
   const totalAll = breakdown
     ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh'] + (breakdown.byMode['listen-type'] ?? 0) + (breakdown.byMode['speak'] ?? 0)
     : 0;
-
-  const reviewParam = mode === 'all' ? 'both' : mode;
 
   return (
     <div className="max-w-xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
@@ -106,14 +150,60 @@ export function DashboardPage() {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => navigate(`/review?mode=${reviewParam}`)}
-          disabled={dueForMode === 0}
-          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-        >
-          {dueForMode > 0 ? `Study (${dueForMode} cards)` : 'No cards due'}
-        </button>
+        {dueForMode > 0 ? (
+          <button
+            onClick={() => navigate(`/review?mode=${reviewParam}`)}
+            className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+          >
+            Study ({dueForMode} cards)
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <div className="w-full py-2.5 rounded-lg text-sm font-medium text-center" style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}>
+              No cards due
+            </div>
+            {(states.newBacklog > 0 || states.reviewBacklog > 0 || states.futureCount > 0) && (
+              <div className="space-y-2 pt-1">
+                <div className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>
+                  Custom Study
+                </div>
+                {states.newBacklog > 0 && (
+                  <CustomStudyRow
+                    label="New cards today"
+                    options={[
+                      { label: '+10', value: 10 },
+                      { label: '+20', value: 20 },
+                    ]}
+                    onPick={bumpNew}
+                  />
+                )}
+                {states.reviewBacklog > 0 && (
+                  <CustomStudyRow
+                    label="Review backlog"
+                    options={[
+                      { label: '+10', value: 10 },
+                      { label: '+20', value: 20 },
+                      { label: 'All', value: states.reviewBacklog },
+                    ]}
+                    onPick={bumpReview}
+                  />
+                )}
+                {states.futureCount > 0 && (
+                  <CustomStudyRow
+                    label="Study ahead"
+                    options={[
+                      { label: '+10', value: '10' },
+                      { label: '+20', value: '20' },
+                      { label: 'All', value: 'all' },
+                    ]}
+                    onPick={goStudyAhead}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Quick actions — ghost buttons */}
