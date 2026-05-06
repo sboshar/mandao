@@ -22,19 +22,24 @@ const MODE_LABEL: Record<ModeOption, string> = {
 
 interface CustomStudyRowProps<T extends string | number> {
   label: string;
+  count: number;
   options: { label: string; value: T }[];
   onPick: (value: T) => void;
 }
 
-function CustomStudyRow<T extends string | number>({ label, options, onPick }: CustomStudyRowProps<T>) {
+function CustomStudyRow<T extends string | number>({ label, count, options, onPick }: CustomStudyRowProps<T>) {
+  const disabled = count === 0;
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs flex-1" style={{ color: 'var(--text-secondary)' }}>{label}</span>
+    <div className="flex items-center gap-2" style={{ opacity: disabled ? 0.4 : 1 }}>
+      <span className="text-xs flex-1 min-w-0" style={{ color: 'var(--text-secondary)' }}>
+        {label} <span style={{ color: 'var(--text-tertiary)' }}>({count})</span>
+      </span>
       {options.map((opt) => (
         <button
           key={opt.label}
           onClick={() => onPick(opt.value)}
-          className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
+          disabled={disabled}
+          className="px-3 py-1 rounded-md text-xs font-medium transition-colors disabled:cursor-not-allowed"
           style={{ background: 'transparent', color: 'var(--accent)', border: '1px solid var(--accent)' }}
         >
           {opt.label}
@@ -163,45 +168,43 @@ export function DashboardPage() {
             <div className="w-full py-2.5 rounded-lg text-sm font-medium text-center" style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}>
               No cards due
             </div>
-            {(states.newBacklog > 0 || states.reviewBacklog > 0 || states.futureCount > 0) && (
-              <div className="space-y-2 pt-1">
-                <div className="text-xs font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  Custom Study
-                </div>
-                {states.newBacklog > 0 && (
-                  <CustomStudyRow
-                    label="New cards today"
-                    options={[
-                      { label: '+10', value: 10 },
-                      { label: '+20', value: 20 },
-                    ]}
-                    onPick={bumpNew}
-                  />
-                )}
-                {states.reviewBacklog > 0 && (
-                  <CustomStudyRow
-                    label="Review backlog"
-                    options={[
-                      { label: '+10', value: 10 },
-                      { label: '+20', value: 20 },
-                      { label: 'All', value: states.reviewBacklog },
-                    ]}
-                    onPick={bumpReview}
-                  />
-                )}
-                {states.futureCount > 0 && (
-                  <CustomStudyRow
-                    label="Study ahead"
-                    options={[
-                      { label: '+10', value: '10' },
-                      { label: '+20', value: '20' },
-                      { label: 'All', value: 'all' },
-                    ]}
-                    onPick={goStudyAhead}
-                  />
-                )}
+            <div
+              className="space-y-2 p-3 rounded-lg"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+            >
+              <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
+                Custom Study
               </div>
-            )}
+              <CustomStudyRow
+                label="New cards today"
+                count={states.newBacklog}
+                options={[
+                  { label: '+10', value: 10 },
+                  { label: '+20', value: 20 },
+                ]}
+                onPick={bumpNew}
+              />
+              <CustomStudyRow
+                label="Review backlog"
+                count={states.reviewBacklog}
+                options={[
+                  { label: '+10', value: 10 },
+                  { label: '+20', value: 20 },
+                  { label: 'All', value: Math.max(1, states.reviewBacklog) },
+                ]}
+                onPick={bumpReview}
+              />
+              <CustomStudyRow
+                label="Study ahead"
+                count={states.futureCount}
+                options={[
+                  { label: '+10', value: '10' },
+                  { label: '+20', value: '20' },
+                  { label: 'All', value: 'all' },
+                ]}
+                onPick={goStudyAhead}
+              />
+            </div>
           </div>
         )}
       </div>
