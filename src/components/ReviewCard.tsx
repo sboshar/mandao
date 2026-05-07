@@ -172,6 +172,9 @@ export function ReviewCard() {
     }
   };
 
+  // The handlers below close over state already in the dep array, so
+  // listing them again would just force a re-attach per render with no
+  // behavioral difference (hence the eslint-disable on the deps line).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -199,9 +202,6 @@ export function ReviewCard() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // Handlers are recreated every render but close over the same state
-    // already listed in the dep array — including them would just cause
-    // a re-attach per render with no behavioral difference.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card, isFlipped, isFreeReview, undoInfo, undoing, pendingRating, flip, clearUndo, next, prev]);
 
