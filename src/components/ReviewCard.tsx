@@ -132,8 +132,13 @@ export function ReviewCard() {
     return () => { stopSpeaking(); };
   }, [isListenType, sentence, card?.id, card?.sentenceId]);
 
+  // Synchronous lock so OS key-repeat (holding 1-4 or Cmd+Z) can't fire
+  // a second action before React commits the pending/undoing state flip.
+  const actionLockRef = useRef(false);
+
   const handleUndo = async () => {
-    if (!undoInfo || undoing || pendingRating !== null) return;
+    if (actionLockRef.current || !undoInfo || undoing || pendingRating !== null) return;
+    actionLockRef.current = true;
     setUndoing(true);
     try {
       await undoReview(undoInfo);
@@ -142,8 +147,63 @@ export function ReviewCard() {
       setRateError('Could not undo. Check your connection and try again.');
     } finally {
       setUndoing(false);
+      actionLockRef.current = false;
     }
   };
+
+  const handleFlip = () => {
+    clearUndo();
+    flip();
+  };
+
+  const handleRate = async (rating: Grade) => {
+    if (!card || actionLockRef.current) return;
+    actionLockRef.current = true;
+    setRateError(null);
+    setPendingRating(rating);
+    try {
+      const undo = await reviewCard(card.id, rating);
+      next(undo);
+    } catch {
+      setRateError('Could not save this review. Check your connection and try again.');
+    } finally {
+      setPendingRating(null);
+      actionLockRef.current = false;
+    }
+  };
+
+  // The handlers below close over state already in the dep array, so
+  // listing them again would just force a re-attach per render with no
+  // behavioral difference (hence the eslint-disable on the deps line).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!card) return;
+
+      if (!isFlipped && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        handleFlip();
+        return;
+      }
+
+      if (isFlipped && !isFreeReview && e.key >= '1' && e.key <= '4') {
+        e.preventDefault();
+        handleRate(Number(e.key) as Grade);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card, isFlipped, isFreeReview, undoInfo, undoing, pendingRating, flip, clearUndo, next, prev]);
 
   if (!card || !sentence) {
     let message: string;
@@ -172,11 +232,6 @@ export function ReviewCard() {
 
   const isEnToZh = card.reviewMode === 'en-to-zh';
   const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
-
-  const handleFlip = () => {
-    clearUndo();
-    flip();
-  };
 
   const handlePinyinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,19 +322,6 @@ export function ReviewCard() {
 
   const handlePlayRecording = () => {
     if (recordingBlob) playBlob(recordingBlob);
-  };
-
-  const handleRate = async (rating: Grade) => {
-    setRateError(null);
-    setPendingRating(rating);
-    try {
-      const undo = await reviewCard(card.id, rating);
-      next(undo);
-    } catch {
-      setRateError('Could not save this review. Check your connection and try again.');
-    } finally {
-      setPendingRating(null);
-    }
   };
 
   const handleGotIt = () => {
