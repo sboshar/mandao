@@ -132,8 +132,13 @@ export function ReviewCard() {
     return () => { stopSpeaking(); };
   }, [isListenType, sentence, card?.id, card?.sentenceId]);
 
+  // Synchronous lock so OS key-repeat (holding 1-4 or Cmd+Z) can't fire
+  // a second action before React commits the pending/undoing state flip.
+  const actionLockRef = useRef(false);
+
   const handleUndo = async () => {
-    if (!undoInfo || undoing || pendingRating !== null) return;
+    if (actionLockRef.current || !undoInfo || undoing || pendingRating !== null) return;
+    actionLockRef.current = true;
     setUndoing(true);
     try {
       await undoReview(undoInfo);
@@ -142,28 +147,39 @@ export function ReviewCard() {
       setRateError('Could not undo. Check your connection and try again.');
     } finally {
       setUndoing(false);
+      actionLockRef.current = false;
     }
   };
 
-  // Desktop keyboard shortcuts (issue #169). Skipped while a text input has
-  // focus so typing modes (pinyin entry, tag input, etc.) keep working.
+  const handleFlip = () => {
+    clearUndo();
+    flip();
+  };
+
+  const handleRate = async (rating: Grade) => {
+    if (!card || actionLockRef.current) return;
+    actionLockRef.current = true;
+    setRateError(null);
+    setPendingRating(rating);
+    try {
+      const undo = await reviewCard(card.id, rating);
+      next(undo);
+    } catch {
+      setRateError('Could not save this review. Check your connection and try again.');
+    } finally {
+      setPendingRating(null);
+      actionLockRef.current = false;
+    }
+  };
+
   useEffect(() => {
-    const onKey = async (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
 
       if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
-        if (!undoInfo || undoing || pendingRating !== null) return;
         e.preventDefault();
-        setUndoing(true);
-        try {
-          await undoReview(undoInfo);
-          prev();
-        } catch {
-          setRateError('Could not undo. Check your connection and try again.');
-        } finally {
-          setUndoing(false);
-        }
+        handleUndo();
         return;
       }
 
@@ -172,31 +188,22 @@ export function ReviewCard() {
 
       if (!isFlipped && (e.key === ' ' || e.key === 'Enter')) {
         e.preventDefault();
-        clearUndo();
-        flip();
+        handleFlip();
         return;
       }
 
-      if (isFlipped && !isFreeReview && pendingRating === null && !undoing) {
-        const n = Number(e.key);
-        if (Number.isInteger(n) && n >= 1 && n <= 4) {
-          e.preventDefault();
-          setRateError(null);
-          setPendingRating(n);
-          try {
-            const undo = await reviewCard(card.id, n as Grade);
-            next(undo);
-          } catch {
-            setRateError('Could not save this review. Check your connection and try again.');
-          } finally {
-            setPendingRating(null);
-          }
-        }
+      if (isFlipped && !isFreeReview && e.key >= '1' && e.key <= '4') {
+        e.preventDefault();
+        handleRate(Number(e.key) as Grade);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [card, isFlipped, isFreeReview, pendingRating, undoing, undoInfo, flip, clearUndo, next, prev]);
+    // Handlers are recreated every render but close over the same state
+    // already listed in the dep array — including them would just cause
+    // a re-attach per render with no behavioral difference.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card, isFlipped, isFreeReview, undoInfo, undoing, pendingRating, flip, clearUndo, next, prev]);
 
   if (!card || !sentence) {
     let message: string;
@@ -225,11 +232,6 @@ export function ReviewCard() {
 
   const isEnToZh = card.reviewMode === 'en-to-zh';
   const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
-
-  const handleFlip = () => {
-    clearUndo();
-    flip();
-  };
 
   const handlePinyinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -320,19 +322,6 @@ export function ReviewCard() {
 
   const handlePlayRecording = () => {
     if (recordingBlob) playBlob(recordingBlob);
-  };
-
-  const handleRate = async (rating: Grade) => {
-    setRateError(null);
-    setPendingRating(rating);
-    try {
-      const undo = await reviewCard(card.id, rating);
-      next(undo);
-    } catch {
-      setRateError('Could not save this review. Check your connection and try again.');
-    } finally {
-      setPendingRating(null);
-    }
   };
 
   const handleGotIt = () => {
