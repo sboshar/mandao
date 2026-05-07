@@ -11,7 +11,8 @@ import { ClickableEnglish } from './ClickableEnglish';
 import { reviewCard, undoReview, type Grade } from '../services/srs';
 import { comparePinyin, type SyllableResult } from '../lib/pinyinCompare';
 import { numericStringToDiacritic } from '../services/toneSandhi';
-import { speakChinese, stopSpeaking } from '../services/audio';
+import { stopSpeaking } from '../services/audio';
+import { useAudioPlaybackSettingsStore } from '../stores/audioPlaybackSettingsStore';
 import {
   isSpeechRecognitionSupported,
   stopRecognition,
@@ -46,9 +47,10 @@ export function ReviewCard() {
   const [pinyinInput, setPinyinInput] = useState('');
   const [pinyinResults, setPinyinResults] = useState<SyllableResult[] | null>(null);
   const pinyinInputRef = useRef<HTMLInputElement>(null);
-  const autoPlayed = useRef<string | null>(null);
   const [speedIndex, setSpeedIndex] = useState(2);
   const speechRate = SPEED_OPTIONS[speedIndex].value;
+  const masterAutoPlay = useAudioPlaybackSettingsStore((s) => s.masterEnabled);
+  const perModeAutoPlay = useAudioPlaybackSettingsStore((s) => s.perMode);
 
   // Speak-mode state
   const [isListening, setIsListening] = useState(false);
@@ -122,10 +124,6 @@ export function ReviewCard() {
   useEffect(() => {
     if (!isListenType || !sentence || !card) return;
     if (sentence.id !== card.sentenceId) return;
-    if (autoPlayed.current !== card.id) {
-      autoPlayed.current = card.id;
-      speakChinese(sentence.chinese, speechRate).catch(() => {});
-    }
     if (pinyinInputRef.current) {
       pinyinInputRef.current.focus();
     }
@@ -135,6 +133,18 @@ export function ReviewCard() {
   // Synchronous lock so OS key-repeat (holding 1-4 or Cmd+Z) can't fire
   // a second action before React commits the pending/undoing state flip.
   const actionLockRef = useRef(false);
+
+  // Auto-play key passed to SentenceAudioControls. Listen-type/speak fire on
+  // mount (audio is the prompt); other modes fire after flip. Speak skips
+  // while recording so playback doesn't bleed into the user's mic.
+  const autoPlayKey = (() => {
+    if (!card || !sentence) return null;
+    if (!masterAutoPlay) return null;
+    if (!perModeAutoPlay[card.reviewMode]) return null;
+    if (card.reviewMode === 'speak' && isListening) return null;
+    if (card.reviewMode === 'listen-type' || card.reviewMode === 'speak') return card.id;
+    return isFlipped ? card.id : null;
+  })();
 
   const handleUndo = async () => {
     if (actionLockRef.current || !undoInfo || undoing || pendingRating !== null) return;
@@ -519,7 +529,11 @@ export function ReviewCard() {
 
               {/* Audio controls row */}
               <div className="flex gap-2 justify-center flex-wrap mt-4">
-                <SentenceAudioControls sentenceId={sentence.id} text={sentence.chinese} />
+                <SentenceAudioControls
+                  sentenceId={sentence.id}
+                  text={sentence.chinese}
+                  autoPlayKey={autoPlayKey}
+                />
                 {recordingBlob && (
                   <button
                     onClick={handlePlayRecording}
@@ -583,6 +597,8 @@ export function ReviewCard() {
                   text={sentence.chinese}
                   rate={speechRate}
                   className="text-2xl"
+                  autoPlayKey={autoPlayKey}
+                  autoPlayFallbackToTts
                 />
                 <button
                   onClick={() => setSpeedIndex((i) => (i + 1) % SPEED_OPTIONS.length)}
@@ -762,7 +778,11 @@ export function ReviewCard() {
               )}
 
               <div className="text-center">
-                <SentenceAudioControls sentenceId={sentence.id} text={sentence.chinese} />
+                <SentenceAudioControls
+                  sentenceId={sentence.id}
+                  text={sentence.chinese}
+                  autoPlayKey={autoPlayKey}
+                />
               </div>
 
               {/* Tags */}
