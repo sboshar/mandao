@@ -145,6 +145,59 @@ export function ReviewCard() {
     }
   };
 
+  // Desktop keyboard shortcuts (issue #169). Skipped while a text input has
+  // focus so typing modes (pinyin entry, tag input, etc.) keep working.
+  useEffect(() => {
+    const onKey = async (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        if (!undoInfo || undoing || pendingRating !== null) return;
+        e.preventDefault();
+        setUndoing(true);
+        try {
+          await undoReview(undoInfo);
+          prev();
+        } catch {
+          setRateError('Could not undo. Check your connection and try again.');
+        } finally {
+          setUndoing(false);
+        }
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!card) return;
+
+      if (!isFlipped && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        clearUndo();
+        flip();
+        return;
+      }
+
+      if (isFlipped && !isFreeReview && pendingRating === null && !undoing) {
+        const n = Number(e.key);
+        if (Number.isInteger(n) && n >= 1 && n <= 4) {
+          e.preventDefault();
+          setRateError(null);
+          setPendingRating(n);
+          try {
+            const undo = await reviewCard(card.id, n as Grade);
+            next(undo);
+          } catch {
+            setRateError('Could not save this review. Check your connection and try again.');
+          } finally {
+            setPendingRating(null);
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [card, isFlipped, isFreeReview, pendingRating, undoing, undoInfo, flip, clearUndo, next, prev]);
+
   if (!card || !sentence) {
     let message: string;
     if (remaining() > 0) message = 'Loading...';
