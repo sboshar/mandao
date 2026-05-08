@@ -14,6 +14,7 @@ import type { SrsCard, ReviewLog, ReviewMode } from '../db/schema';
 import { v4 as uuid } from 'uuid';
 import { getDeviceId } from '../db/syncEngine';
 import { useFSRSSettingsStore, toFSRSParams } from '../stores/fsrsSettingsStore';
+import { getNewLimitBumpToday, getReviewLimitBumpToday } from '../lib/dailyLimits';
 
 function getScheduler() {
   const settings = useFSRSSettingsStore.getState();
@@ -140,6 +141,22 @@ export async function undoReview(undo: UndoInfo): Promise<void> {
   await repo.deletePendingSyncOp(undo.syncOpId);
 }
 
+/**
+ * How many new cards the user can still see today, deck-wide. The cap is
+ * shared across review modes — matches Anki's "new cards/day" semantic.
+ * Adds any "Increase today's new card limit" bump the user has applied.
+ */
+async function newCardsRemainingToday(deckId: string, newCardsPerDay: number): Promise<number> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayLogs = await repo.getReviewLogsSince(todayStart.getTime());
+  const todayNewCardIds = new Set(todayLogs.map((r) => r.cardId));
+  const todayCards = await repo.getSrsCardsByIds([...todayNewCardIds]);
+  const newReviewedToday = todayCards.filter((c) => c.reps === 1).length;
+  const cap = newCardsPerDay + getNewLimitBumpToday(deckId);
+  return Math.max(0, cap - newReviewedToday);
+}
+
 /** Get review queue for a deck, optionally filtered by review mode and/or tags */
 export async function getReviewQueue(
   deckId: string,
@@ -165,34 +182,64 @@ export async function getReviewQueue(
 
   // Fetch all cards for this deck in relevant states
   // Learning (1) + Relearning (3) + Review (2) + New (0)
-  const [learningRelearning, reviewCards, newCards] = await Promise.all([
+  const [learningRelearning, reviewCards, newCards, newRemaining] = await Promise.all([
     repo.getSrsCardsByDeckAndStates(deckId, [1, 3]),
     repo.getSrsCardsByDeckAndState(deckId, 2),
     repo.getSrsCardsByDeckAndState(deckId, 0),
+    newCardsRemainingToday(deckId, deck.newCardsPerDay),
   ]);
 
-  // Learning cards (state=1 or 3, due now)
+  const reviewLimit = deck.reviewsPerDay + getReviewLimitBumpToday(deckId);
+
   const duelearning = learningRelearning.filter((c) => c.due <= now && ok(c));
 
-  // Review cards (state=2, due now, up to daily limit)
   const dueReview = reviewCards
     .filter((c) => c.due <= now && ok(c))
-    .slice(0, deck.reviewsPerDay);
+    .slice(0, reviewLimit);
 
-  // New cards (state=0) up to daily limit
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayLogs = await repo.getReviewLogsSince(todayStart.getTime());
-
-  const todayNewCardIds = new Set(todayLogs.map((r) => r.cardId));
-  const todayCards = await repo.getSrsCardsByIds([...todayNewCardIds]);
-  const newReviewedToday = todayCards.filter((c) => c.reps === 1).length;
-
-  const remaining = Math.max(0, deck.newCardsPerDay - newReviewedToday);
-  const dueNew = newCards.filter((c) => ok(c)).slice(0, remaining);
+  const dueNew = newCards.filter((c) => ok(c)).slice(0, newRemaining);
 
   // Priority: learning/relearning > review > new
   return [...duelearning, ...dueReview, ...dueNew];
+}
+
+/**
+ * Bonus queue of cards that aren't due yet but are coming up soonest. The
+ * regular queue is empty (or close to it) and the user wants to keep going.
+ *
+ * Ratings still write to FSRS as normal early reviews — elapsed-time is
+ * meaningful, so this isn't cram-mode. New cards (state 0) are excluded;
+ * they aren't "ahead", they're always available and have their own daily cap.
+ */
+export async function getStudyAheadQueue(
+  deckId: string,
+  modeFilter?: ReviewMode | 'both',
+  tagFilter?: string[] | null,
+  limit?: number,
+): Promise<SrsCard[]> {
+  const now = Date.now();
+
+  let tagSentenceIds: Set<string> | null = null;
+  if (tagFilter && tagFilter.length > 0) {
+    const tagged = await repo.getSentencesByTags(tagFilter);
+    tagSentenceIds = new Set(tagged.map((s) => s.id));
+  }
+
+  const modeOk = (c: SrsCard) =>
+    !modeFilter || modeFilter === 'both' || c.reviewMode === modeFilter;
+  const tagOk = (c: SrsCard) =>
+    !tagSentenceIds || tagSentenceIds.has(c.sentenceId);
+
+  const [learningRelearning, reviewCards] = await Promise.all([
+    repo.getSrsCardsByDeckAndStates(deckId, [1, 3]),
+    repo.getSrsCardsByDeckAndState(deckId, 2),
+  ]);
+
+  const future = [...learningRelearning, ...reviewCards]
+    .filter((c) => c.due > now && modeOk(c) && tagOk(c))
+    .sort((a, b) => a.due - b.due);
+
+  return typeof limit === 'number' ? future.slice(0, limit) : future;
 }
 
 export interface FreeReviewQueueArgs {
@@ -287,25 +334,69 @@ export function groupCardsBySentence(cards: SrsCard[]): Map<string, SrsCard[]> {
 
 export type ModeCounts = Record<ReviewMode, number>;
 
-export interface DueBreakdown {
-  byMode: ModeCounts;
-  /** Per-state counts keyed by mode ('all' includes every mode) */
-  byModeAndState: Record<ReviewMode | 'all', { newCount: number; learningCount: number; reviewCount: number }>;
+/**
+ * Per-mode counts. The first three are what the user can review *right now*
+ * (cap-applied, matches getReviewQueue). The "*Backlog" / futureCount fields
+ * are what *could* be reviewed via Custom Study actions — used by the
+ * Dashboard to decide which Custom Study rows to show when due === 0.
+ */
+export interface ModeStateCounts {
+  newCount: number;
+  learningCount: number;
+  reviewCount: number;
+  /** Unseen new cards held back by the daily new-card cap. */
+  newBacklog: number;
+  /** Already-due review cards held back by the daily review cap. */
+  reviewBacklog: number;
+  /** Cards scheduled in the future (study-ahead candidates). */
+  futureCount: number;
 }
 
-/** Get due card counts broken down by review mode and card state */
+export const EMPTY_MODE_STATE: ModeStateCounts = {
+  newCount: 0, learningCount: 0, reviewCount: 0,
+  newBacklog: 0, reviewBacklog: 0, futureCount: 0,
+};
+
+export interface DueBreakdown {
+  byMode: ModeCounts;
+  byModeAndState: Record<ReviewMode | 'all', ModeStateCounts>;
+}
+
+/**
+ * Due card counts broken down by review mode and card state. Counts are
+ * cap-aware: they reflect what `getReviewQueue` would actually return for
+ * each mode, so "X due (today)" matches what clicking Study delivers.
+ *
+ * Also surfaces "what could be unlocked": newBacklog/reviewBacklog (cards
+ * the daily caps are holding back) and futureCount (study-ahead candidates).
+ */
 export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
   const now = Date.now();
+  const deck = await repo.getDeck(deckId);
+  if (!deck) {
+    const empty = EMPTY_MODE_STATE;
+    const byModeAndState = {
+      'all': empty, 'en-to-zh': empty, 'zh-to-en': empty,
+      'py-to-en-zh': empty, 'listen-type': empty, 'speak': empty,
+    };
+    return {
+      byMode: { 'en-to-zh': 0, 'zh-to-en': 0, 'py-to-en-zh': 0, 'listen-type': 0, 'speak': 0 },
+      byModeAndState,
+    };
+  }
 
-  const [newCards, learningCards, reviewCards] = await Promise.all([
+  const [newCards, learningCards, reviewCards, newRemaining] = await Promise.all([
     repo.getSrsCardsByDeckAndState(deckId, 0),
     repo.getSrsCardsByDeckAndStates(deckId, [1, 3]),
     repo.getSrsCardsByDeckAndState(deckId, 2),
+    newCardsRemainingToday(deckId, deck.newCardsPerDay),
   ]);
 
-  const dueNew = newCards;
+  const reviewLimit = deck.reviewsPerDay + getReviewLimitBumpToday(deckId);
+
   const dueLearning = learningCards.filter((c) => c.due <= now);
   const dueReview = reviewCards.filter((c) => c.due <= now);
+  const futureCards = [...learningCards, ...reviewCards].filter((c) => c.due > now);
 
   const modes: (ReviewMode | 'all')[] = ['all', 'en-to-zh', 'zh-to-en', 'py-to-en-zh', 'listen-type', 'speak'];
   const byMode: ModeCounts = { 'en-to-zh': 0, 'zh-to-en': 0, 'py-to-en-zh': 0, 'listen-type': 0, 'speak': 0 };
@@ -313,10 +404,21 @@ export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
 
   for (const m of modes) {
     const modeOk = (c: SrsCard) => m === 'all' || c.reviewMode === m;
-    const nc = dueNew.filter(modeOk).length;
+    const modeNewTotal = newCards.filter(modeOk).length;
+    const modeDueReviewTotal = dueReview.filter(modeOk).length;
+
+    const nc = Math.min(modeNewTotal, newRemaining);
     const lc = dueLearning.filter(modeOk).length;
-    const rc = dueReview.filter(modeOk).length;
-    byModeAndState[m] = { newCount: nc, learningCount: lc, reviewCount: rc };
+    const rc = Math.min(modeDueReviewTotal, reviewLimit);
+
+    byModeAndState[m] = {
+      newCount: nc,
+      learningCount: lc,
+      reviewCount: rc,
+      newBacklog: Math.max(0, modeNewTotal - newRemaining),
+      reviewBacklog: Math.max(0, modeDueReviewTotal - reviewLimit),
+      futureCount: futureCards.filter(modeOk).length,
+    };
     if (m !== 'all') byMode[m] = nc + lc + rc;
   }
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { getDueBreakdown, type DueBreakdown } from '../services/srs';
+import { getDueBreakdown, EMPTY_MODE_STATE, type DueBreakdown } from '../services/srs';
 import * as repo from '../db/repo';
 import { TutorialBanner } from '../components/TutorialBanner';
+import { CustomStudyButton } from '../components/CustomStudyButton';
 import { useTutorialStore } from '../stores/tutorialStore';
 import { useAuthStore } from '../stores/authStore';
 import type { ReviewMode } from '../db/schema';
@@ -26,28 +27,45 @@ export function DashboardPage() {
   const [mode, setMode] = useState<ModeOption>('all');
   const [totalSentences, setTotalSentences] = useState(0);
   const [totalMeanings, setTotalMeanings] = useState(0);
+  const [deckId, setDeckId] = useState<string | null>(null);
+  const [reloadFlag, setReloadFlag] = useState(0);
 
   const tutorialStep = useTutorialStore((s) => s.step);
   const advanceTutorial = useTutorialStore((s) => s.advance);
 
+  // Static-ish counts only refetch on user change. A Custom Study bump
+  // doesn't change sentence/meaning totals, so we don't need to re-run them
+  // when reloadFlag bumps.
   useEffect(() => {
     if (!user) return;
-    async function load() {
-      const deckId = await repo.ensureDefaultDeck();
-      setBreakdown(await getDueBreakdown(deckId));
+    (async () => {
+      const id = await repo.ensureDefaultDeck();
+      setDeckId(id);
       setTotalSentences(await repo.getSentencesCount());
       setTotalMeanings(await repo.getMeaningsCount());
-    }
-    load();
+    })();
   }, [user]);
 
-  const states = breakdown?.byModeAndState[mode] ?? { newCount: 0, learningCount: 0, reviewCount: 0 };
+  // Breakdown refetches on bump too, since a bump shifts due/backlog counts.
+  useEffect(() => {
+    if (!deckId) return;
+    let cancelled = false;
+    getDueBreakdown(deckId).then((b) => {
+      if (!cancelled) setBreakdown(b);
+    });
+    return () => { cancelled = true; };
+  }, [deckId, reloadFlag]);
+
+  const states = breakdown?.byModeAndState[mode] ?? EMPTY_MODE_STATE;
   const dueForMode = states.newCount + states.learningCount + states.reviewCount;
+  const reviewParam = mode === 'all' ? 'both' : mode;
+
+  const goStudyAhead = (count: number) => {
+    navigate(`/review?mode=${reviewParam}&ahead=${count}`);
+  };
   const totalAll = breakdown
     ? breakdown.byMode['en-to-zh'] + breakdown.byMode['zh-to-en'] + breakdown.byMode['py-to-en-zh'] + (breakdown.byMode['listen-type'] ?? 0) + (breakdown.byMode['speak'] ?? 0)
     : 0;
-
-  const reviewParam = mode === 'all' ? 'both' : mode;
 
   return (
     <div className="max-w-xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
@@ -106,25 +124,28 @@ export function DashboardPage() {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => navigate(`/review?mode=${reviewParam}`)}
-          disabled={dueForMode === 0}
-          className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-        >
-          {dueForMode > 0 ? `Study (${dueForMode} cards)` : 'No cards due'}
-        </button>
-        <button
-          onClick={() => navigate('/free-review')}
-          className="mt-2 w-full py-2 rounded-lg text-xs font-medium transition-colors"
-          style={{
-            background: 'transparent',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border-strong)',
-          }}
-        >
-          Free review (no schedule effect)
-        </button>
+        {dueForMode > 0 ? (
+          <button
+            onClick={() => navigate(`/review?mode=${reviewParam}`)}
+            className="w-full py-2.5 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+          >
+            Study ({dueForMode} cards)
+          </button>
+        ) : (
+          <div className="w-full py-2.5 rounded-lg text-sm font-medium text-center" style={{ background: 'var(--bg-inset)', color: 'var(--text-tertiary)' }}>
+            No cards due
+          </div>
+        )}
+        {breakdown && deckId && (
+          <CustomStudyButton
+            deckId={deckId}
+            mode={mode}
+            breakdown={breakdown}
+            onAfterBump={() => setReloadFlag((f) => f + 1)}
+            onStudyAhead={goStudyAhead}
+          />
+        )}
       </div>
 
       {/* Quick actions — ghost buttons */}
