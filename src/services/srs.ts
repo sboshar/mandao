@@ -191,16 +191,49 @@ export async function getReviewQueue(
 
   const reviewLimit = deck.reviewsPerDay + getReviewLimitBumpToday(deckId);
 
-  const duelearning = learningRelearning.filter((c) => c.due <= now && ok(c));
+  // Anki's daily-cap rule: interday learning/relearning shares the
+  // reviewsPerDay budget with state-2 reviews and gets first dibs;
+  // intraday learning bypasses the cap entirely.
+  const dueLearning = learningRelearning.filter((c) => c.due <= now && ok(c));
+  const intraday = dueLearning.filter(isIntradayLearning);
+  const interday = dueLearning.filter((c) => !isIntradayLearning(c));
+  const dueReview = reviewCards.filter((c) => c.due <= now && ok(c));
+  const reviewBucket = [...interday, ...dueReview].slice(0, reviewLimit);
 
-  const dueReview = reviewCards
-    .filter((c) => c.due <= now && ok(c))
-    .slice(0, reviewLimit);
+  // Anki default: new cards also count against reviewsPerDay (the
+  // "newCardsIgnoreReviewLimit" toggle reverts to two independent caps).
+  const ignoreReviewLimit = useFSRSSettingsStore.getState().newCardsIgnoreReviewLimit;
+  const newCap = ignoreReviewLimit
+    ? newRemaining
+    : Math.min(newRemaining, Math.max(0, reviewLimit - reviewBucket.length));
+  const dueNew = newCards.filter((c) => ok(c)).slice(0, newCap);
 
-  const dueNew = newCards.filter((c) => ok(c)).slice(0, newRemaining);
+  return [...intraday, ...reviewBucket, ...dueNew];
+}
 
-  // Priority: learning/relearning > review > new
-  return [...duelearning, ...dueReview, ...dueNew];
+/**
+ * Per Anki, a learning/relearning card is intraday only when its step both
+ * (a) is sub-day AND (b) does not cross the day boundary between
+ * lastReview and due. From the Anki docs:
+ *
+ *   "if the step crosses a day boundary, the delay is automatically
+ *   converted to days" (deck-options#day-boundaries)
+ *
+ * Anki rewrites the scheduled interval at scheduling time so a 6-hour step
+ * taken at 11pm becomes a 1-day step; ts-fsrs does not. We detect the same
+ * condition by comparing lastReview's calendar day with due's. Different
+ * days → step crossed midnight → interday.
+ */
+function isIntradayLearning(c: SrsCard): boolean {
+  if (c.scheduledDays >= 1) return false;
+  if (!c.lastReview) return true;
+  return startOfDayMs(c.lastReview) === startOfDayMs(c.due);
+}
+
+function startOfDayMs(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 /**
@@ -393,8 +426,11 @@ export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
   ]);
 
   const reviewLimit = deck.reviewsPerDay + getReviewLimitBumpToday(deckId);
+  const ignoreReviewLimit = useFSRSSettingsStore.getState().newCardsIgnoreReviewLimit;
 
   const dueLearning = learningCards.filter((c) => c.due <= now);
+  const intraday = dueLearning.filter(isIntradayLearning);
+  const interday = dueLearning.filter((c) => !isIntradayLearning(c));
   const dueReview = reviewCards.filter((c) => c.due <= now);
   const futureCards = [...learningCards, ...reviewCards].filter((c) => c.due > now);
 
@@ -405,21 +441,28 @@ export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
   for (const m of modes) {
     const modeOk = (c: SrsCard) => m === 'all' || c.reviewMode === m;
     const modeNewTotal = newCards.filter(modeOk).length;
+    const modeIntradayTotal = intraday.filter(modeOk).length;
+    const modeInterdayTotal = interday.filter(modeOk).length;
     const modeDueReviewTotal = dueReview.filter(modeOk).length;
+    const modeReviewBucketTotal = modeInterdayTotal + modeDueReviewTotal;
 
-    const nc = Math.min(modeNewTotal, newRemaining);
-    const lc = dueLearning.filter(modeOk).length;
-    const rc = Math.min(modeDueReviewTotal, reviewLimit);
+    const rc = Math.min(modeReviewBucketTotal, reviewLimit);
+    const reviewBacklog = Math.max(0, modeReviewBucketTotal - reviewLimit);
+
+    const newSlots = ignoreReviewLimit
+      ? newRemaining
+      : Math.min(newRemaining, Math.max(0, reviewLimit - rc));
+    const nc = Math.min(modeNewTotal, newSlots);
 
     byModeAndState[m] = {
       newCount: nc,
-      learningCount: lc,
+      learningCount: modeIntradayTotal,
       reviewCount: rc,
-      newBacklog: Math.max(0, modeNewTotal - newRemaining),
-      reviewBacklog: Math.max(0, modeDueReviewTotal - reviewLimit),
+      newBacklog: Math.max(0, modeNewTotal - newSlots),
+      reviewBacklog,
       futureCount: futureCards.filter(modeOk).length,
     };
-    if (m !== 'all') byMode[m] = nc + lc + rc;
+    if (m !== 'all') byMode[m] = nc + modeIntradayTotal + rc;
   }
 
   return { byMode, byModeAndState };
