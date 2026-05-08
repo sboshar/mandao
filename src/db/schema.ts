@@ -173,17 +173,25 @@ export interface SrsCard {
   usn?: number;
 }
 
+/** FSRS scheduling parameters. Stored as a partial so missing keys fall
+ *  back to client-side defaults — that's how the column starts (`{}`) for
+ *  new users, and how unknown future keys land on older clients. */
+export interface FSRSSettings {
+  requestRetention: number;
+  maximumInterval: number;
+  enableFuzz: boolean;
+  enableShortTerm: boolean;
+  learningSteps: string[];
+  relearningSteps: string[];
+}
+
 export interface Deck {
   id: string;
   name: string;
   description: string;
   newCardsPerDay: number;
   reviewsPerDay: number;
-  /** FSRS scheduling parameters (requestRetention, learning steps, etc.).
-   *  Stored as a free-form record so future fields (e.g. the optimizer's
-   *  weight vector) don't need schema migrations. Empty `{}` means
-   *  "use hardcoded defaults". */
-  fsrsSettings?: Record<string, unknown>;
+  fsrsSettings?: Partial<FSRSSettings>;
   createdAt: number;
   updatedAt?: number;
   usn?: number;

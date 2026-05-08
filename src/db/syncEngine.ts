@@ -530,6 +530,8 @@ async function pullOnePage(): Promise<boolean> {
         await localDb.decks.bulkPut(localDecks);
         // Mirror the (possibly updated) FSRS settings into the in-memory
         // store so the FSRS scheduler picks up the new params immediately.
+        // TODO(multi-deck): the FSRS store is global today; once decks can
+        // have per-deck settings, scope this to the active/default deck.
         for (const d of localDecks) hydrateFSRSSettingsFromBlob(d.fsrsSettings);
       }
       trackRows(changes.decks);

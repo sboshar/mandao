@@ -93,21 +93,30 @@ function App() {
     if (!userId && ready) setReady(false);
   }, [userId, ready]);
 
-  // Push FSRS settings changes to the deck row so they sync. Skips writes
-  // triggered by sync-side hydration (avoids the pull→hydrate→push loop).
+  // Push FSRS settings changes to the deck row so they sync. Debounced so a
+  // dragged slider collapses into one outbox op instead of dozens. Skips
+  // writes triggered by sync-side hydration (avoids the pull→hydrate→push
+  // loop).
   useEffect(() => {
     if (!userId || !ready) return;
-    return useFSRSSettingsStore.subscribe(async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = useFSRSSettingsStore.subscribe(() => {
       if (isHydratingFSRSSettings()) return;
-      try {
-        const deckId = await repo.ensureDefaultDeck();
-        await repo.updateDeck(deckId, {
-          fsrsSettings: getFSRSSettings() as unknown as Record<string, unknown>,
-        });
-      } catch (err) {
-        console.error('Failed to enqueue FSRS settings update', err);
-      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async () => {
+        timer = null;
+        try {
+          const deckId = await repo.ensureDefaultDeck();
+          await repo.updateDeck(deckId, { fsrsSettings: getFSRSSettings() });
+        } catch (err) {
+          console.error('Failed to enqueue FSRS settings update', err);
+        }
+      }, 500);
     });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
   }, [userId, ready]);
 
   if (authLoading) return <LoadingScreen />;
