@@ -190,22 +190,11 @@ export async function getReviewQueue(
   ]);
 
   const reviewLimit = deck.reviewsPerDay + getReviewLimitBumpToday(deckId);
-
-  // Anki's daily-cap rule: interday learning/relearning shares the
-  // reviewsPerDay budget with state-2 reviews and gets first dibs;
-  // intraday learning bypasses the cap entirely.
   const dueLearning = learningRelearning.filter((c) => c.due <= now && ok(c));
-  const intraday = dueLearning.filter(isIntradayLearning);
-  const interday = dueLearning.filter((c) => !isIntradayLearning(c));
+  const { intraday, interday } = partitionLearning(dueLearning);
   const dueReview = reviewCards.filter((c) => c.due <= now && ok(c));
   const reviewBucket = [...interday, ...dueReview].slice(0, reviewLimit);
-
-  // Anki default: new cards also count against reviewsPerDay (the
-  // "newCardsIgnoreReviewLimit" toggle reverts to two independent caps).
-  const ignoreReviewLimit = useFSRSSettingsStore.getState().newCardsIgnoreReviewLimit;
-  const newCap = ignoreReviewLimit
-    ? newRemaining
-    : Math.min(newRemaining, Math.max(0, reviewLimit - reviewBucket.length));
+  const newCap = newCardSlots(newRemaining, reviewLimit, reviewBucket.length);
   const dueNew = newCards.filter((c) => ok(c)).slice(0, newCap);
 
   return [...intraday, ...reviewBucket, ...dueNew];
@@ -226,8 +215,27 @@ export async function getReviewQueue(
  */
 function isIntradayLearning(c: SrsCard): boolean {
   if (c.scheduledDays >= 1) return false;
+  // No lastReview → freshly-seeded mid-step card; treat as intraday so it
+  // doesn't accidentally consume a review-bucket slot.
   if (!c.lastReview) return true;
   return startOfDayMs(c.lastReview) === startOfDayMs(c.due);
+}
+
+function partitionLearning(cards: SrsCard[]): { intraday: SrsCard[]; interday: SrsCard[] } {
+  const intraday: SrsCard[] = [];
+  const interday: SrsCard[] = [];
+  for (const c of cards) (isIntradayLearning(c) ? intraday : interday).push(c);
+  return { intraday, interday };
+}
+
+/**
+ * How many new cards to deliver after the review bucket is filled. Anki's
+ * default has the two caps share a budget; the newCardsIgnoreReviewLimit
+ * toggle reverts to independent caps.
+ */
+function newCardSlots(newRemaining: number, reviewLimit: number, reviewBucketSize: number): number {
+  if (useFSRSSettingsStore.getState().newCardsIgnoreReviewLimit) return newRemaining;
+  return Math.min(newRemaining, Math.max(0, reviewLimit - reviewBucketSize));
 }
 
 function startOfDayMs(ms: number): number {
@@ -426,11 +434,8 @@ export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
   ]);
 
   const reviewLimit = deck.reviewsPerDay + getReviewLimitBumpToday(deckId);
-  const ignoreReviewLimit = useFSRSSettingsStore.getState().newCardsIgnoreReviewLimit;
-
   const dueLearning = learningCards.filter((c) => c.due <= now);
-  const intraday = dueLearning.filter(isIntradayLearning);
-  const interday = dueLearning.filter((c) => !isIntradayLearning(c));
+  const { intraday, interday } = partitionLearning(dueLearning);
   const dueReview = reviewCards.filter((c) => c.due <= now);
   const futureCards = [...learningCards, ...reviewCards].filter((c) => c.due > now);
 
@@ -448,10 +453,7 @@ export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
 
     const rc = Math.min(modeReviewBucketTotal, reviewLimit);
     const reviewBacklog = Math.max(0, modeReviewBucketTotal - reviewLimit);
-
-    const newSlots = ignoreReviewLimit
-      ? newRemaining
-      : Math.min(newRemaining, Math.max(0, reviewLimit - rc));
+    const newSlots = newCardSlots(newRemaining, reviewLimit, rc);
     const nc = Math.min(modeNewTotal, newSlots);
 
     byModeAndState[m] = {
