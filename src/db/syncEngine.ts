@@ -13,7 +13,8 @@
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
-import type { Deck } from './schema';
+import type { Deck, Meaning } from './schema';
+import { hydrateFSRSSettingsFromBlob } from '../stores/fsrsSettingsStore';
 import type { FailedOp } from '../stores/syncStore';
 import { runAudioPrefetch } from '../services/audioPrefetch';
 import { audioBlobToBlob } from './localRepo';
@@ -204,6 +205,9 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
     case 'updateDeck':
       await pushSequential(ops, pushUpdateDeck);
       break;
+    case 'updateMeaning':
+      await pushSequential(ops, pushUpdateMeaning);
+      break;
     case 'upsertAudioRecording':
       await pushSequential(ops, pushUpsertAudioRecording);
       break;
@@ -372,6 +376,7 @@ async function pushUpdateDeck(op: SyncOp): Promise<void> {
     description: 'description',
     newCardsPerDay: 'new_cards_per_day',
     reviewsPerDay: 'reviews_per_day',
+    fsrsSettings: 'fsrs_settings',
   };
   const row: Record<string, unknown> = {};
   for (const [camel, snake] of Object.entries(FIELD_MAP)) {
@@ -382,6 +387,34 @@ async function pushUpdateDeck(op: SyncOp): Promise<void> {
   const userId = getCachedUserIdOrThrow();
   const { error } = await supabase
     .from('decks')
+    .update(row)
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw syncErrorFrom(error);
+}
+
+async function pushUpdateMeaning(op: SyncOp): Promise<void> {
+  const { id, updates } = op.payload as { id: string; updates: Partial<Meaning> };
+  // Mutable fields only. id/type/createdAt are immutable by convention;
+  // updatedAt/usn are managed by the bump_sync_meta trigger.
+  const FIELD_MAP: Partial<Record<keyof Meaning, string>> = {
+    headword: 'headword',
+    pinyinNumeric: 'pinyin_numeric',
+    partOfSpeech: 'part_of_speech',
+    englishShort: 'english_short',
+    englishFull: 'english_full',
+    level: 'level',
+    isTransliteration: 'is_transliteration',
+  };
+  const row: Record<string, unknown> = {};
+  for (const [camel, snake] of Object.entries(FIELD_MAP)) {
+    if (camel in updates) row[snake] = updates[camel as keyof Meaning];
+  }
+  if (Object.keys(row).length === 0) return;
+
+  const userId = getCachedUserIdOrThrow();
+  const { error } = await supabase
+    .from('meanings')
     .update(row)
     .eq('id', id)
     .eq('user_id', userId);
@@ -493,7 +526,11 @@ async function pullOnePage(): Promise<boolean> {
       trackRows(changes.sentence_tokens);
 
       if (changes.decks.length > 0) {
-        await localDb.decks.bulkPut(changes.decks.map(deckFromRow));
+        const localDecks = changes.decks.map(deckFromRow);
+        await localDb.decks.bulkPut(localDecks);
+        // Mirror the (possibly updated) FSRS settings into the in-memory
+        // store so the FSRS scheduler picks up the new params immediately.
+        for (const d of localDecks) hydrateFSRSSettingsFromBlob(d.fsrsSettings);
       }
       trackRows(changes.decks);
 

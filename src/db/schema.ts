@@ -179,6 +179,11 @@ export interface Deck {
   description: string;
   newCardsPerDay: number;
   reviewsPerDay: number;
+  /** FSRS scheduling parameters (requestRetention, learning steps, etc.).
+   *  Stored as a free-form record so future fields (e.g. the optimizer's
+   *  weight vector) don't need schema migrations. Empty `{}` means
+   *  "use hardcoded defaults". */
+  fsrsSettings?: Record<string, unknown>;
   createdAt: number;
   updatedAt?: number;
   usn?: number;

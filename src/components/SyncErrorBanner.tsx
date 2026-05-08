@@ -10,6 +10,7 @@ const OP_LABELS: Record<SyncOpType, string> = {
   deleteAllData: 'clear all data',
   updateTags: 'tag update',
   updateDeck: 'deck settings',
+  updateMeaning: 'meaning update',
   upsertAudioRecording: 'audio upload',
   deleteStorageObjects: 'audio cleanup',
 };

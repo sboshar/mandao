@@ -21,6 +21,8 @@ const DEFAULTS: FSRSSettings = {
   relearningSteps: ['10m'],
 };
 
+const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof FSRSSettings)[];
+
 function load(): FSRSSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -52,6 +54,47 @@ export const useFSRSSettingsStore = create<FSRSSettingsState>((set, get) => ({
     set({ ...DEFAULTS });
   },
 }));
+
+/** Pull only the FSRSSettings shape out of the store (drop action methods). */
+export function getFSRSSettings(): FSRSSettings {
+  const state = useFSRSSettingsStore.getState();
+  const out: Record<string, unknown> = {};
+  for (const k of SETTING_KEYS) out[k] = state[k];
+  return out as unknown as FSRSSettings;
+}
+
+/**
+ * Hydrate the store from a remote deck row's `fsrs_settings` blob (after
+ * a sync pull). Skips no-op assignments to avoid the subscribe-→push-→
+ * pull loop. Unknown keys are ignored; missing keys fall back to defaults.
+ */
+let hydrating = false;
+export function isHydratingFSRSSettings(): boolean {
+  return hydrating;
+}
+export function hydrateFSRSSettingsFromBlob(blob: Record<string, unknown> | undefined): void {
+  if (!blob || Object.keys(blob).length === 0) return;
+  const merged = { ...DEFAULTS } as FSRSSettings;
+  let changed = false;
+  for (const k of SETTING_KEYS) {
+    if (k in blob) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (merged as any)[k] = (blob as any)[k];
+    }
+  }
+  const cur = getFSRSSettings();
+  for (const k of SETTING_KEYS) {
+    if (JSON.stringify(cur[k]) !== JSON.stringify(merged[k])) { changed = true; break; }
+  }
+  if (!changed) return;
+  hydrating = true;
+  try {
+    save(merged);
+    useFSRSSettingsStore.setState(merged);
+  } finally {
+    hydrating = false;
+  }
+}
 
 /** Convert store state to ts-fsrs generatorParameters input */
 export function toFSRSParams(s: FSRSSettings) {

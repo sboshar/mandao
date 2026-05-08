@@ -20,6 +20,12 @@ import { SyncErrorBanner } from './components/SyncErrorBanner';
 import { InstallBanner } from './components/InstallBanner';
 import { useTutorialStore, skipTutorialIfReturningUser } from './stores/tutorialStore';
 import { useAuthStore } from './stores/authStore';
+import {
+  useFSRSSettingsStore,
+  getFSRSSettings,
+  isHydratingFSRSSettings,
+} from './stores/fsrsSettingsStore';
+import * as repo from './db/repo';
 import './stores/themeStore';
 
 const LoadingScreen = ({ message }: { message?: string }) => (
@@ -85,6 +91,23 @@ function App() {
   // Sign-out: clear ready so hydration re-runs on next login
   useEffect(() => {
     if (!userId && ready) setReady(false);
+  }, [userId, ready]);
+
+  // Push FSRS settings changes to the deck row so they sync. Skips writes
+  // triggered by sync-side hydration (avoids the pull→hydrate→push loop).
+  useEffect(() => {
+    if (!userId || !ready) return;
+    return useFSRSSettingsStore.subscribe(async () => {
+      if (isHydratingFSRSSettings()) return;
+      try {
+        const deckId = await repo.ensureDefaultDeck();
+        await repo.updateDeck(deckId, {
+          fsrsSettings: getFSRSSettings() as unknown as Record<string, unknown>,
+        });
+      } catch (err) {
+        console.error('Failed to enqueue FSRS settings update', err);
+      }
+    });
   }, [userId, ready]);
 
   if (authLoading) return <LoadingScreen />;
