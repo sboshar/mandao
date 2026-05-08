@@ -5,6 +5,7 @@ import { getReviewQueue, getStudyAheadQueue } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
+import { TagFilterRow } from '../components/TagFilterRow';
 import type { ReviewMode } from '../db/schema';
 import { ensureDefaultDeck } from '../db/repo';
 
@@ -28,7 +29,6 @@ export function ReviewPage() {
   const [started, setStarted] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [filterTags, setFilterTags] = useState<string[]>([]);
-  const [showFilter, setShowFilter] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<ModeOption | null>(null);
   const autoStarted = useRef(false);
@@ -94,49 +94,14 @@ export function ReviewPage() {
         </div>
 
         <div className="space-y-3">
-          {allTags.length > 0 && (
-            <div className="mb-4">
-              <button
-                onClick={() => setShowFilter(!showFilter)}
-                className="text-xs px-2.5 py-1 rounded-full transition-colors"
-                style={filterTags.length > 0
-                  ? { background: 'color-mix(in srgb, var(--accent) 15%, var(--bg-surface))', color: 'var(--accent)' }
-                  : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
-                }
-              >
-                Filter by tag{filterTags.length > 0 ? ` (${filterTags.length})` : ''} {showFilter ? '\u25B2' : '\u25BC'}
-              </button>
-              {showFilter && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  <button
-                    onClick={() => setFilterTags([])}
-                    className="px-2.5 py-1 text-xs rounded-full transition-colors"
-                    style={filterTags.length === 0
-                      ? { background: 'var(--text-primary)', color: 'var(--bg-surface)' }
-                      : { background: 'var(--bg-inset)', color: 'var(--text-secondary)' }
-                    }
-                  >
-                    All sentences
-                  </button>
-                  {allTags.map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => setFilterTags((prev) =>
-                        prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-                      )}
-                      className="px-2.5 py-1 text-xs rounded-full transition-colors"
-                      style={filterTags.includes(tag)
-                        ? { background: 'var(--accent)', color: 'var(--text-inverted)' }
-                        : { background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-surface))', color: 'var(--accent)' }
-                      }
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <TagFilterRow
+            allTags={allTags}
+            selected={filterTags}
+            onChange={setFilterTags}
+            allLabel="All sentences"
+            chipSize="md"
+            className="mb-4"
+          />
 
           <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
             Choose review mode:

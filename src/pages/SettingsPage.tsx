@@ -24,6 +24,8 @@ import {
   RECORDING_CAP_SEC_MAX,
   type AudioCacheCapMB,
 } from '../stores/audioCacheSettingsStore';
+import { useAudioPlaybackSettingsStore } from '../stores/audioPlaybackSettingsStore';
+import type { ReviewMode } from '../db/schema';
 import { getAudioCacheUsage } from '../db/localRepo';
 import {
   runAudioPrefetch,
@@ -1333,6 +1335,8 @@ function DataSection() {
         </div>
       </SectionCard>
 
+      <AudioPlaybackCard />
+
       {/* Offline audio cache */}
       <AudioCacheCard />
 
@@ -1375,6 +1379,60 @@ function DataSection() {
         )}
       </SectionCard>
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Auto-play during review
+// ────────────────────────────────────────────────────────────
+
+const PLAYBACK_MODES: { mode: ReviewMode; label: string }[] = [
+  { mode: 'listen-type', label: 'Listen mode' },
+  { mode: 'zh-to-en', label: 'ZH → EN' },
+  { mode: 'en-to-zh', label: 'EN → ZH' },
+  { mode: 'py-to-en-zh', label: 'Pinyin' },
+  { mode: 'speak', label: 'Speak' },
+];
+
+function AudioPlaybackCard() {
+  const masterEnabled = useAudioPlaybackSettingsStore((s) => s.masterEnabled);
+  const perMode = useAudioPlaybackSettingsStore((s) => s.perMode);
+  const setMasterEnabled = useAudioPlaybackSettingsStore((s) => s.setMasterEnabled);
+  const setModeEnabled = useAudioPlaybackSettingsStore((s) => s.setModeEnabled);
+
+  return (
+    <SectionCard
+      title="Auto-play during review"
+      description="When a card is revealed, automatically play the most-recent recording for that sentence (or the default voice for Listen mode if no recording exists)."
+    >
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">Auto-play audio during review</span>
+          <Toggle checked={masterEnabled} onChange={setMasterEnabled} />
+        </div>
+
+        <div
+          className="space-y-2 pt-2"
+          style={{
+            opacity: masterEnabled ? 1 : 0.4,
+            pointerEvents: masterEnabled ? 'auto' : 'none',
+            borderTop: '1px solid var(--border)',
+          }}
+        >
+          {PLAYBACK_MODES.map(({ mode, label }) => (
+            <div key={mode} className="flex items-center justify-between">
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {label}
+              </span>
+              <Toggle
+                checked={perMode[mode]}
+                onChange={(v) => setModeEnabled(mode, v)}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </SectionCard>
   );
 }
 

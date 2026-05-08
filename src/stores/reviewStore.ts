@@ -11,11 +11,15 @@ interface ReviewState {
   isFlipped: boolean;
   isLoading: boolean;
   undoInfo: UndoInfo | null;
+  /** When true, ratings/actions must NOT write to FSRS. */
+  isFreeReview: boolean;
 
-  setQueue: (cards: SrsCard[]) => void;
+  setQueue: (cards: SrsCard[], opts?: { freeReview?: boolean }) => void;
   flip: () => void;
   next: (undo?: UndoInfo) => void;
   prev: () => void;
+  /** Free-review only: send the current card to the back of the queue and advance. */
+  requeueCurrent: () => void;
   currentCard: () => SrsCard | null;
   remaining: () => number;
   clearUndo: () => void;
@@ -28,9 +32,17 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   isFlipped: false,
   isLoading: false,
   undoInfo: null,
+  isFreeReview: false,
 
-  setQueue: (cards) =>
-    set({ queue: cards, currentIndex: 0, isFlipped: false, isLoading: false, undoInfo: null }),
+  setQueue: (cards, opts) =>
+    set({
+      queue: cards,
+      currentIndex: 0,
+      isFlipped: false,
+      isLoading: false,
+      undoInfo: null,
+      isFreeReview: opts?.freeReview ?? false,
+    }),
 
   flip: () => set({ isFlipped: true }),
 
@@ -54,6 +66,21 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
     }
   },
 
+  requeueCurrent: () => {
+    const { queue, currentIndex } = get();
+    if (currentIndex >= queue.length) return;
+    // Only one unconsumed card left: requeueing would put it right back at currentIndex
+    // and trap the user. Treat "Again later" as "next" and end the session instead.
+    if (queue.length - currentIndex <= 1) {
+      set({ currentIndex: queue.length, isFlipped: false, undoInfo: null });
+      return;
+    }
+    const card = queue[currentIndex];
+    const next = [...queue.slice(0, currentIndex), ...queue.slice(currentIndex + 1), card];
+    // currentIndex stays — what's now at this slot is the next card.
+    set({ queue: next, isFlipped: false, undoInfo: null });
+  },
+
   currentCard: () => {
     const { queue, currentIndex } = get();
     return currentIndex < queue.length ? queue[currentIndex] : null;
@@ -67,5 +94,12 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
   clearUndo: () => set({ undoInfo: null }),
 
   reset: () =>
-    set({ queue: [], currentIndex: 0, isFlipped: false, isLoading: false, undoInfo: null }),
+    set({
+      queue: [],
+      currentIndex: 0,
+      isFlipped: false,
+      isLoading: false,
+      undoInfo: null,
+      isFreeReview: false,
+    }),
 }));

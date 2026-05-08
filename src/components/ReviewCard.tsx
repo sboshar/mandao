@@ -11,7 +11,8 @@ import { ClickableEnglish } from './ClickableEnglish';
 import { reviewCard, undoReview, type Grade } from '../services/srs';
 import { comparePinyin, type SyllableResult } from '../lib/pinyinCompare';
 import { numericStringToDiacritic } from '../services/toneSandhi';
-import { speakChinese, stopSpeaking } from '../services/audio';
+import { stopSpeaking } from '../services/audio';
+import { useAudioPlaybackSettingsStore } from '../stores/audioPlaybackSettingsStore';
 import {
   isSpeechRecognitionSupported,
   stopRecognition,
@@ -36,7 +37,7 @@ const SPEED_OPTIONS = [
 ] as const;
 
 export function ReviewCard() {
-  const { currentCard, isFlipped, flip, next, prev, remaining, undoInfo, clearUndo } = useReviewStore();
+  const { currentCard, isFlipped, flip, next, prev, remaining, undoInfo, clearUndo, isFreeReview, requeueCurrent } = useReviewStore();
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
   const [editingTags, setEditingTags] = useState(false);
@@ -46,9 +47,10 @@ export function ReviewCard() {
   const [pinyinInput, setPinyinInput] = useState('');
   const [pinyinResults, setPinyinResults] = useState<SyllableResult[] | null>(null);
   const pinyinInputRef = useRef<HTMLInputElement>(null);
-  const autoPlayed = useRef<string | null>(null);
   const [speedIndex, setSpeedIndex] = useState(2);
   const speechRate = SPEED_OPTIONS[speedIndex].value;
+  const masterAutoPlay = useAudioPlaybackSettingsStore((s) => s.masterEnabled);
+  const perModeAutoPlay = useAudioPlaybackSettingsStore((s) => s.perMode);
 
   // Speak-mode state
   const [isListening, setIsListening] = useState(false);
@@ -122,18 +124,31 @@ export function ReviewCard() {
   useEffect(() => {
     if (!isListenType || !sentence || !card) return;
     if (sentence.id !== card.sentenceId) return;
-    if (autoPlayed.current !== card.id) {
-      autoPlayed.current = card.id;
-      speakChinese(sentence.chinese, speechRate).catch(() => {});
-    }
     if (pinyinInputRef.current) {
       pinyinInputRef.current.focus();
     }
     return () => { stopSpeaking(); };
   }, [isListenType, sentence, card?.id, card?.sentenceId]);
 
+  // Synchronous lock so OS key-repeat (holding 1-4 or Cmd+Z) can't fire
+  // a second action before React commits the pending/undoing state flip.
+  const actionLockRef = useRef(false);
+
+  // Auto-play key passed to SentenceAudioControls. Listen-type/speak fire on
+  // mount (audio is the prompt); other modes fire after flip. Speak skips
+  // while recording so playback doesn't bleed into the user's mic.
+  const autoPlayKey = (() => {
+    if (!card || !sentence) return null;
+    if (!masterAutoPlay) return null;
+    if (!perModeAutoPlay[card.reviewMode]) return null;
+    if (card.reviewMode === 'speak' && isListening) return null;
+    if (card.reviewMode === 'listen-type' || card.reviewMode === 'speak') return card.id;
+    return isFlipped ? card.id : null;
+  })();
+
   const handleUndo = async () => {
-    if (!undoInfo || undoing || pendingRating !== null) return;
+    if (actionLockRef.current || !undoInfo || undoing || pendingRating !== null) return;
+    actionLockRef.current = true;
     setUndoing(true);
     try {
       await undoReview(undoInfo);
@@ -142,15 +157,72 @@ export function ReviewCard() {
       setRateError('Could not undo. Check your connection and try again.');
     } finally {
       setUndoing(false);
+      actionLockRef.current = false;
     }
   };
 
+  const handleFlip = () => {
+    clearUndo();
+    flip();
+  };
+
+  const handleRate = async (rating: Grade) => {
+    if (!card || actionLockRef.current) return;
+    actionLockRef.current = true;
+    setRateError(null);
+    setPendingRating(rating);
+    try {
+      const undo = await reviewCard(card.id, rating);
+      next(undo);
+    } catch {
+      setRateError('Could not save this review. Check your connection and try again.');
+    } finally {
+      setPendingRating(null);
+      actionLockRef.current = false;
+    }
+  };
+
+  // The handlers below close over state already in the dep array, so
+  // listing them again would just force a re-attach per render with no
+  // behavioral difference (hence the eslint-disable on the deps line).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!card) return;
+
+      if (!isFlipped && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        handleFlip();
+        return;
+      }
+
+      if (isFlipped && !isFreeReview && e.key >= '1' && e.key <= '4') {
+        e.preventDefault();
+        handleRate(Number(e.key) as Grade);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card, isFlipped, isFreeReview, undoInfo, undoing, pendingRating, flip, clearUndo, next, prev]);
+
   if (!card || !sentence) {
+    let message: string;
+    if (remaining() > 0) message = 'Loading...';
+    else if (isFreeReview) message = 'All done — nothing left in this free-review session.';
+    else message = 'No cards to review. Add some sentences first!';
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3" style={{ color: 'var(--text-tertiary)' }}>
-        {remaining() === 0
-          ? 'No cards to review. Add some sentences first!'
-          : 'Loading...'}
+        {message}
         {remaining() === 0 && undoInfo && (
           <button
             onClick={handleUndo}
@@ -170,11 +242,6 @@ export function ReviewCard() {
 
   const isEnToZh = card.reviewMode === 'en-to-zh';
   const isPyToEnZh = card.reviewMode === 'py-to-en-zh';
-
-  const handleFlip = () => {
-    clearUndo();
-    flip();
-  };
 
   const handlePinyinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,18 +334,69 @@ export function ReviewCard() {
     if (recordingBlob) playBlob(recordingBlob);
   };
 
-  const handleRate = async (rating: Grade) => {
+  const handleGotIt = () => {
     setRateError(null);
-    setPendingRating(rating);
-    try {
-      const undo = await reviewCard(card.id, rating);
-      next(undo);
-    } catch {
-      setRateError('Could not save this review. Check your connection and try again.');
-    } finally {
-      setPendingRating(null);
-    }
+    next();
   };
+  const handleAgainLater = () => {
+    setRateError(null);
+    requeueCurrent();
+  };
+
+  const actionBar = isFreeReview ? (
+    <div className="mt-6 grid grid-cols-2 gap-2">
+      <button
+        onClick={handleAgainLater}
+        className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+        style={{
+          background: 'color-mix(in srgb, var(--rating-again) 15%, var(--bg-surface))',
+          color: 'var(--rating-again)',
+        }}
+        title="Send this card to the back of the queue"
+      >
+        Again later
+      </button>
+      <button
+        onClick={handleGotIt}
+        className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+        style={{
+          background: 'color-mix(in srgb, var(--rating-good) 15%, var(--bg-surface))',
+          color: 'var(--rating-good)',
+        }}
+      >
+        Got it
+      </button>
+    </div>
+  ) : (
+    <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {([
+        { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
+        { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
+        { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
+        { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
+      ]).map((btn) => {
+        const isSelected = pendingRating === btn.rating;
+        const isDisabled = pendingRating !== null || undoing;
+        return (
+          <button
+            key={btn.rating}
+            onClick={() => handleRate(btn.rating)}
+            disabled={isDisabled}
+            className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
+            style={{
+              background: isSelected
+                ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
+                : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
+              color: isSelected ? 'var(--text-inverted)' : btn.color,
+              opacity: isDisabled && !isSelected ? 0.4 : 1,
+            }}
+          >
+            {btn.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -411,7 +529,11 @@ export function ReviewCard() {
 
               {/* Audio controls row */}
               <div className="flex gap-2 justify-center flex-wrap mt-4">
-                <SentenceAudioControls sentenceId={sentence.id} text={sentence.chinese} />
+                <SentenceAudioControls
+                  sentenceId={sentence.id}
+                  text={sentence.chinese}
+                  autoPlayKey={autoPlayKey}
+                />
                 {recordingBlob && (
                   <button
                     onClick={handlePlayRecording}
@@ -441,36 +563,9 @@ export function ReviewCard() {
 
               {/* Rating buttons — appear once a comparison exists; user grades themselves */}
               {comparison ? (
-                <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {([
-                    { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
-                    { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
-                    { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
-                    { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
-                  ]).map((btn) => {
-                    const isSelected = pendingRating === btn.rating;
-                    const isDisabled = pendingRating !== null || undoing;
-                    return (
-                      <button
-                        key={btn.rating}
-                        onClick={() => handleRate(btn.rating)}
-                        disabled={isDisabled}
-                        className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
-                        style={{
-                          background: isSelected
-                            ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
-                            : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
-                          color: isSelected ? 'var(--text-inverted)' : btn.color,
-                          opacity: isDisabled && !isSelected ? 0.4 : 1,
-                        }}
-                      >
-                        {btn.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                actionBar
               ) : (
-                undoInfo && (
+                !isFreeReview && undoInfo && (
                   <button
                     onClick={handleUndo}
                     disabled={undoing || pendingRating !== null}
@@ -502,6 +597,8 @@ export function ReviewCard() {
                   text={sentence.chinese}
                   rate={speechRate}
                   className="text-2xl"
+                  autoPlayKey={autoPlayKey}
+                  autoPlayFallbackToTts
                 />
                 <button
                   onClick={() => setSpeedIndex((i) => (i + 1) % SPEED_OPTIONS.length)}
@@ -681,7 +778,11 @@ export function ReviewCard() {
               )}
 
               <div className="text-center">
-                <SentenceAudioControls sentenceId={sentence.id} text={sentence.chinese} />
+                <SentenceAudioControls
+                  sentenceId={sentence.id}
+                  text={sentence.chinese}
+                  autoPlayKey={autoPlayKey}
+                />
               </div>
 
               {/* Tags */}
@@ -738,35 +839,7 @@ export function ReviewCard() {
               </p>
             )}
 
-            {/* Rating buttons */}
-            <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {([
-                { rating: 1 as const, label: 'Again', color: 'var(--rating-again)' },
-                { rating: 2 as const, label: 'Hard', color: 'var(--rating-hard)' },
-                { rating: 3 as const, label: 'Good', color: 'var(--rating-good)' },
-                { rating: 4 as const, label: 'Easy', color: 'var(--rating-easy)' },
-              ]).map((btn) => {
-                const isSelected = pendingRating === btn.rating;
-                const isDisabled = pendingRating !== null || undoing;
-                return (
-                  <button
-                    key={btn.rating}
-                    onClick={() => handleRate(btn.rating)}
-                    disabled={isDisabled}
-                    className="py-3 min-h-[44px] rounded-lg font-medium transition-all active:scale-[0.95]"
-                    style={{
-                      background: isSelected
-                        ? `color-mix(in srgb, ${btn.color} 50%, var(--bg-surface))`
-                        : `color-mix(in srgb, ${btn.color} 15%, var(--bg-surface))`,
-                      color: isSelected ? 'var(--text-inverted)' : btn.color,
-                      opacity: isDisabled && !isSelected ? 0.4 : 1,
-                    }}
-                  >
-                    {btn.label}
-                  </button>
-                );
-              })}
-            </div>
+            {actionBar}
           </>
         )}
         </>

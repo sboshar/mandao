@@ -57,6 +57,14 @@ interface Props {
   text: string;
   rate?: number;
   className?: string;
+  /**
+   * When this string changes to a non-null value, attempt auto-play once for
+   * that key. The component plays the first available recording; if none
+   * exists and `autoPlayFallbackToTts` is set, it falls back to default TTS.
+   */
+  autoPlayKey?: string | null;
+  /** If no recording exists, fall back to playing default Google TTS. */
+  autoPlayFallbackToTts?: boolean;
 }
 
 /**
@@ -64,15 +72,26 @@ interface Props {
  * one button per saved recording (same icon + label underneath), and a
  * trailing + button that starts a new recording inline.
  */
-export function SentenceAudioControls({ sentenceId, text, rate, className = '' }: Props) {
+export function SentenceAudioControls({
+  sentenceId,
+  text,
+  rate,
+  className = '',
+  autoPlayKey = null,
+  autoPlayFallbackToTts = false,
+}: Props) {
   const [recordings, setRecordings] = useState<AudioRecording[]>([]);
   // Recording id → resolved Blob. Eagerly populated alongside recordings so
   // play clicks can read the blob synchronously and call audio.play() inside
   // the user-gesture context — required by iOS Safari, where any await
   // between the click and play() rejects unmuted audio playback.
   const [blobMap, setBlobMap] = useState<Map<string, Blob>>(new Map());
+  const [recordingsLoaded, setRecordingsLoaded] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null); // 'default' or recording.id
   const stopPlaybackRef = useRef<(() => void) | null>(null);
+  // Tracks which auto-play keys have already been handled, so a single key
+  // never fires twice (e.g. when recordings reload mid-effect).
+  const handledAutoPlayKeyRef = useRef<string | null>(null);
 
   // Inline recording state
   const [recordHandle, setRecordHandle] = useState<RecordingHandle | null>(null);
@@ -96,7 +115,12 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
         if (blob) map.set(r.id, blob);
       }),
     );
-    if (!cancelledRef.current) setBlobMap(map);
+    if (cancelledRef.current) return;
+    setBlobMap(map);
+    // Set after blobs land so the auto-play effect uses the eager-loaded
+    // blob path (synchronous play() inside the user-gesture context) rather
+    // than the async fallback.
+    setRecordingsLoaded(true);
   };
 
   const refresh = async () => {
@@ -105,6 +129,7 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
 
   useEffect(() => {
     const cancelledRef = { current: false };
+    setRecordingsLoaded(false);
     loadRecordingsAndBlobs(cancelledRef);
     return () => {
       cancelledRef.current = true;
@@ -193,6 +218,24 @@ export function SentenceAudioControls({ sentenceId, text, rate, className = '' }
       }
     })();
   };
+
+  // Each autoPlayKey fires at most once. We bail if playback has already
+  // started (cancel-on-manual-play) or recordings haven't finished loading.
+  useEffect(() => {
+    if (!autoPlayKey) return;
+    if (!recordingsLoaded) return;
+    if (handledAutoPlayKeyRef.current === autoPlayKey) return;
+    handledAutoPlayKeyRef.current = autoPlayKey;
+    if (playingId !== null) return;
+
+    if (recordings.length > 0) {
+      // recordings are sorted asc by createdAt; the last is the newest.
+      playRecording(recordings[recordings.length - 1]);
+      return;
+    }
+    if (autoPlayFallbackToTts) void playDefault();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlayKey, recordingsLoaded, recordings]);
 
   const defaultName = () => `Recording ${recordings.length + 1}`;
 

@@ -242,6 +242,41 @@ export async function getStudyAheadQueue(
   return typeof limit === 'number' ? future.slice(0, limit) : future;
 }
 
+export interface FreeReviewQueueArgs {
+  deckId: string;
+  mode: ReviewMode | 'both';
+  sentenceIds: string[];
+  shuffle?: boolean;
+  limit?: number | null;
+}
+
+/**
+ * Build a queue for free review. Unlike {@link getReviewQueue} this ignores
+ * due dates and daily limits — the user is opting in to drill specific cards.
+ * Cards returned here are NEVER passed to FSRS scheduling; the caller must
+ * skip {@link reviewCard} writes.
+ */
+export async function getFreeReviewQueue(args: FreeReviewQueueArgs): Promise<SrsCard[]> {
+  const { deckId, mode, sentenceIds, shuffle = true, limit } = args;
+  if (sentenceIds.length === 0) return [];
+
+  const restrict = new Set(sentenceIds);
+  const all = await repo.getSrsCardsByDeckAndStates(deckId, [0, 1, 2, 3]);
+  let filtered = all.filter(
+    (c) => (mode === 'both' || c.reviewMode === mode) && restrict.has(c.sentenceId)
+  );
+
+  if (shuffle) {
+    for (let i = filtered.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+    }
+  }
+
+  if (limit && limit > 0) filtered = filtered.slice(0, limit);
+  return filtered;
+}
+
 /** Get counts for dashboard display */
 export async function getDueCounts(
   deckId: string
