@@ -352,6 +352,11 @@ export interface ModeStateCounts {
   futureCount: number;
 }
 
+export const EMPTY_MODE_STATE: ModeStateCounts = {
+  newCount: 0, learningCount: 0, reviewCount: 0,
+  newBacklog: 0, reviewBacklog: 0, futureCount: 0,
+};
+
 export interface DueBreakdown {
   byMode: ModeCounts;
   byModeAndState: Record<ReviewMode | 'all', ModeStateCounts>;
@@ -369,10 +374,7 @@ export async function getDueBreakdown(deckId: string): Promise<DueBreakdown> {
   const now = Date.now();
   const deck = await repo.getDeck(deckId);
   if (!deck) {
-    const empty: ModeStateCounts = {
-      newCount: 0, learningCount: 0, reviewCount: 0,
-      newBacklog: 0, reviewBacklog: 0, futureCount: 0,
-    };
+    const empty = EMPTY_MODE_STATE;
     const byModeAndState = {
       'all': empty, 'en-to-zh': empty, 'zh-to-en': empty,
       'py-to-en-zh': empty, 'listen-type': empty, 'speak': empty,

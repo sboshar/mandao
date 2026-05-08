@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { useReviewStore } from '../stores/reviewStore';
-import { getReviewQueue, getStudyAheadQueue } from '../services/srs';
+import { getReviewQueue, getStudyAheadQueue, getDueBreakdown, type DueBreakdown } from '../services/srs';
 import { getAllTags } from '../services/ingestion';
 import { ReviewCard } from '../components/ReviewCard';
 import { MeaningCard } from '../components/MeaningCard';
 import { TagFilterRow } from '../components/TagFilterRow';
+import { CustomStudyButton } from '../components/CustomStudyButton';
 import type { ReviewMode } from '../db/schema';
 import { ensureDefaultDeck } from '../db/repo';
 
@@ -24,14 +25,19 @@ export function ReviewPage() {
   const { deckId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { setQueue, remaining, reset } = useReviewStore();
+  const { setQueue, reset } = useReviewStore();
+  const remainingCount = useReviewStore((s) => s.queue.length - s.currentIndex);
   const [mode, setMode] = useState<ModeOption>('en-to-zh');
   const [started, setStarted] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<ModeOption | null>(null);
+  const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
+  const [breakdown, setBreakdown] = useState<DueBreakdown | null>(null);
   const autoStarted = useRef(false);
+
+  const isSessionDone = started && remainingCount === 0;
 
   useEffect(() => {
     getAllTags().then(setAllTags);
@@ -42,6 +48,7 @@ export function ReviewPage() {
     setLoadingMode(selectedMode);
     try {
       const effectiveDeckId = deckId ?? (await ensureDefaultDeck());
+      setActiveDeckId(effectiveDeckId);
       const tags = filterTags.length > 0 ? filterTags : null;
       const queue = studyAhead !== undefined
         ? await getStudyAheadQueue(effectiveDeckId, selectedMode, tags, studyAhead === 'all' ? undefined : studyAhead)
@@ -52,6 +59,25 @@ export function ReviewPage() {
       setLoading(false);
       setLoadingMode(null);
     }
+  };
+
+  // Refetch the breakdown whenever the session ends so the Custom Study panel
+  // shows accurate backlogs / future counts (after a bump, those numbers shift).
+  useEffect(() => {
+    if (!isSessionDone || !activeDeckId) return;
+    let cancelled = false;
+    getDueBreakdown(activeDeckId).then((b) => {
+      if (!cancelled) setBreakdown(b);
+    });
+    return () => { cancelled = true; };
+  }, [isSessionDone, activeDeckId]);
+
+  const handleStudyAhead = (count: number) => {
+    startReview(mode, Math.max(1, count));
+  };
+
+  const handleAfterBump = () => {
+    startReview(mode);
   };
 
   // Auto-start if mode passed via query param from dashboard
@@ -156,11 +182,22 @@ export function ReviewPage() {
           &larr; Back
         </button>
         <h1 className="text-xl font-bold">Review</h1>
-        <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{remaining()} left</div>
+        <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{remainingCount} left</div>
       </div>
 
       <ReviewCard />
       <MeaningCard />
+      {isSessionDone && breakdown && activeDeckId && (
+        <div className="max-w-md mx-auto mt-2">
+          <CustomStudyButton
+            deckId={activeDeckId}
+            mode={mode === 'both' ? 'all' : mode}
+            breakdown={breakdown}
+            onAfterBump={handleAfterBump}
+            onStudyAhead={handleStudyAhead}
+          />
+        </div>
+      )}
     </div>
   );
 }
