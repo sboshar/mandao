@@ -24,6 +24,7 @@ export type SyncOpType =
   | 'deleteAllData'
   | 'updateTags'
   | 'updateDeck'
+  | 'updateMeaning'
   | 'upsertAudioRecording'
   | 'deleteStorageObjects';
 

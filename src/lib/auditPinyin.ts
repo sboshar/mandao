@@ -2,8 +2,6 @@ import * as repo from '../db/repo';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { loadCedict, lookup } from './cedict';
 import { collapsePinyin } from './checkPinyin';
-import { localDb } from '../db/localDb';
-import { supabase } from './supabase';
 import type { Meaning } from '../db/schema';
 
 export interface AuditRow {
@@ -109,19 +107,13 @@ export async function repairFlaggedPinyin(): Promise<RepairSummary> {
     const canonical = row.cedictEntries[0].toLowerCase();
     if (canonical === row.pinyinNumeric.toLowerCase()) continue;
 
-    await localDb.meanings.update(row.id, {
-      pinyinNumeric: canonical,
-      updatedAt: Date.now(),
-    });
-    const { error } = await supabase
-      .from('meanings')
-      .update({ pinyin_numeric: canonical, updated_at: Date.now() })
-      .eq('id', row.id);
-    if (error) {
+    try {
+      await repo.updateMeaning(row.id, { pinyinNumeric: canonical });
+    } catch (e) {
       skipped.push({
         headword: row.headword,
         stored: row.pinyinNumeric,
-        reason: `supabase update failed: ${error.message}`,
+        reason: `update failed: ${(e as Error).message}`,
       });
       continue;
     }

@@ -51,6 +51,10 @@ export async function insertMeaning(meaning: Meaning): Promise<void> {
   await localDb.meanings.put(meaning);
 }
 
+export async function updateMeaning(id: string, updates: Partial<Meaning>): Promise<void> {
+  await localDb.meanings.update(id, updates);
+}
+
 export async function deleteMeaningsByIds(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   await localDb.meanings.bulkDelete(ids);

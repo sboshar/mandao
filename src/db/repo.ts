@@ -78,6 +78,11 @@ export async function insertMeaning(meaning: Meaning): Promise<void> {
   // Meanings are enqueued as part of ingestBundle — no standalone outbox op needed.
 }
 
+export async function updateMeaning(id: string, updates: Partial<Meaning>): Promise<void> {
+  await local.updateMeaning(id, updates);
+  await enqueue({ op: 'updateMeaning', payload: { id, updates } });
+}
+
 // ============================================================
 // MeaningLinks — reads from local, writes local + outbox
 // ============================================================

@@ -1,16 +1,10 @@
 import { create } from 'zustand';
 import type { Steps } from 'ts-fsrs';
+import type { FSRSSettings } from '../db/schema';
+
+export type { FSRSSettings };
 
 const STORAGE_KEY = 'mandao_fsrs_settings';
-
-export interface FSRSSettings {
-  requestRetention: number;
-  maximumInterval: number;
-  enableFuzz: boolean;
-  enableShortTerm: boolean;
-  learningSteps: string[];
-  relearningSteps: string[];
-}
 
 const DEFAULTS: FSRSSettings = {
   requestRetention: 0.9,
@@ -20,6 +14,8 @@ const DEFAULTS: FSRSSettings = {
   learningSteps: ['1m', '10m'],
   relearningSteps: ['10m'],
 };
+
+const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof FSRSSettings)[];
 
 function load(): FSRSSettings {
   try {
@@ -52,6 +48,45 @@ export const useFSRSSettingsStore = create<FSRSSettingsState>((set, get) => ({
     set({ ...DEFAULTS });
   },
 }));
+
+/** Pull only the FSRSSettings shape out of the store (drop action methods). */
+export function getFSRSSettings(): FSRSSettings {
+  const state = useFSRSSettingsStore.getState();
+  const out = {} as FSRSSettings;
+  for (const k of SETTING_KEYS) (out[k] as FSRSSettings[typeof k]) = state[k];
+  return out;
+}
+
+/**
+ * Hydrate the store from a remote deck row's `fsrs_settings` blob (after
+ * a sync pull). Skips no-op assignments to avoid the subscribe-→push-→
+ * pull loop. Unknown keys are ignored; missing keys fall back to defaults.
+ */
+let hydrating = false;
+export function isHydratingFSRSSettings(): boolean {
+  return hydrating;
+}
+export function hydrateFSRSSettingsFromBlob(blob: Record<string, unknown> | undefined): void {
+  if (!blob || Object.keys(blob).length === 0) return;
+  const merged: FSRSSettings = { ...DEFAULTS };
+  const partial = blob as Partial<FSRSSettings>;
+  for (const k of SETTING_KEYS) {
+    if (k in partial) (merged[k] as FSRSSettings[typeof k]) = partial[k] as FSRSSettings[typeof k];
+  }
+  const cur = getFSRSSettings();
+  let changed = false;
+  for (const k of SETTING_KEYS) {
+    if (JSON.stringify(cur[k]) !== JSON.stringify(merged[k])) { changed = true; break; }
+  }
+  if (!changed) return;
+  hydrating = true;
+  try {
+    save(merged);
+    useFSRSSettingsStore.setState(merged);
+  } finally {
+    hydrating = false;
+  }
+}
 
 /** Convert store state to ts-fsrs generatorParameters input */
 export function toFSRSParams(s: FSRSSettings) {

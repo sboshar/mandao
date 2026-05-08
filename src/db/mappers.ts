@@ -72,6 +72,7 @@ export function deckFromRow(r: any): Deck {
   return {
     id: r.id, name: r.name, description: r.description,
     newCardsPerDay: r.new_cards_per_day, reviewsPerDay: r.reviews_per_day,
+    fsrsSettings: r.fsrs_settings ?? {},
     createdAt: r.created_at,
     usn: r.usn,
   };
