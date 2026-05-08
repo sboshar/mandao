@@ -331,6 +331,41 @@ describe('getReviewQueue daily-cap semantics', () => {
     // Reviews use their full cap, AND new cards still flow up to newCardsPerDay.
     expect(result).toHaveLength(3 + 5);
   });
+
+  it('treats a learning card with no lastReview as intraday (uncapped fallback)', async () => {
+    setupDeck(0); // hard cap blocks the review bucket entirely
+    const seeded = card({
+      id: 'l0',
+      state: 1,
+      scheduledDays: 0,
+      lastReview: null, // no review history yet
+      due: past,
+    });
+    mockedRepo.getSrsCardsByDeckAndStates.mockResolvedValue([seeded]);
+    mockedRepo.getSrsCardsByDeckAndState.mockResolvedValue([]);
+
+    const result = await getReviewQueue('d1');
+    expect(result.map((c) => c.id)).toEqual(['l0']);
+  });
+
+  it('applies the cap after mode filtering — modeFilter scopes the bucket', async () => {
+    setupDeck(2);
+    // 3 zh-to-en interday cards + 3 en-to-zh interday cards. Cap=2 per
+    // session. Filtering to zh-to-en should yield 2 zh-to-en, not 2 of
+    // any mode.
+    const zh = Array.from({ length: 3 }, (_, i) =>
+      card({ id: `zh${i}`, state: 3, scheduledDays: 1, due: past, lastReview: past, reviewMode: 'zh-to-en' }),
+    );
+    const en = Array.from({ length: 3 }, (_, i) =>
+      card({ id: `en${i}`, state: 3, scheduledDays: 1, due: past, lastReview: past, reviewMode: 'en-to-zh' }),
+    );
+    mockedRepo.getSrsCardsByDeckAndStates.mockResolvedValue([...zh, ...en]);
+    mockedRepo.getSrsCardsByDeckAndState.mockResolvedValue([]);
+
+    const result = await getReviewQueue('d1', 'zh-to-en');
+    expect(result).toHaveLength(2);
+    expect(result.every((c) => c.reviewMode === 'zh-to-en')).toBe(true);
+  });
 });
 
 describe('getDueBreakdown reflects the capped queue', () => {
