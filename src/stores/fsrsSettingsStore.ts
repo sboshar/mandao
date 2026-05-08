@@ -13,6 +13,7 @@ const DEFAULTS: FSRSSettings = {
   enableShortTerm: true,
   learningSteps: ['1m', '10m'],
   relearningSteps: ['10m'],
+  newCardsIgnoreReviewLimit: false,
 };
 
 const SETTING_KEYS = Object.keys(DEFAULTS) as (keyof FSRSSettings)[];

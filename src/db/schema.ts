@@ -183,6 +183,13 @@ export interface FSRSSettings {
   enableShortTerm: boolean;
   learningSteps: string[];
   relearningSteps: string[];
+  /**
+   * If true, new cards are limited only by newCardsPerDay (independent of
+   * reviewsPerDay). If false (Anki default), new cards also count against
+   * reviewsPerDay — once the review bucket fills, no new cards are shown
+   * even if newCardsPerDay still has room.
+   */
+  newCardsIgnoreReviewLimit: boolean;
 }
 
 export interface Deck {

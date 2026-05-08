@@ -349,6 +349,18 @@ function SRSSection() {
             hint="Maximum reviews per day"
           />
         </div>
+        <div className="flex items-start justify-between gap-4 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="flex-1">
+            <div className="text-sm font-medium">New cards <u>ignore</u> review limit</div>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+              Off (Anki default): new cards count against the reviews/day cap. Once the review bucket fills, no new cards appear even if the new-cards cap has room. Turn on to keep the two caps independent.
+            </p>
+          </div>
+          <Toggle
+            checked={fsrs.newCardsIgnoreReviewLimit}
+            onChange={(v) => fsrsUpdate({ newCardsIgnoreReviewLimit: v })}
+          />
+        </div>
       </SectionCard>
 
       {/* FSRS parameters */}
