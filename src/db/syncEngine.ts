@@ -13,6 +13,7 @@
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
+import type { Deck } from './schema';
 import type { FailedOp } from '../stores/syncStore';
 import { runAudioPrefetch } from '../services/audioPrefetch';
 import { audioBlobToBlob } from './localRepo';
@@ -200,6 +201,9 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
     case 'updateTags':
       await pushSequential(ops, pushUpdateTags);
       break;
+    case 'updateDeck':
+      await pushSequential(ops, pushUpdateDeck);
+      break;
     case 'upsertAudioRecording':
       await pushSequential(ops, pushUpsertAudioRecording);
       break;
@@ -357,6 +361,31 @@ async function pushDeleteStorageObjects(op: SyncOp): Promise<void> {
     const { error } = await supabase.storage.from(AUDIO_BUCKET).remove(chunk);
     if (error) throw syncErrorFrom(error);
   }
+}
+
+async function pushUpdateDeck(op: SyncOp): Promise<void> {
+  const { id, updates } = op.payload as { id: string; updates: Partial<Deck> };
+  // Whitelist the fields that are safe to push. Anything else
+  // (like timestamps managed by triggers) is filtered out.
+  const FIELD_MAP: Partial<Record<keyof Deck, string>> = {
+    name: 'name',
+    description: 'description',
+    newCardsPerDay: 'new_cards_per_day',
+    reviewsPerDay: 'reviews_per_day',
+  };
+  const row: Record<string, unknown> = {};
+  for (const [camel, snake] of Object.entries(FIELD_MAP)) {
+    if (camel in updates) row[snake] = updates[camel as keyof Deck];
+  }
+  if (Object.keys(row).length === 0) return;
+
+  const userId = getCachedUserIdOrThrow();
+  const { error } = await supabase
+    .from('decks')
+    .update(row)
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw syncErrorFrom(error);
 }
 
 async function pushUpdateTags(op: SyncOp): Promise<void> {

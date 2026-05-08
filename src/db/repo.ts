@@ -339,6 +339,7 @@ export async function getDeck(id: string): Promise<Deck | undefined> {
 
 export async function updateDeck(id: string, updates: Partial<Deck>): Promise<void> {
   await local.updateDeck(id, updates);
+  await enqueue({ op: 'updateDeck', payload: { id, updates } });
 }
 
 export async function getAllDecks(): Promise<Deck[]> {
