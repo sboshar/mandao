@@ -16,16 +16,11 @@ export default defineConfig({
       // prompt + offline behavior can be exercised locally without
       // running a production build.
       devOptions: { enabled: true },
-      includeAssets: ['cedict.txt', 'favicon.svg', 'icon-192.png', 'icon-512.png'],
       workbox: {
-        // Precache everything needed for cold-boot. `txt` covers cedict.txt
-        // (~8.5MB) which loadCedict() awaits on every boot — without it
-        // cached, opening the installed PWA offline fails the dictionary
-        // fetch and the app never reaches the ready state. `wasm` covers
-        // sql-wasm.wasm so Anki import also works offline.
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,txt,wasm}'],
-        // Default cap is 2 MiB, which silently excludes cedict.txt from
-        // the precache. Raise to fit it (plus headroom for growth).
+        // `txt` is here so cedict.txt — awaited on every boot — is
+        // precached; without it, offline cold-start hangs on the fetch.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,txt}'],
+        // Workbox's 2 MiB default would silently drop cedict.txt.
         maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
         runtimeCaching: [
           {
