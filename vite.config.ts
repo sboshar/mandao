@@ -16,9 +16,12 @@ export default defineConfig({
       // prompt + offline behavior can be exercised locally without
       // running a production build.
       devOptions: { enabled: true },
-      includeAssets: ['cedict.txt', 'favicon.svg', 'icon-192.png', 'icon-512.png'],
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // `txt` is here so cedict.txt — awaited on every boot — is
+        // precached; without it, offline cold-start hangs on the fetch.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,txt}'],
+        // Workbox's 2 MiB default would silently drop cedict.txt.
+        maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\//,
