@@ -38,9 +38,10 @@ export async function getExistingMeanings(
 /**
  * Generate LLM prompt that tokenizes and analyzes a Chinese sentence.
  *
- * @param translationReference Optional machine translation of the sentence,
- *   injected as the starting point for the sentence-level english. The model
- *   may override it but must declare the override so review can surface it.
+ * @param translationReference Optional machine translation of the sentence.
+ *   When supplied it is authoritative for the sentence-level english — the
+ *   prompt instructs the model to copy it verbatim, and the caller enforces
+ *   that regardless of what comes back.
  */
 export async function generateAnalysisPrompt(
   chinese: string,
@@ -72,25 +73,23 @@ Reference translation (independent machine translation of this sentence):
     : '';
 
   const translationRule = translationReference
-    ? `A reference translation is supplied above. Use it as your starting point.
+    ? `A reference translation is supplied above. Copy it into "english" VERBATIM.
 
-Set "translationOverridden" to false and copy the reference into "english" when it is
-correct or near-correct.
+This is not a judgement call. Do not reword it, do not "improve" it, and do not
+replace it with a more literal rendering. The reference comes from a dedicated
+translation system and is authoritative for the sentence level.
 
-Override it ONLY when it is clearly wrong — a wrong word sense, a wrong grammatical
-relationship, or an invented tense or aspect the Chinese does not express. When you
-override:
-- write your own natural translation in "english"
-- set "translationOverridden" to true
-- give a one-sentence reason in "translationOverrideReason"
+In particular: do NOT reason that a more literal gloss is "more accurate". The
+sentence-level english is meant to be natural English, not a literal decomposition.
+The literal reading lives in the token and character glosses, which is where you
+should put it.
 
-Do not override for style, word-order preference, or minor synonym choice. Overrides
-are surfaced to the user for review, so reserve them for real errors.`
+If the reference and your instinct disagree, the reference wins. Treat it as a
+constraint on the rest of your analysis: choose token and character glosses that are
+consistent with the reference's reading of the sentence.`
     : `Translate the complete sentence into natural English.
 
-Prefer the natural contextual meaning over a literal word-for-word translation.
-
-Set "translationOverridden" to false.`;
+Prefer the natural contextual meaning over a literal word-for-word translation.`;
 
   return `Analyze the Chinese sentence below and return ONLY the JSON object specified at the end. No markdown, prose, explanations, or code fences.
 
@@ -367,8 +366,6 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
 {
   "chinese": string,
   "english": string,
-  "translationOverridden": boolean,
-  "translationOverrideReason": string,
   "pinyinSandhi": string,
   "tokens": [
     {
@@ -390,15 +387,13 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
   ]
 }
 
-"translationOverrideReason" may be an empty string when "translationOverridden" is false.
-
 # 13. Final validation
 
 Before returning the JSON, verify all of the following:
 
 - "chinese" exactly matches the input sentence.
 - "english" is a natural translation of the complete sentence.
-- "translationOverridden" is true only if you departed from the reference translation for a real error.
+- "english" is the reference translation verbatim when one was supplied.
 - Word segmentation is linguistically correct.
 - Every character appears exactly once in exactly one token.
 - Every token's "characters" array contains exactly the token's characters in order.
@@ -448,10 +443,6 @@ export interface LLMResponse {
   chinese: string;
   english: string;
   pinyinSandhi?: string;
-  /** True when the model rejected the supplied reference translation. Surfaced at review. */
-  translationOverridden?: boolean;
-  /** Model's one-sentence justification for the override. */
-  translationOverrideReason?: string;
   tokens: LLMTokenResponse[];
 }
 

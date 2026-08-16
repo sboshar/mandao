@@ -164,12 +164,6 @@ export function AddSentencePage() {
 
   const [chinese, setChinese] = useState('');
   const [english, setEnglish] = useState('');
-  /** Set when the model rejected the supplied reference translation (#185).
-   *  Surfaced at review so the user can sanity-check the disagreement. */
-  const [translationOverride, setTranslationOverride] = useState<{
-    reference: string;
-    reason: string;
-  } | null>(null);
   const [tokens, setTokens] = useState<TokenFormData[]>([]);
   const [step, setStep] = useState<'input' | 'llm' | 'review' | 'confirm'>('input');
   const [error, setError] = useState('');
@@ -340,19 +334,16 @@ export function AddSentencePage() {
     reference?: string | null,
   ) => {
     const processed = processLLMTokens(parsed);
-    if (parsed.english) setEnglish(parsed.english);
+    // When a reference translation was supplied it wins outright, and we
+    // enforce that here rather than trusting the model to comply. Gemini Flash
+    // will happily argue that a literal reading is "more accurate" — it
+    // rejected "He becomes completely engrossed in his work" in favour of "He
+    // is very selfless when he works" — and the dedicated translation system is
+    // simply better at this layer. The literal reading still gets expressed, in
+    // the token and character glosses.
+    if (reference) setEnglish(reference);
+    else if (parsed.english) setEnglish(parsed.english);
     setIngestFlags(processed.flags);
-    // Only a genuine disagreement is worth surfacing: the model must have
-    // declared the override AND actually departed from the reference.
-    const overrode =
-      !!reference &&
-      !!parsed.translationOverridden &&
-      parsed.english?.trim() !== reference.trim();
-    setTranslationOverride(
-      overrode
-        ? { reference, reason: parsed.translationOverrideReason?.trim() || '' }
-        : null,
-    );
 
     const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
       surfaceForm: t.surfaceForm,
@@ -1069,36 +1060,6 @@ export function AddSentencePage() {
                 color: 'var(--text-primary)',
               }}
             />
-            {translationOverride && (
-              <div
-                className="mt-2 px-3 py-2 rounded-lg text-xs"
-                style={{
-                  background: 'var(--warning-subtle)',
-                  border: '1px solid var(--warning)',
-                  color: 'var(--text-primary)',
-                }}
-              >
-                <div className="font-medium mb-1">
-                  The model rejected the reference translation
-                </div>
-                <div style={{ color: 'var(--text-secondary)' }}>
-                  Reference: “{translationOverride.reference}”
-                </div>
-                {translationOverride.reason && (
-                  <div className="mt-1" style={{ color: 'var(--text-secondary)' }}>
-                    Reason: {translationOverride.reason}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setEnglish(translationOverride.reference)}
-                  className="mt-2 px-2 py-1 rounded text-xs"
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-                >
-                  Use reference instead
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Per-token detail forms */}
