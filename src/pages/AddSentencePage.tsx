@@ -6,7 +6,10 @@ import {
   parseLLMResponse,
   getExistingMeanings,
 } from '../services/llmPrompt';
-import { getTranslationReference } from '../services/translationReference';
+import {
+  getTranslationReference,
+  prefetchTranslationReference,
+} from '../services/translationReference';
 import { processLLMTokens } from '../services/processLLMTokens';
 import { collapsePinyin } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
@@ -815,6 +818,12 @@ export function AddSentencePage() {
               onClick={() => {
                 if (!chinese.trim()) return;
                 setError('');
+                // Warm the machine translation now. The next screen's Copy
+                // Prompt button needs it, and starting here means the request
+                // overlaps with the user reading that screen instead of
+                // stalling the copy. Fire-and-forget — the result is cached,
+                // and a failure just means the prompt omits the reference.
+                prefetchTranslationReference(chinese.trim());
                 setManualMode(true);
                 setStep('llm');
               }}

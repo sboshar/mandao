@@ -62,13 +62,88 @@ export function isTranslationReferenceAvailable(): boolean {
 }
 
 /**
- * Fetch an independent translation of `chinese`.
+ * Warn on a configured-but-failing lookup. Deliberately silent when
+ * unconfigured — that's the expected production state, not a fault.
+ *
+ * Scrubs OAuth bearer tokens defensively. Google's error bodies don't echo
+ * the credential today, but this lands in the console where users paste from.
+ */
+function warn(summary: string, detail = ''): void {
+  const scrubbed = detail
+    .replace(/\bya29\.[A-Za-z0-9._-]+/g, '[REDACTED]')
+    .slice(0, 300);
+  console.warn(
+    `[translationReference] ${summary} — prompt will omit the reference block.`,
+    scrubbed,
+  );
+}
+
+/**
+ * Sentence → in-flight or resolved lookup.
+ *
+ * Serves two purposes. It lets the UI warm the translation ahead of time (see
+ * prefetchTranslationReference), so the click that actually needs it resolves
+ * instantly instead of waiting on a network round trip. And it deduplicates:
+ * Copy Prompt, Auto-Analyze and Re-analyze all request the same sentence, and
+ * without this each would pay for its own call.
+ *
+ * Only SUCCESSFUL results stay cached. Failures are evicted on settle so the
+ * next attempt retries — the dev OAuth token expires hourly, and a cached null
+ * would keep the reference switched off for the rest of the session even after
+ * the token is refreshed.
+ */
+const cache = new Map<string, Promise<string | null>>();
+
+/** Cap on distinct sentences held. Small; this is a single-sentence workflow. */
+const MAX_CACHE_ENTRIES = 20;
+
+/**
+ * Fetch an independent translation of `chinese`, reusing an in-flight or
+ * previously successful lookup for the same sentence.
  *
  * Never throws. Returns null when unconfigured, when the request fails, or on
  * timeout — callers treat the reference as optional and the prompt drops the
  * reference block entirely, falling back to the model's own translation.
  */
-export async function getTranslationReference(
+export function getTranslationReference(
+  chinese: string,
+): Promise<string | null> {
+  const key = chinese.trim();
+  if (!key) return Promise.resolve(null);
+
+  const existing = cache.get(key);
+  if (existing) return existing;
+
+  const pending = fetchTranslation(key);
+  cache.set(key, pending);
+
+  // Map iterates in insertion order, so the first key is the oldest.
+  if (cache.size > MAX_CACHE_ENTRIES) {
+    cache.delete(cache.keys().next().value as string);
+  }
+
+  void pending.then((result) => {
+    if (result === null) cache.delete(key);
+  });
+
+  return pending;
+}
+
+/**
+ * Start fetching the translation without waiting for it.
+ *
+ * Called when the user opens the manual-copy path, which is a screen ahead of
+ * the Copy Prompt button — that gap is enough for the request to finish, so the
+ * copy itself feels instant rather than stalling on the network. Fire-and-
+ * forget: the result lands in the cache and any error is already swallowed and
+ * logged by fetchTranslation.
+ */
+export function prefetchTranslationReference(chinese: string): void {
+  void getTranslationReference(chinese);
+}
+
+/** Uncached single request. Callers should prefer getTranslationReference. */
+async function fetchTranslation(
   chinese: string,
 ): Promise<string | null> {
   const config = getConfig();
@@ -98,13 +173,27 @@ export async function getTranslationReference(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      // Configured but failing is a different situation from not configured,
+      // and the UI can't tell them apart — both just drop the reference block.
+      // The dev token expires hourly, so this path gets hit routinely.
+      const detail = await resp.text().catch(() => '');
+      warn(`HTTP ${resp.status}`, detail);
+      return null;
+    }
     const data = await resp.json();
     const text = data?.translations?.[0]?.translatedText;
-    return typeof text === 'string' && text.trim() ? text : null;
-  } catch {
-    // Unconfigured, offline, expired token, CORS — all non-fatal. The prompt
-    // works without a reference; it just loses the anchor.
+    if (typeof text !== 'string' || !text.trim()) {
+      warn('response contained no translation', JSON.stringify(data));
+      return null;
+    }
+    return text;
+  } catch (e: unknown) {
+    // Offline, CORS, or the 10s timeout. Non-fatal — the prompt works without
+    // a reference, it just loses the anchor.
+    const aborted = e instanceof DOMException && e.name === 'AbortError';
+    warn(aborted ? `timed out after ${REQUEST_TIMEOUT_MS}ms` : 'request failed',
+      e instanceof Error ? e.message : String(e));
     return null;
   } finally {
     clearTimeout(timer);
