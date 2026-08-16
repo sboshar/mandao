@@ -6,6 +6,7 @@ import {
   parseLLMResponse,
   getExistingMeanings,
 } from '../services/llmPrompt';
+import { getTranslationReference } from '../services/translationReference';
 import { processLLMTokens } from '../services/processLLMTokens';
 import { collapsePinyin } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
@@ -160,6 +161,12 @@ export function AddSentencePage() {
 
   const [chinese, setChinese] = useState('');
   const [english, setEnglish] = useState('');
+  /** Set when the model rejected the supplied reference translation (#185).
+   *  Surfaced at review so the user can sanity-check the disagreement. */
+  const [translationOverride, setTranslationOverride] = useState<{
+    reference: string;
+    reason: string;
+  } | null>(null);
   const [tokens, setTokens] = useState<TokenFormData[]>([]);
   const [step, setStep] = useState<'input' | 'llm' | 'review' | 'confirm'>('input');
   const [error, setError] = useState('');
@@ -310,8 +317,13 @@ export function AddSentencePage() {
   // Copy LLM prompt (LLM handles tokenization)
   const handleCopyPrompt = async () => {
     setError('');
-    const existingMeanings = await getExistingMeanings(chinese.trim());
-    const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
+    const [existingMeanings, reference] = await Promise.all([
+      getExistingMeanings(chinese.trim()),
+      getTranslationReference(chinese.trim()),
+    ]);
+    const prompt = await generateAnalysisPrompt(
+      chinese.trim(), existingMeanings, undefined, reference ?? undefined,
+    );
     await navigator.clipboard.writeText(prompt);
     setPromptCopied(true);
     setTimeout(() => setPromptCopied(false), 2000);
@@ -319,10 +331,25 @@ export function AddSentencePage() {
 
   /** Apply a parsed LLM response to review-step state: policy, english,
    *  flags, form tokens, missing-char coverage. Callers own setStep. */
-  const applyAnalysis = (parsed: ReturnType<typeof parseLLMResponse>) => {
+  const applyAnalysis = (
+    parsed: ReturnType<typeof parseLLMResponse>,
+    /** The reference translation sent with the prompt, if any. */
+    reference?: string | null,
+  ) => {
     const processed = processLLMTokens(parsed);
     if (parsed.english) setEnglish(parsed.english);
     setIngestFlags(processed.flags);
+    // Only a genuine disagreement is worth surfacing: the model must have
+    // declared the override AND actually departed from the reference.
+    const overrode =
+      !!reference &&
+      !!parsed.translationOverridden &&
+      parsed.english?.trim() !== reference.trim();
+    setTranslationOverride(
+      overrode
+        ? { reference, reason: parsed.translationOverrideReason?.trim() || '' }
+        : null,
+    );
 
     const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
       surfaceForm: t.surfaceForm,
@@ -349,12 +376,17 @@ export function AddSentencePage() {
     setError('');
     setAnalyzing(true);
     try {
-      const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
+      const [existingMeanings, reference] = await Promise.all([
+        getExistingMeanings(chinese.trim()),
+        getTranslationReference(chinese.trim()),
+      ]);
+      const prompt = await generateAnalysisPrompt(
+        chinese.trim(), existingMeanings, undefined, reference ?? undefined,
+      );
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed);
+      applyAnalysis(parsed, reference);
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -459,12 +491,17 @@ export function AddSentencePage() {
     setError('');
     setReanalyzing(true);
     try {
-      const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
+      const [existingMeanings, reference] = await Promise.all([
+        getExistingMeanings(chinese.trim()),
+        getTranslationReference(chinese.trim()),
+      ]);
+      const prompt = await generateAnalysisPrompt(
+        chinese.trim(), existingMeanings, missingChars, reference ?? undefined,
+      );
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed);
+      applyAnalysis(parsed, reference);
     } catch (e: any) {
       setError(e.message || 'Re-analyze failed');
     }
@@ -1023,6 +1060,36 @@ export function AddSentencePage() {
                 color: 'var(--text-primary)',
               }}
             />
+            {translationOverride && (
+              <div
+                className="mt-2 px-3 py-2 rounded-lg text-xs"
+                style={{
+                  background: 'var(--warning-subtle)',
+                  border: '1px solid var(--warning)',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <div className="font-medium mb-1">
+                  The model rejected the reference translation
+                </div>
+                <div style={{ color: 'var(--text-secondary)' }}>
+                  Reference: “{translationOverride.reference}”
+                </div>
+                {translationOverride.reason && (
+                  <div className="mt-1" style={{ color: 'var(--text-secondary)' }}>
+                    Reason: {translationOverride.reason}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEnglish(translationOverride.reference)}
+                  className="mt-2 px-2 py-1 rounded text-xs"
+                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+                >
+                  Use reference instead
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Per-token detail forms */}
