@@ -36,7 +36,7 @@ export function collapsePinyin(s: string): string {
  * the raw value or the de-sandhied value — this gives us the 不是
  * `bu2 shi4` rescue without false-flagging 容易 `rong2 yi4`.
  */
-function deSandhi(value: string): string {
+export function deSandhi(value: string): string {
   return value
     .split(/\s+/)
     .map((syl) => {

@@ -136,6 +136,29 @@ function FlagRow({
     );
   }
 
+  if (flag.kind === 'pinyin-pro-disagreement') {
+    // The AI's reading stands — picking between a polyphone's readings is a
+    // semantic call it's better placed to make. This is an alert, not a verdict,
+    // so the suggestion is offered rather than the disagreement asserted.
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        <div style={descStyle}>
+          <strong className="font-mono">{flag.headword}:</strong> the AI chose{' '}
+          {renderPinyin(flag.llmValue)}, but pinyin-pro reads it as{' '}
+          {renderPinyin(flag.pinyinProValue)}.
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <FlagButton onClick={() => onApply(flag.headword, flag.pinyinProValue)}>
+            Use {renderPinyin(flag.pinyinProValue)}
+          </FlagButton>
+          <span style={hintStyle}>
+            — or keep the AI's value; it can see the sentence's meaning
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={wrapperClass} style={wrapperStyle}>
       <div style={descStyle}>

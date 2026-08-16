@@ -276,16 +276,28 @@ Do not force a user's existing meaning merely because the same character appears
 
 # 7. Polyphones
 
-Many characters have more than one reading. Choose the reading appropriate to this sentence's context, not the most common reading in isolation.
+Many characters have more than one reading. Which one is correct depends on what the
+character MEANS here, not on which reading is most common in isolation. Different
+readings of the same character are effectively different words.
 
-  行: 银行 → hang2;  行走 → xing2
-  重: 重复 → chong2; 很重 → zhong4
-  长: 长度 → chang2; 长大 → zhang3
-  为: 为了 → wei4;   以为 → wei2
+  觉: 觉得 → jue2;  睡觉 → jiao4
+  教: 教书 → jiao1; 教室 → jiao4
+  空: 空气 → kong1; 有空 → kong4
+  为: 为了 → wei4;  以为 → wei2
+
+The same character can take DIFFERENT readings twice in one sentence, when it is being
+used with different meanings each time. Do not assume that because a character was read
+one way earlier in the sentence, it takes that reading again. Decide each occurrence
+from its own context.
 
 # 8. pinyinNumeric
 
 "pinyinNumeric" is citation-form pinyin.
+
+Readings are verified against a dictionary after you answer, and corrected where
+the dictionary is unambiguous. The place your answer matters most is POLYPHONES —
+characters with more than one reading, where only the sentence tells you which is
+correct. Spend your effort there.
 
 Rules:
 - lowercase ASCII
@@ -319,29 +331,7 @@ reading, not the concatenation of citation readings:
 This applies to reduplicated kinship and verb forms, and to many high-frequency
 disyllabic words. When a compound has an established neutral-tone reading, use it.
 
-# 9. pinyinSandhi
-
-"pinyinSandhi" uses standard pinyin with tone marks and appropriate Mandarin sandhi.
-
-Apply:
-- third-tone sandhi
-- 不 sandhi
-- 一 sandhi
-- other standard Mandarin pronunciation changes where appropriate
-
-For example:
-
-  不是
-  pinyinSandhi: "bú shì"
-
-  一个
-  pinyinSandhi: "yí gè"
-
-Do not apply these changes to "pinyinNumeric".
-
-There must be exactly one syllable per character.
-
-# 10. Part of speech
+# 9. Part of speech
 
 Assign exactly ONE part of speech to each TOKEN as used in the sentence.
 
@@ -351,7 +341,7 @@ Use only:
 
 Do not assign multiple parts of speech.
 
-# 11. Transliteration
+# 10. Transliteration
 
 Set "isTransliteration" to true only for genuine phonetic loanwords where the characters are primarily being used for their sounds rather than their normal semantic meanings.
 
@@ -361,17 +351,15 @@ For transliterations, each character's English should describe the phonetic role
 
 Set "isTransliteration" to false for ordinary native Chinese words and compounds (好吃, 电脑).
 
-# 12. Output schema
+# 11. Output schema
 
 {
   "chinese": string,
   "english": string,
-  "pinyinSandhi": string,
   "tokens": [
     {
       "surfaceForm": string,
       "pinyinNumeric": string,
-      "pinyinSandhi": string,
       "english": string,
       "partOfSpeech": "noun"|"verb"|"adj"|"adv"|"prep"|"conj"|"particle"|"measure"|"pronoun"|"number"|"other",
       "isTransliteration": boolean,
@@ -379,7 +367,6 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
         {
           "char": string,
           "pinyinNumeric": string,
-          "pinyinSandhi": string,
           "english": string
         }
       ]
@@ -387,7 +374,7 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
   ]
 }
 
-# 13. Final validation
+# 12. Final validation
 
 Before returning the JSON, verify all of the following:
 
@@ -412,9 +399,7 @@ Before returning the JSON, verify all of the following:
 - Existing meanings are reused exactly when appropriate.
 - Polyphonic readings are resolved according to context.
 - "pinyinNumeric" uses citation-form pronunciation with no sandhi.
-- Established neutral-tone compound readings use tone 5.
-- "pinyinSandhi" uses diacritics and appropriate sandhi.
-- Every pinyin representation contains exactly one syllable per character.
+- "pinyinNumeric" contains exactly one syllable per character.
 - "isTransliteration" is true only for genuine phonetic transliterations.
 - The output is valid JSON.
 
