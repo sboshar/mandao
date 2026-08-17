@@ -1,10 +1,9 @@
 import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
-import { checkPinyinPro, readSentence, type PinyinProFlag } from '../lib/checkPinyinPro';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 import type { LLMResponse, LLMTokenResponse } from './llmPrompt';
 
-export type IngestFlag = CheckPinyinFlag | SegmentationFlag | PinyinProFlag;
+export type IngestFlag = CheckPinyinFlag | SegmentationFlag;
 
 export interface ProcessedToken extends LLMTokenResponse {
   pinyinNumeric: string;
@@ -16,9 +15,17 @@ export interface ProcessResult {
 }
 
 /**
+ * ONE CHECKER, NOT TWO. A pinyin-pro cross-check ran here briefly, on the
+ * theory that it would cover words CEDICT lacks. Measurement killed it: over a
+ * 300-word sample of CEDICT compounds with a neutral second syllable,
+ * pinyin-pro matched no CEDICT reading 69% of the time, and is plainly wrong on
+ * common words — 值得 as "zhi2 de2", 事情 as "shi4 qing2", 位置 as "wei4 zhi4".
+ * A second opinion that unreliable produces noise and offers bad fixes, and the
+ * model's own readings have so far been correct where they were checkable. So
+ * CEDICT is the single source, and the "Look it up" link is the real tiebreaker.
+ *
  * Observation-only pass:
  *   - checkPinyin on each token (disagreements with CC-CEDICT).
- *   - checkPinyinPro on each token (disagreements with pinyin-pro).
  *   - scanSegmentation across the token list (mergeable runs of single-char
  *     tokens that CEDICT treats as one compound, e.g. 哥+哥 → 哥哥).
  * Never mutates a token's pinyinNumeric. The review UI decides whether to
@@ -40,39 +47,9 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
   const tokens: ProcessedToken[] = response.tokens.map((t) => ({ ...t }));
   const flags: IngestFlag[] = [];
 
-  // pinyin-pro reads the whole sentence at once so it can disambiguate
-  // polyphones from context; each token then takes its slice.
-  const sentence = response.chinese || tokens.map((t) => t.surfaceForm).join('');
-  const sentenceSyllables = readSentence(sentence);
-  const proReadings = new Map<string, string[]>();
-  if (sentenceSyllables) {
-    let charOffset = 0;
-    for (const t of tokens) {
-      const charCount = Array.from(t.surfaceForm).length;
-      const slice = sentenceSyllables.slice(charOffset, charOffset + charCount);
-      charOffset += charCount;
-      if (slice.length === charCount) proReadings.set(t.surfaceForm, slice);
-    }
-  }
-
   for (const t of tokens) {
-    const slice = proReadings.get(t.surfaceForm);
     const result = checkPinyin(t.surfaceForm, t.pinyinNumeric);
-
-    if (result.flag) {
-      // cedict-unknown claims the reading is "unchecked". That was true when
-      // CEDICT was the only reference, but pinyin-pro answers for words CEDICT
-      // has never heard of — and its silence here means it AGREES. Reporting an
-      // unchecked reading that was in fact checked and confirmed is just noise,
-      // so it's suppressed. Words CEDICT knows still flag normally.
-      const coveredByPinyinPro = result.flag.kind === 'cedict-unknown' && !!slice;
-      if (!coveredByPinyinPro) flags.push(result.flag);
-    }
-
-    if (slice) {
-      const flag = checkPinyinPro(t.surfaceForm, t.pinyinNumeric, slice);
-      if (flag) flags.push(flag);
-    }
+    if (result.flag) flags.push(result.flag);
   }
 
   for (const flag of scanSegmentation(tokens)) {

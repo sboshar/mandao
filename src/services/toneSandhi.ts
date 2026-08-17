@@ -109,3 +109,57 @@ export function numericStringToDiacritic(pinyinNumeric: string): string {
     .map(numericToDiacritic)
     .join(' ');
 }
+
+/** Diacritic vowel → [base letter, tone number]. */
+const DIACRITIC_MAP: Record<string, [string, number]> = {
+  ā: ['a', 1], á: ['a', 2], ǎ: ['a', 3], à: ['a', 4],
+  ē: ['e', 1], é: ['e', 2], ě: ['e', 3], è: ['e', 4],
+  ī: ['i', 1], í: ['i', 2], ǐ: ['i', 3], ì: ['i', 4],
+  ō: ['o', 1], ó: ['o', 2], ǒ: ['o', 3], ò: ['o', 4],
+  ū: ['u', 1], ú: ['u', 2], ǔ: ['u', 3], ù: ['u', 4],
+  ǖ: ['ü', 1], ǘ: ['ü', 2], ǚ: ['ü', 3], ǜ: ['ü', 4],
+};
+
+/**
+ * Coerce one syllable into the app's pinyinNumeric convention: lowercase ASCII
+ * plus a tone digit 1-5, neutral written as 5.
+ *
+ * The model does not reliably obey that convention however firmly the prompt
+ * states it — observed output includes "zhè4" (tone mark AND digit), "zhè"
+ * (mark, no digit) and "si" (neither). Each variant produced a spurious
+ * disagreement flag against a dictionary value that was actually equivalent,
+ * so this is normalized mechanically rather than trusted.
+ *
+ * A syllable with no tone information at all is treated as neutral, which is
+ * what a missing tone almost always means in practice ("yi4 si" → "yi4 si5").
+ */
+export function normalizePinyinSyllable(raw: string): string {
+  let tone = 0;
+  let base = '';
+  for (const ch of raw.trim()) {
+    const mapped = DIACRITIC_MAP[ch];
+    if (mapped) {
+      base += mapped[0];
+      tone = mapped[1];
+    } else if (/[1-5]/.test(ch)) {
+      tone = Number(ch);
+    } else if (ch === '0') {
+      tone = 5; // pinyin-pro's neutral notation
+    } else {
+      base += ch;
+    }
+  }
+  base = base.toLowerCase();
+  if (!base) return '';
+  return `${base}${tone || 5}`;
+}
+
+/** Apply normalizePinyinSyllable across a whole space-separated reading. */
+export function normalizePinyinNumeric(raw: string): string {
+  return raw
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(normalizePinyinSyllable)
+    .filter(Boolean)
+    .join(' ');
+}

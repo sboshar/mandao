@@ -13,6 +13,7 @@
  */
 import * as repo from '../db/repo';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
+import { normalizePinyinNumeric } from './toneSandhi';
 
 export interface ExistingMeaning {
   headword: string;
@@ -300,8 +301,11 @@ characters with more than one reading, where only the sentence tells you which i
 correct. Spend your effort there.
 
 Rules:
-- lowercase ASCII
-- tone numbers 1-5, where 5 = neutral tone
+- lowercase ASCII letters ONLY. Never tone marks. Write "zhe4", never "zhè4" and
+  never "zhè". Tone marks belong nowhere in this field.
+- EVERY syllable ends in a tone digit 1-5. No syllable may be left bare.
+- A syllable with no audible tone is NEUTRAL, and neutral is written 5 — not
+  omitted, not 0. "yi4 si5", never "yi4 si" and never "yi4 si0".
 - spaces between syllables
 - exactly one syllable per character
 - NO tone sandhi
@@ -400,6 +404,8 @@ Before returning the JSON, verify all of the following:
 - Polyphonic readings are resolved according to context.
 - "pinyinNumeric" uses citation-form pronunciation with no sandhi.
 - "pinyinNumeric" contains exactly one syllable per character.
+- Every syllable in "pinyinNumeric" ends in a digit 1-5, neutral written as 5.
+- "pinyinNumeric" contains no tone marks — ASCII letters and digits only.
 - "isTransliteration" is true only for genuine phonetic transliterations.
 - The output is valid JSON.
 
@@ -456,6 +462,15 @@ export function parseLLMResponse(raw: string): LLMResponse {
       if (!t.surfaceForm) throw new Error(`Token ${i} missing "surfaceForm"`);
       if (!t.pinyinNumeric) throw new Error(`Token ${i} missing "pinyinNumeric"`);
       if (!t.english) throw new Error(`Token ${i} missing "english"`);
+
+      // The model emits tone marks and bare syllables into pinyinNumeric no
+      // matter how firmly the prompt forbids it, and each variant raised a
+      // spurious flag against an equivalent dictionary value. Normalized here
+      // so every consumer sees the documented format.
+      t.pinyinNumeric = normalizePinyinNumeric(t.pinyinNumeric);
+      for (const c of t.characters ?? []) {
+        if (c.pinyinNumeric) c.pinyinNumeric = normalizePinyinNumeric(c.pinyinNumeric);
+      }
     }
 
     return parsed as LLMResponse;

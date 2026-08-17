@@ -158,36 +158,13 @@ function FlagRow({
     return (
       <div className={wrapperClass} style={wrapperStyle}>
         <div style={descStyle}>
-          <strong className="font-mono">{flag.headword}</strong> isn't in CEDICT — often a
-          name, neologism, or regional usage. The AI's pinyin{' '}
-          {renderPinyin(flag.llmValue)} is unchecked.
-        </div>
-        <div style={hintStyle}>Verify manually in the tokens below before saving.</div>
-      </div>
-    );
-  }
-
-  if (flag.kind === 'pinyin-pro-disagreement') {
-    // The AI's reading stands — picking between a polyphone's readings is a
-    // semantic call it's better placed to make. This is an alert, not a verdict,
-    // so the suggestion is offered rather than the disagreement asserted.
-    return (
-      <div className={wrapperClass} style={wrapperStyle}>
-        <div style={descStyle}>
-          <strong className="font-mono">{flag.headword}:</strong> the AI chose{' '}
-          {renderPinyin(flag.llmValue)}, but pinyin-pro reads it as{' '}
-          {renderPinyin(flag.pinyinProValue)}.
+          <strong className="font-mono">{flag.headword}</strong> isn't in CEDICT, so its
+          reading {renderPinyin(flag.llmValue)} is unverified. Common causes: a name, a
+          neologism, or a verb-object phrase like 还钱 that isn't a dictionary word.
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <FlagButton onClick={() => onApply(flag.headword, flag.pinyinProValue)}>
-            Use {renderPinyin(flag.pinyinProValue)}
-          </FlagButton>
-          <span style={hintStyle}>
-            — or keep the AI's value; it can see the sentence's meaning
-          </span>
-          <SearchLink
-            href={searchUrl(sentence, flag.headword, [flag.llmValue, flag.pinyinProValue])}
-          />
+          <span style={hintStyle}>Worth a check before saving</span>
+          <SearchLink href={searchUrl(sentence, flag.headword, [flag.llmValue])} />
         </div>
       </div>
     );
@@ -243,6 +220,9 @@ export function AddSentencePage() {
   const [missingChars, setMissingChars] = useState<string[]>([]);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [ingestFlags, setIngestFlags] = useState<IngestFlag[]>([]);
+  /** Flags past the first five are collapsed; hiding them outright meant a
+   *  disagreement could never be read or acted on. */
+  const [showAllFlags, setShowAllFlags] = useState(false);
   const [rawLLMResponse, setRawLLMResponse] = useState<string | null>(null);
 
   /**
@@ -1052,7 +1032,7 @@ export function AddSentencePage() {
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               <div className="space-y-1">
                 <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and the reference sources (CC-CEDICT, pinyin-pro)
+                  {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and CC-CEDICT
                 </div>
                 <div style={{ color: 'var(--text-tertiary)' }}>
                   Neither source is always right. They commonly differ on polyphone readings, neutral tones,
@@ -1064,13 +1044,24 @@ export function AddSentencePage() {
                 </div>
               </div>
 
-              {ingestFlags.slice(0, 5).map((f, i) => (
+              {(showAllFlags ? ingestFlags : ingestFlags.slice(0, 5)).map((f, i) => (
                 <FlagRow key={i} flag={f} tokens={tokens} sentence={chinese.trim()}
                   onApply={applyCedictSuggestion}
                   onMerge={mergeTokensIntoCompound}
                 />
               ))}
-              {ingestFlags.length > 5 && <div style={{ opacity: 0.6 }}>…and {ingestFlags.length - 5} more</div>}
+              {ingestFlags.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllFlags((v) => !v)}
+                  className="underline text-xs"
+                  style={{ color: 'var(--text-tertiary)' }}
+                >
+                  {showAllFlags
+                    ? 'Show fewer'
+                    : `Show ${ingestFlags.length - 5} more`}
+                </button>
+              )}
             </div>
           )}
 

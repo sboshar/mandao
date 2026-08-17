@@ -58,7 +58,11 @@ export function checkPinyin(
   llmValue: string,
 ): CheckPinyinResult {
   const entries = lookup(headword);
-  const cedictSuggestions = entries.map((e) => e.pinyin.toLowerCase());
+  // Deduped: several CEDICT entries can share a reading (是 has two), and the
+  // review UI would otherwise render the same button twice.
+  const cedictSuggestions = [
+    ...new Set(entries.map((e) => e.pinyin.toLowerCase())),
+  ];
 
   if (entries.length === 0) {
     return {
