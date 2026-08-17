@@ -56,13 +56,24 @@ export function SuggestedPhrases({
       // explicitly supplied gloss (the MeaningCard path, which already knows
       // exactly which meaning the user is looking at).
       let glossMap: Map<string, string> | undefined;
+      let targets = headwords;
+
       if (meaningIds && meaningIds.length > 0) {
         const meanings = await repo.getMeaningsByIds(meaningIds);
-        glossMap = new Map(meanings.map((m) => [m.headword, m.englishShort]));
+        if (meanings.length > 0) {
+          // Target the resolved words, not the raw selection string. Highlighting
+          // 走路上班 yields one string, but it is two words — asking for sentences
+          // containing "走路上班" verbatim asks for something that isn't a word,
+          // and the per-token glosses would never match that key, leaving the
+          // sense lock referring to glosses it never printed.
+          targets = meanings.map((m) => m.headword);
+          glossMap = new Map(meanings.map((m) => [m.headword, m.englishShort]));
+        }
       } else if (gloss && headwords.length === 1) {
         glossMap = new Map([[headwords[0], gloss]]);
       }
-      setResult(await suggestPhrases(headwords, glossMap));
+
+      setResult(await suggestPhrases(targets, glossMap));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not fetch suggestions');
       setResult(null);
