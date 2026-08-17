@@ -114,10 +114,30 @@ Segment the sentence according to natural Chinese word boundaries.
 
 - Multi-character lexical words should be emitted as one token.
 - Never split a lexical compound into individual character tokens.
-- Do not merge separate words.
 - Reduplicated forms that function as a single lexical or grammatical unit should be emitted as one token (哥哥, 看看, 试试, 慢慢).
 - Skip punctuation.
 - Every character in the input must appear exactly once in exactly one token.
+
+## Do not merge separate words
+
+A token must be a WORD. Two words that happen to sit next to each other are two
+tokens, however often they co-occur.
+
+Particles are ALWAYS their own token. Never attach 的, 了, 着, 吗, 呢, 吧, 过 to
+the word before them:
+
+  ❌ 我的 as one token        ✅ 我 + 的
+  ❌ 吃了 as one token        ✅ 吃 + 了
+
+Merging a pronoun with 的 also corrupts the pronoun: in 我 + 的 the possessive
+belongs to 的, and 我 still means "I", not "my".
+
+The copula 是 is its own token — it is a verb, not part of what precedes it:
+
+  ❌ 这是 as one token        ✅ 这 + 是
+
+Test: could this token appear in a dictionary as a headword? 我的 and 这是 could
+not. 上班 and 非常 could.
 
 # 2. Whole-sentence English
 
@@ -134,6 +154,40 @@ Choose the single meaning that best fits the context.
 Do not provide multiple alternative translations.
 
 For example, if a Chinese word can reasonably be translated as either "begin" or "start" in a particular context, choose whichever ONE is the best contextual gloss rather than outputting "begin/start".
+
+## Function words use a FIXED gloss
+
+Particles and grammatical markers do not get a translation — they get a name for
+what they do. Use these EXACT strings. Do not paraphrase them, do not invent
+variants, and do not translate the character.
+
+  的   possessive particle           我的书
+  的   modifier particle             漂亮的女孩
+  地   adverbial particle            慢慢地走
+  得   complement particle           说得很好
+  了   completion particle           我吃了饭
+  了   change-of-state particle      天黑了
+  过   experiential particle         我吃过
+  着   durative particle             门开着
+  吗   yes/no question particle      你好吗
+  呢   follow-up question particle   你呢
+  吧   suggestion particle           走吧
+  啊   emphasis particle             好啊
+  呀   emphasis particle             好呀
+  们   plural suffix                 我们
+
+Several characters appear twice because they have genuinely different functions.
+Pick by what the character is doing in THIS sentence — 的 joining a possessor to
+a thing is "possessive particle"; 的 joining a description to a noun is "modifier
+particle".
+
+Wording matters as much as accuracy here. "completed action" and "perfective
+marker" may describe 了 correctly, but only "completion particle" is the string
+this deck uses, and a different wording creates a second card for the same
+morpheme.
+
+These strings apply at BOTH levels — as the token's english when the particle is
+its own token, and as its character gloss inside the token's characters array.
 
 # 4. Character-level English
 
@@ -203,10 +257,9 @@ The gloss may be:
 - a short English phrase when necessary
 - a grammatical label describing a grammatical contribution
 
-For example, grammatical characters may receive glosses such as:
-- "possession"
-- "completion"
-- "plurality"
+For grammatical characters, use the fixed strings from the function-word table
+above ("possessive particle", "completion particle", "plural suffix", …) rather
+than inventing a description.
 
 The character gloss does not have to be the most common standalone translation of the character.
 

@@ -113,6 +113,7 @@ function FlagRow({
   tokens,
   sentence,
   onApply,
+  onApplyGloss,
   onMerge,
 }: {
   flag: IngestFlag;
@@ -120,6 +121,7 @@ function FlagRow({
   /** Needed for the lookup link — readings depend on the sentence. */
   sentence: string;
   onApply: (headword: string, suggestion: string) => void;
+  onApplyGloss: (headword: string, gloss: string) => void;
   onMerge: (flag: SegmentationFlag) => void;
 }) {
   const wrapperClass = 'space-y-1 pt-2';
@@ -165,6 +167,30 @@ function FlagRow({
         <div className="flex flex-wrap items-center gap-2">
           <span style={hintStyle}>Worth a check before saving</span>
           <SearchLink href={searchUrl(sentence, flag.headword, [flag.llmValue])} />
+        </div>
+      </div>
+    );
+  }
+
+  if (flag.kind === 'particle-gloss') {
+    // Wording, not meaning: the model's gloss may be perfectly accurate but
+    // phrased differently, which would still fork a second Meaning row for a
+    // morpheme that already has one.
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        <div style={descStyle}>
+          <strong className="font-mono">{flag.headword}</strong> is a function word with a
+          fixed gloss. The AI wrote "{flag.llmValue}".
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {flag.allowed.map((a) => (
+            <FlagButton key={a} onClick={() => onApplyGloss(flag.headword, a)}>
+              Use "{a}"
+            </FlagButton>
+          ))}
+          <span style={hintStyle}>
+            — keeping a non-standard wording creates a second card for {flag.headword}
+          </span>
         </div>
       </div>
     );
@@ -511,6 +537,17 @@ export function AddSentencePage() {
       ),
     );
     setIngestFlags((prev) => prev.filter((f) => f.headword !== headword));
+  };
+
+  /** Snap a function word's gloss to the canonical wording. Keeps one
+   *  morpheme to one Meaning row instead of one per phrasing. */
+  const applyGlossSuggestion = (headword: string, gloss: string) => {
+    setTokens((prev) =>
+      prev.map((t) => (t.surfaceForm === headword ? { ...t, english: gloss } : t)),
+    );
+    setIngestFlags((prev) =>
+      prev.filter((f) => !(f.kind === 'particle-gloss' && f.headword === headword)),
+    );
   };
 
   /** Collapse the tokens referenced by a segmentation flag into one
@@ -1047,6 +1084,7 @@ export function AddSentencePage() {
               {(showAllFlags ? ingestFlags : ingestFlags.slice(0, 5)).map((f, i) => (
                 <FlagRow key={i} flag={f} tokens={tokens} sentence={chinese.trim()}
                   onApply={applyCedictSuggestion}
+                  onApplyGloss={applyGlossSuggestion}
                   onMerge={mergeTokensIntoCompound}
                 />
               ))}

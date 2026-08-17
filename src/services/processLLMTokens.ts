@@ -1,9 +1,10 @@
 import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
+import { checkParticleGloss, type ParticleGlossFlag } from '../lib/checkParticleGloss';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 import type { LLMResponse, LLMTokenResponse } from './llmPrompt';
 
-export type IngestFlag = CheckPinyinFlag | SegmentationFlag;
+export type IngestFlag = CheckPinyinFlag | SegmentationFlag | ParticleGlossFlag;
 
 export interface ProcessedToken extends LLMTokenResponse {
   pinyinNumeric: string;
@@ -26,6 +27,8 @@ export interface ProcessResult {
  *
  * Observation-only pass:
  *   - checkPinyin on each token (disagreements with CC-CEDICT).
+ *   - checkParticleGloss on each token (function-word glosses off the canonical
+ *     vocabulary, which would fragment one morpheme across several rows).
  *   - scanSegmentation across the token list (mergeable runs of single-char
  *     tokens that CEDICT treats as one compound, e.g. 哥+哥 → 哥哥).
  * Never mutates a token's pinyinNumeric. The review UI decides whether to
@@ -50,6 +53,11 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
   for (const t of tokens) {
     const result = checkPinyin(t.surfaceForm, t.pinyinNumeric);
     if (result.flag) flags.push(result.flag);
+
+    // Function words carry a fixed vocabulary; an invented wording would become
+    // its own Meaning row for a morpheme that already has one.
+    const glossFlag = checkParticleGloss(t.surfaceForm, t.pinyinNumeric, t.english);
+    if (glossFlag) flags.push(glossFlag);
   }
 
   for (const flag of scanSegmentation(tokens)) {
