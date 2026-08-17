@@ -20,6 +20,21 @@ import { useEffect, useState } from 'react';
 const MAX_CHARS = 12;
 
 const CJK = /[一-鿿]/;
+/** Everything that isn't a Han character. */
+const NOT_CJK = /[^一-鿿]/g;
+
+/**
+ * Reduce a raw selection to just its Han characters.
+ *
+ * TokenSpan stacks each token's pinyin under its characters, so dragging
+ * across 我饿了 in Browse yields "我\nwǒ\n饿\nè\n了". Dropping everything that
+ * isn't a Han character recovers the sentence, and incidentally strips
+ * punctuation and the whitespace between tokens — all of which would otherwise
+ * be sent to the model as part of the word.
+ */
+export function hanOnly(raw: string): string {
+  return raw.replace(NOT_CJK, '');
+}
 
 export interface ChineseSelection {
   text: string;
@@ -54,13 +69,18 @@ export function useChineseSelection(): {
      */
     const read = () => {
       const sel = window.getSelection();
-      const text = sel?.toString().trim() ?? '';
+      const raw = sel?.toString() ?? '';
 
-      if (!sel || sel.rangeCount === 0 || !text) {
+      if (!sel || sel.rangeCount === 0 || !CJK.test(raw)) {
         setSelection(null);
         return;
       }
-      if (text.length > MAX_CHARS || !CJK.test(text)) {
+
+      // Length is judged on the Han characters alone. The raw string is padded
+      // with interleaved pinyin, so measuring it would reject short selections
+      // for being long.
+      const text = hanOnly(raw);
+      if (!text || text.length > MAX_CHARS) {
         setSelection(null);
         return;
       }
