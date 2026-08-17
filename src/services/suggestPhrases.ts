@@ -57,6 +57,15 @@ export function buildSuggestionPrompt(
     })
     .join('\n');
 
+  const senseLock = glossByHeadword && glossByHeadword.size > 0
+    ? `\nSTAY IN THIS SENSE. The gloss beside each target is the specific meaning
+being studied, and every sentence must use the word with THAT meaning. Many
+Chinese words carry unrelated senses — 意思 is "meaning" but also "a small gift" —
+and a sentence using the wrong one is not a different example of the same word,
+it is a different word. Discard any sentence that would use another sense, even
+if it is a perfectly good sentence.\n`
+    : '';
+
   const together =
     headwords.length > 1
       ? `\nEvery sentence must use ALL of the target words together. If there is no natural way to use them all in one sentence, return fewer suggestions — or an empty list. Do NOT force them into a contrived sentence just to fill the quota.\n`
@@ -66,7 +75,7 @@ export function buildSuggestionPrompt(
 
 Target${headwords.length > 1 ? 's' : ''}:
 ${targets}
-${together}
+${senseLock}${together}
 # What makes a good suggestion
 
 Write sentences a native speaker would actually produce, AT THIS WORD'S OWN

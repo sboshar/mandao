@@ -40,6 +40,48 @@ export interface ChineseSelection {
   text: string;
   /** Viewport rect of the selection, for positioning the popup. */
   rect: DOMRect;
+  /**
+   * Meaning ids of the tokens the highlight touches, in document order.
+   *
+   * This is the sense the user is actually looking at. Resolving by headword
+   * instead would be a guess — 意思 can be "meaning" or "a small gift", and two
+   * sentences in the deck may use both. The DOM knows which one is on screen;
+   * a headword lookup does not.
+   *
+   * Empty when the highlight isn't inside rendered tokens (e.g. plain sentence
+   * text in Browse), which is fine — the request just goes out unconstrained.
+   */
+  meaningIds: string[];
+}
+
+/**
+ * Collect the meaning ids of every token element the range touches.
+ *
+ * TokenSpan stamps data-meaning-id, so this walks the range's ancestor for
+ * those elements and keeps the ones that actually intersect. A selection inside
+ * a single token has that token as an ancestor rather than a descendant, hence
+ * the closest() check as well.
+ */
+export function meaningIdsInRange(range: Range): string[] {
+  const node = range.commonAncestorContainer;
+  const el: Element | null =
+    node instanceof Element ? node : (node.parentElement ?? null);
+  if (!el) return [];
+
+  const ids: string[] = [];
+  const push = (candidate: Element | null) => {
+    if (!candidate) return;
+    const id = candidate.getAttribute('data-meaning-id');
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+
+  // Selection sits entirely inside one token.
+  push(el.closest('[data-meaning-id]'));
+  // Selection spans several tokens under a common ancestor.
+  for (const candidate of el.querySelectorAll('[data-meaning-id]')) {
+    if (range.intersectsNode(candidate)) push(candidate);
+  }
+  return ids;
 }
 
 /** True when the selection sits inside an editable field, where the user is
@@ -89,14 +131,15 @@ export function useChineseSelection(): {
         return;
       }
 
-      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
       // A zero-size rect means the range isn't laid out (collapsed or hidden).
       if (rect.width === 0 && rect.height === 0) {
         setSelection(null);
         return;
       }
 
-      setSelection({ text, rect });
+      setSelection({ text, rect, meaningIds: meaningIdsInRange(range) });
     };
 
     // Deferred so the browser has committed the selection before we read it —

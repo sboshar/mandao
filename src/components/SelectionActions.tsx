@@ -23,10 +23,12 @@ const POPUP_W = 220;
 
 export function SelectionActions() {
   const { selection, clear } = useChineseSelection();
-  const [target, setTarget] = useState<string | null>(null);
+  const [target, setTarget] = useState<{ text: string; meaningIds: string[] } | null>(
+    null,
+  );
 
-  const openFor = (text: string) => {
-    setTarget(text);
+  const openFor = (text: string, meaningIds: string[]) => {
+    setTarget({ text, meaningIds });
     clear(); // drop the highlight so it isn't left hanging behind the modal
   };
 
@@ -57,7 +59,7 @@ export function SelectionActions() {
         >
           <button
             type="button"
-            onClick={() => openFor(selection.text)}
+            onClick={() => openFor(selection.text, selection.meaningIds)}
             className="w-full px-3 py-2 rounded text-sm text-left surface-hover"
             style={{ color: 'var(--text-primary)' }}
           >
@@ -82,7 +84,7 @@ export function SelectionActions() {
               style={{ borderBottom: '1px solid var(--border)' }}
             >
               <div>
-                <div className="text-lg">{target}</div>
+                <div className="text-lg">{target.text}</div>
                 <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
                   More sentences using this
                 </div>
@@ -98,7 +100,8 @@ export function SelectionActions() {
             </div>
             <div className="p-4">
               <SuggestedPhrases
-                headwords={[target]}
+                headwords={[target.text]}
+                meaningIds={target.meaningIds}
                 autoFetch
                 onNavigate={() => setTarget(null)}
               />
