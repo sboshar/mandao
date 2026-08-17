@@ -16,16 +16,26 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { suggestPhrases, type SuggestionResult } from '../services/suggestPhrases';
 import { isAIConfigured } from '../services/aiProvider';
+import * as repo from '../db/repo';
 
 export function SuggestedPhrases({
   headwords,
   gloss,
+  meaningIds,
   autoFetch = false,
   onNavigate,
 }: {
   /** One word, or several that must appear together. */
   headwords: string[];
   gloss?: string;
+  /**
+   * Meanings the highlight actually touched, when opened from a selection.
+   *
+   * Preferred over a headword lookup, because it names the sense on screen
+   * rather than guessing: 意思 may exist in the deck as both "meaning" and
+   * "a small gift", and only the rendered token knows which one is being read.
+   */
+  meaningIds?: string[];
   /** Fetch on mount instead of waiting for a button press. */
   autoFetch?: boolean;
   /** Lets the host close its modal before we route away. */
@@ -42,8 +52,16 @@ export function SuggestedPhrases({
     setLoading(true);
     setError('');
     try {
-      const glossMap =
-        gloss && headwords.length === 1 ? new Map([[headwords[0], gloss]]) : undefined;
+      // Prefer the senses the highlight resolved to; fall back to an
+      // explicitly supplied gloss (the MeaningCard path, which already knows
+      // exactly which meaning the user is looking at).
+      let glossMap: Map<string, string> | undefined;
+      if (meaningIds && meaningIds.length > 0) {
+        const meanings = await repo.getMeaningsByIds(meaningIds);
+        glossMap = new Map(meanings.map((m) => [m.headword, m.englishShort]));
+      } else if (gloss && headwords.length === 1) {
+        glossMap = new Map([[headwords[0], gloss]]);
+      }
       setResult(await suggestPhrases(headwords, glossMap));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not fetch suggestions');
@@ -51,7 +69,7 @@ export function SuggestedPhrases({
     } finally {
       setLoading(false);
     }
-  }, [headwords, gloss]);
+  }, [headwords, gloss, meaningIds]);
 
   useEffect(() => {
     if (autoFetch) void fetchSuggestions();

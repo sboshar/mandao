@@ -84,6 +84,22 @@ describe('buildSuggestionPrompt', () => {
     expect(p).toContain('Do not return an empty list');
   });
 
+  it('locks the model to the supplied sense when a gloss is known', () => {
+    // 意思 is "meaning" but also "a small gift". A sentence using the other
+    // sense isn't another example of the same word — it's a different word, and
+    // accepting it would create an unrelated Meaning row rather than adding
+    // context to the card being studied.
+    const p = buildSuggestionPrompt(['意思'], new Map([['意思', 'a small gift']]));
+    expect(p).toContain('STAY IN THIS SENSE');
+    expect(p).toContain('a small gift');
+  });
+
+  it('omits the sense lock when no gloss is known', () => {
+    // Highlighting a word that isn't in the deck yet: there is no sense to
+    // preserve, so constraining would be inventing one.
+    expect(buildSuggestionPrompt(['意思'])).not.toContain('STAY IN THIS SENSE');
+  });
+
   it('reserves the empty list for the multi-word case only', () => {
     expect(buildSuggestionPrompt(['忘我'])).toContain('ONLY in the multi-word case');
   });
