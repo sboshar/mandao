@@ -154,13 +154,28 @@ describe('processLLMTokens — observation only', () => {
     expect(r.tokens[0].pinyinSandhi).toBe('bú shì'); // derived
   });
 
-  it('flags cedict-unknown for novel words', () => {
+  it('suppresses cedict-unknown when pinyin-pro confirms the reading', () => {
+    // 佛系青年 is a neologism CEDICT has never heard of, so checkPinyin can only
+    // report "unchecked". But pinyin-pro reads it as fo2 xi4 qing1 nian2 and
+    // agrees — the reading IS checked, so saying otherwise is just noise.
     const r = processLLMTokens(
       response([token('佛系青年', 'fo2 xi4 qing1 nian2', 'apathetic youth')]),
     );
     expect(r.tokens[0].pinyinNumeric).toBe('fo2 xi4 qing1 nian2');
-    const flag = cedictFlag(r.flags);
-    expect(flag.kind).toBe('cedict-unknown');
-    expect(flag.cedictSuggestions).toEqual([]);
+    expect(r.flags).toHaveLength(0);
+  });
+
+  it('reports a disagreement on a novel word rather than "unchecked"', () => {
+    // Same word CEDICT lacks, but now the model's reading differs. The useful
+    // message is the specific conflict, not that CEDICT has no entry.
+    const r = processLLMTokens(
+      response([token('佛系青年', 'fu2 xi4 qing1 nian2', 'apathetic youth')]),
+    );
+    const flag = r.flags.find((f) => f.kind === 'pinyin-pro-disagreement')!;
+    expect(flag).toBeDefined();
+    if (flag.kind === 'pinyin-pro-disagreement') {
+      expect(flag.llmValue).toBe('fu2 xi4 qing1 nian2');
+      expect(flag.pinyinProValue).toBe('fo2 xi4 qing1 nian2');
+    }
   });
 });

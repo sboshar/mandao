@@ -40,22 +40,36 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
   const tokens: ProcessedToken[] = response.tokens.map((t) => ({ ...t }));
   const flags: IngestFlag[] = [];
 
-  for (const t of tokens) {
-    const result = checkPinyin(t.surfaceForm, t.pinyinNumeric);
-    if (result.flag) flags.push(result.flag);
-  }
-
   // pinyin-pro reads the whole sentence at once so it can disambiguate
-  // polyphones from context, then each token takes its slice.
+  // polyphones from context; each token then takes its slice.
   const sentence = response.chinese || tokens.map((t) => t.surfaceForm).join('');
   const sentenceSyllables = readSentence(sentence);
+  const proReadings = new Map<string, string[]>();
   if (sentenceSyllables) {
     let charOffset = 0;
     for (const t of tokens) {
       const charCount = Array.from(t.surfaceForm).length;
       const slice = sentenceSyllables.slice(charOffset, charOffset + charCount);
       charOffset += charCount;
-      if (slice.length !== charCount) continue;
+      if (slice.length === charCount) proReadings.set(t.surfaceForm, slice);
+    }
+  }
+
+  for (const t of tokens) {
+    const slice = proReadings.get(t.surfaceForm);
+    const result = checkPinyin(t.surfaceForm, t.pinyinNumeric);
+
+    if (result.flag) {
+      // cedict-unknown claims the reading is "unchecked". That was true when
+      // CEDICT was the only reference, but pinyin-pro answers for words CEDICT
+      // has never heard of — and its silence here means it AGREES. Reporting an
+      // unchecked reading that was in fact checked and confirmed is just noise,
+      // so it's suppressed. Words CEDICT knows still flag normally.
+      const coveredByPinyinPro = result.flag.kind === 'cedict-unknown' && !!slice;
+      if (!coveredByPinyinPro) flags.push(result.flag);
+    }
+
+    if (slice) {
       const flag = checkPinyinPro(t.surfaceForm, t.pinyinNumeric, slice);
       if (flag) flags.push(flag);
     }

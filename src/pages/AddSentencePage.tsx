@@ -69,6 +69,34 @@ const FLAG_BUTTON_STYLE: React.CSSProperties = {
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
 };
 
+/**
+ * Google search for a reading disagreement, phrased as the question the user
+ * actually has. Readings depend on the sentence, so the sentence goes in the
+ * query — a bare "还钱 pinyin" search returns the dictionary form and misses the
+ * point of the disagreement.
+ */
+function searchUrl(sentence: string, headword: string, readings: string[]): string {
+  const options = readings
+    .map((r) => `"${numericStringToDiacritic(r)}"`)
+    .join(' or ');
+  const q = `in the context of the sentence "${sentence}", is ${headword} pronounced ${options}?`;
+  return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+}
+
+function SearchLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline"
+      style={{ color: 'var(--text-tertiary)' }}
+    >
+      Look it up ↗
+    </a>
+  );
+}
+
 function FlagButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick}
@@ -83,11 +111,14 @@ function FlagButton({ onClick, children }: { onClick: () => void; children: Reac
 function FlagRow({
   flag,
   tokens,
+  sentence,
   onApply,
   onMerge,
 }: {
   flag: IngestFlag;
   tokens: TokenFormData[];
+  /** Needed for the lookup link — readings depend on the sentence. */
+  sentence: string;
   onApply: (headword: string, suggestion: string) => void;
   onMerge: (flag: SegmentationFlag) => void;
 }) {
@@ -154,6 +185,9 @@ function FlagRow({
           <span style={hintStyle}>
             — or keep the AI's value; it can see the sentence's meaning
           </span>
+          <SearchLink
+            href={searchUrl(sentence, flag.headword, [flag.llmValue, flag.pinyinProValue])}
+          />
         </div>
       </div>
     );
@@ -173,6 +207,9 @@ function FlagRow({
           </FlagButton>
         ))}
         <span style={hintStyle}>— or keep the AI's value if it's correct</span>
+        <SearchLink
+          href={searchUrl(sentence, flag.headword, [flag.llmValue, ...flag.cedictSuggestions])}
+        />
       </div>
     </div>
   );
@@ -987,7 +1024,7 @@ export function AddSentencePage() {
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               <div className="space-y-1">
                 <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and CC-CEDICT
+                  {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and the reference sources (CC-CEDICT, pinyin-pro)
                 </div>
                 <div style={{ color: 'var(--text-tertiary)' }}>
                   Neither source is always right. They commonly differ on polyphone readings, neutral tones,
@@ -1000,7 +1037,7 @@ export function AddSentencePage() {
               </div>
 
               {ingestFlags.slice(0, 5).map((f, i) => (
-                <FlagRow key={i} flag={f} tokens={tokens}
+                <FlagRow key={i} flag={f} tokens={tokens} sentence={chinese.trim()}
                   onApply={applyCedictSuggestion}
                   onMerge={mergeTokensIntoCompound}
                 />
