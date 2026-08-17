@@ -101,12 +101,19 @@ export function useChineseSelection(): {
 
     // Deferred so the browser has committed the selection before we read it —
     // on touch especially, the selection isn't final at touchend time.
-    const schedule = () => setTimeout(read, 0);
+    // Only one is ever pending; a rapid second release supersedes the first.
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      clearTimeout(pending);
+      pending = setTimeout(read, 0);
+    };
 
     document.addEventListener('mouseup', schedule);
     document.addEventListener('touchend', schedule);
     document.addEventListener('keyup', schedule);
     return () => {
+      // Otherwise a release just before unmount lands in a dead component.
+      clearTimeout(pending);
       document.removeEventListener('mouseup', schedule);
       document.removeEventListener('touchend', schedule);
       document.removeEventListener('keyup', schedule);

@@ -226,6 +226,7 @@ export function AddSentencePage() {
    *  the sentence already typed, so accepting a suggestion drops the user into
    *  the normal review flow rather than a second bespoke pipeline. */
   const [chinese, setChinese] = useState(() => searchParams.get('chinese') ?? '');
+  const prefill = searchParams.get('chinese');
   const [english, setEnglish] = useState('');
   const [tokens, setTokens] = useState<TokenFormData[]>([]);
   const [step, setStep] = useState<'input' | 'llm' | 'review' | 'confirm'>('input');
@@ -243,6 +244,30 @@ export function AddSentencePage() {
   const [reanalyzing, setReanalyzing] = useState(false);
   const [ingestFlags, setIngestFlags] = useState<IngestFlag[]>([]);
   const [rawLLMResponse, setRawLLMResponse] = useState<string | null>(null);
+
+  /**
+   * Re-apply the ?chinese= prefill when it changes.
+   *
+   * The useState initializer above only runs on mount, and the selection popup
+   * is mounted globally — so accepting a suggestion while already on /add
+   * navigates /add → /add?chinese=X without remounting, and the prefill would
+   * silently do nothing. Clicking "Add to deck" is an explicit request to start
+   * that sentence, so any half-finished one is reset rather than merged into.
+   */
+  useEffect(() => {
+    if (!prefill || prefill === chinese) return;
+    setChinese(prefill);
+    setEnglish('');
+    setTokens([]);
+    setMissingChars([]);
+    setIngestFlags([]);
+    setRawLLMResponse(null);
+    setError('');
+    setStep('input');
+    // chinese is intentionally excluded: this fires on prefill changes only,
+    // otherwise typing in the box would fight the effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
   const [showRawLLM, setShowRawLLM] = useState(false);
   const aiEnabled = isAIConfigured();
   const [listening, setListening] = useState(false);
