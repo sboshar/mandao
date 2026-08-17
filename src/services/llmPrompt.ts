@@ -239,10 +239,10 @@ the sentence translation.
 
 Each part contributes to the whole; no part IS the whole.
 
-  非常 → "very"
-    非 → "not"      ✅ contributes
-    常 → "usual"    ✅ contributes    ("not usual" → "extremely")
-    非 → "very"     ❌ this is the whole token's meaning, not the character's
+  冰箱 → "refrigerator"
+    冰 → "ice"           ✅ contributes
+    箱 → "box"           ✅ contributes    ("ice box" → refrigerator)
+    冰 → "refrigerator"  ❌ this is the whole token's meaning, not the character's
 
 ### When coherence is not achievable
 
