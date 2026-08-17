@@ -1,28 +1,33 @@
 /**
- * "Suggest more sentences" panel inside MeaningCard (#187).
+ * Suggestion list for one or more target words (#187).
  *
- * Opt-in rather than automatic: it costs an LLM call, and most of the time you
- * open a meaning to read it, not to expand it.
+ * Two entry points share this: the inline panel in MeaningCard (opt-in, since
+ * it costs an LLM call and most visits are just to read), and the modal opened
+ * by highlighting Chinese text (auto-fetches, because highlighting and tapping
+ * the action IS the request).
  *
- * Accepting a suggestion hands off to the normal +add flow via ?chinese=
- * instead of ingesting directly. A suggestion is only a Chinese string; turning
- * it into a card needs tokenization, pinyin and per-character meanings, and
- * that pipeline plus its review screen already exists. Routing through it also
- * means suggestions get the same flags and the same chance to be corrected as
- * anything typed by hand.
+ * Accepting hands off to the normal +add flow via ?chinese= rather than
+ * ingesting directly. A suggestion is only a Chinese string; making it a card
+ * needs tokenization, pinyin and per-character meanings, and that pipeline plus
+ * its review screen already exist. Routing through it also means suggestions
+ * get the same flags and corrections as anything typed by hand.
  */
-import { useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { suggestPhrases, type PhraseSuggestion } from '../services/suggestPhrases';
 import { isAIConfigured } from '../services/aiProvider';
 
 export function SuggestedPhrases({
-  headword,
+  headwords,
   gloss,
+  autoFetch = false,
   onNavigate,
 }: {
-  headword: string;
+  /** One word, or several that must appear together. */
+  headwords: string[];
   gloss?: string;
+  /** Fetch on mount instead of waiting for a button press. */
+  autoFetch?: boolean;
   /** Lets the host close its modal before we route away. */
   onNavigate?: () => void;
 }) {
@@ -31,21 +36,31 @@ export function SuggestedPhrases({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  if (!isAIConfigured()) return null;
+  const label = headwords.join(' + ');
 
-  const fetchSuggestions = async () => {
+  const fetchSuggestions = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const glossMap = gloss ? new Map([[headword, gloss]]) : undefined;
-      setSuggestions(await suggestPhrases([headword], glossMap));
+      const glossMap =
+        gloss && headwords.length === 1 ? new Map([[headwords[0], gloss]]) : undefined;
+      setSuggestions(await suggestPhrases(headwords, glossMap));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not fetch suggestions');
       setSuggestions(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [headwords, gloss]);
+
+  useEffect(() => {
+    if (autoFetch) void fetchSuggestions();
+    // Deliberately keyed on the joined headwords rather than the array
+    // identity, which changes on every render of the caller.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFetch, label]);
+
+  if (!isAIConfigured()) return null;
 
   const accept = (s: PhraseSuggestion) => {
     onNavigate?.();
@@ -53,24 +68,22 @@ export function SuggestedPhrases({
   };
 
   return (
-    <div className="px-6 pb-4">
-      <h3
-        className="text-sm font-medium uppercase tracking-wider mb-2"
-        style={{ color: 'var(--text-tertiary)' }}
-      >
-        More sentences with {headword}
-      </h3>
-
-      {suggestions === null && (
+    <div className="space-y-2">
+      {suggestions === null && !loading && !error && (
         <button
           type="button"
           onClick={fetchSuggestions}
-          disabled={loading}
-          className="w-full px-3 py-2 rounded text-sm disabled:opacity-50 inset surface-hover"
+          className="w-full px-3 py-2 rounded text-sm inset surface-hover"
           style={{ color: 'var(--text-secondary)' }}
         >
-          {loading ? 'Thinking…' : `Suggest sentences using ${headword}`}
+          Suggest sentences using {label}
         </button>
+      )}
+
+      {loading && (
+        <div className="text-sm py-2" style={{ color: 'var(--text-tertiary)' }}>
+          Thinking…
+        </div>
       )}
 
       {error && (
@@ -82,14 +95,14 @@ export function SuggestedPhrases({
         </div>
       )}
 
-      {suggestions !== null && suggestions.length === 0 && (
+      {suggestions !== null && suggestions.length === 0 && !loading && (
         <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-          No new suggestions — anything it came up with is already in your deck.
+          Nothing new — anything it suggested is already in your deck.
         </div>
       )}
 
       {suggestions !== null && suggestions.length > 0 && (
-        <div className="space-y-2">
+        <>
           {suggestions.map((s) => (
             <div key={s.chinese} className="p-3 rounded inset">
               <div className="text-lg">{s.chinese}</div>
@@ -122,9 +135,9 @@ export function SuggestedPhrases({
             className="w-full px-3 py-1.5 rounded text-xs disabled:opacity-50 inset surface-hover"
             style={{ color: 'var(--text-tertiary)' }}
           >
-            {loading ? 'Thinking…' : 'Suggest different ones'}
+            Suggest different ones
           </button>
-        </div>
+        </>
       )}
     </div>
   );

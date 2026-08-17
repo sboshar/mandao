@@ -6,6 +6,7 @@ import { runSync, startSyncListeners, stopSyncListeners } from './db/syncEngine'
 import { DashboardPage } from './pages/DashboardPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { FreeReviewPage } from './pages/FreeReviewPage';
+import { SelectionActions } from './components/SelectionActions';
 import { AddSentencePage } from './pages/AddSentencePage';
 import { BrowsePage } from './pages/BrowsePage';
 import { GraphPage } from './pages/GraphPage';
@@ -213,6 +214,8 @@ function App() {
           <Route path="/auth/callback" element={<Navigate to="/" replace />} />
           <Route path="/reset-password" element={<Navigate to="/" replace />} />
         </Routes>
+        {/* Global: highlighting Chinese anywhere raises the action popup. */}
+        <SelectionActions />
       </div>
     </BrowserRouter>
   );
