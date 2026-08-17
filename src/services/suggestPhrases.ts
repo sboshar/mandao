@@ -22,6 +22,22 @@ export interface PhraseSuggestion {
   note?: string;
 }
 
+/**
+ * Outcome of a request, with counts.
+ *
+ * An empty list has several different causes — the model returned nothing, its
+ * suggestions didn't contain the target word, or they were all already in the
+ * deck — and they call for different messages. The UI used to assert
+ * "already in your deck" for all three, which was a guess and often wrong.
+ */
+export interface SuggestionResult {
+  suggestions: PhraseSuggestion[];
+  /** How many the model returned before any filtering. */
+  returned: number;
+  droppedOffTarget: number;
+  droppedExisting: number;
+}
+
 /** Ceiling on what we ask for. More than this is hard to scan and rarely useful. */
 const MAX_SUGGESTIONS = 8;
 
@@ -53,24 +69,30 @@ ${targets}
 ${together}
 # What makes a good suggestion
 
-Write what a native speaker would ACTUALLY SAY in everyday conversation.
+Write sentences a native speaker would actually produce, AT THIS WORD'S OWN
+REGISTER. Match the word, don't force it somewhere it doesn't go.
 
-- Everyday spoken register. Think message to a friend, not a textbook exercise.
+- A casual word gets casual sentences. A literary or written word gets the
+  natural written contexts it really appears in — that is still a real, useful
+  sentence, not a compromise.
 - Short. Roughly 4-12 characters. These become flashcards.
-- The target word must appear verbatim, in its normal usage.
+- The target word must appear verbatim.
 - Vary the contexts. Different grammatical roles and situations teach more than
   five variations of one pattern.
+- Common collocations are ideal: the phrases this word habitually appears in.
 
 # What to avoid
 
-- Textbook sentences. "这是一本书" is grammatical and worthless.
-- Formal or literary register unless the word itself is formal.
+- Textbook filler. "这是一本书" is grammatical and worthless.
 - Sentences that exist only to contain the word, with no communicative point.
-- Explaining the word instead of using it.
+- Explaining or defining the word instead of using it.
 - Rare or archaic senses. Suggest the usage a learner will actually meet.
 
-If the word is itself formal or literary, say so in the note rather than
-inventing casual usage that does not exist.
+ALWAYS RETURN SUGGESTIONS. Every word that exists is used somewhere — if it
+were unusable there would be nothing to learn. Do not return an empty list
+because the word is formal, literary, or narrow in application; return its real
+usage and note the register instead. Reserve the empty list for the case where
+several target words genuinely cannot co-occur.
 
 # Output
 
@@ -84,7 +106,7 @@ Return ONLY a JSON array. No markdown, no prose, no code fences.
   }
 ]
 
-Return an empty array [] if there is no natural suggestion to make.`;
+Return an empty array [] ONLY in the multi-word case described above.`;
 }
 
 /** Parse the model's array, tolerating the usual fence/prose noise. */
@@ -143,19 +165,25 @@ async function removeExisting(
 export async function suggestPhrases(
   headwords: string[],
   glossByHeadword?: Map<string, string>,
-): Promise<PhraseSuggestion[]> {
+): Promise<SuggestionResult> {
   const targets = headwords.map((h) => h.trim()).filter(Boolean);
-  if (targets.length === 0) return [];
+  if (targets.length === 0) {
+    return { suggestions: [], returned: 0, droppedOffTarget: 0, droppedExisting: 0 };
+  }
 
   const prompt = buildSuggestionPrompt(targets, glossByHeadword);
   const raw = await generateCompletion(prompt);
-  const suggestions = parseSuggestions(raw);
+  const parsed = parseSuggestions(raw);
 
   // A suggestion that doesn't contain the word it was asked for is a
   // non-answer, whatever else it may be.
-  const onTarget = suggestions.filter((s) =>
-    targets.every((t) => s.chinese.includes(t)),
-  );
+  const onTarget = parsed.filter((s) => targets.every((t) => s.chinese.includes(t)));
+  const kept = await removeExisting(onTarget);
 
-  return removeExisting(onTarget);
+  return {
+    suggestions: kept,
+    returned: parsed.length,
+    droppedOffTarget: parsed.length - onTarget.length,
+    droppedExisting: onTarget.length - kept.length,
+  };
 }

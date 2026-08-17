@@ -75,4 +75,16 @@ describe('buildSuggestionPrompt', () => {
   it('does not demand co-occurrence for a single target', () => {
     expect(buildSuggestionPrompt(['上班'])).not.toContain('ALL of the target words');
   });
+
+  it('tells the model to answer even for formal or literary words', () => {
+    // 忘我 is literary-leaning, and an earlier version invited the model to
+    // decline for exactly that reason — so it returned nothing at all.
+    const p = buildSuggestionPrompt(['忘我']);
+    expect(p).toContain('ALWAYS RETURN SUGGESTIONS');
+    expect(p).toContain('Do not return an empty list');
+  });
+
+  it('reserves the empty list for the multi-word case only', () => {
+    expect(buildSuggestionPrompt(['忘我'])).toContain('ONLY in the multi-word case');
+  });
 });
