@@ -18,6 +18,7 @@ import { EnglishCard } from './EnglishCard';
 import { getTokensForSentence } from '../services/ingestion';
 import { TutorialBanner } from './TutorialBanner';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
+import { SuggestedPhrases } from './SuggestedPhrases';
 import { useTutorialStore } from '../stores/tutorialStore';
 import type { SentenceToken } from '../db/schema';
 
@@ -139,6 +140,12 @@ function MeaningContent() {
           </div>
         </div>
       )}
+
+      <SuggestedPhrases
+        headword={meaning.headword}
+        gloss={meaning.englishShort}
+        onNavigate={close}
+      />
 
       {otherMeanings.length > 0 && (
         <div className="px-6 pb-4">

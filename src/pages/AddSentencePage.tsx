@@ -222,7 +222,10 @@ export function AddSentencePage() {
   const tutorialStep = useTutorialStore((s) => s.step);
   const advanceTutorial = useTutorialStore((s) => s.advance);
 
-  const [chinese, setChinese] = useState('');
+  /** Prefilled by the suggestion panel (#187): /add?chinese=… lands here with
+   *  the sentence already typed, so accepting a suggestion drops the user into
+   *  the normal review flow rather than a second bespoke pipeline. */
+  const [chinese, setChinese] = useState(() => searchParams.get('chinese') ?? '');
   const [english, setEnglish] = useState('');
   const [tokens, setTokens] = useState<TokenFormData[]>([]);
   const [step, setStep] = useState<'input' | 'llm' | 'review' | 'confirm'>('input');
