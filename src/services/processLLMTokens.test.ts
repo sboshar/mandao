@@ -4,6 +4,7 @@ import { loadCedict } from '../lib/cedict';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { LLMResponse } from './llmPrompt';
+import type { IngestFlag } from './processLLMTokens';
 
 beforeAll(async () => {
   const text = readFileSync(resolve(__dirname, '../../public/cedict.txt'), 'utf-8');
@@ -22,6 +23,19 @@ const token = (
   english,
   partOfSpeech: 'other',
 });
+
+/** Narrow to a CEDICT-sourced flag; pinyin-pro flags carry no cedictSuggestions. */
+const cedictFlag = (flags: IngestFlag[], headword?: string) => {
+  const f = flags.find(
+    (x) =>
+      (x.kind === 'cedict-disagreement' || x.kind === 'cedict-unknown') &&
+      (!headword || x.headword === headword),
+  );
+  if (!f || (f.kind !== 'cedict-disagreement' && f.kind !== 'cedict-unknown')) {
+    throw new Error(`no cedict flag for ${headword ?? '(any)'}`);
+  }
+  return f;
+};
 
 const response = (tokens: LLMResponse['tokens']): LLMResponse => ({
   chinese: tokens.map((t) => t.surfaceForm).join(''),
@@ -42,7 +56,7 @@ describe('processLLMTokens — observation only', () => {
     );
     const brother = r.tokens.find((t) => t.surfaceForm === '哥哥')!;
     expect(brother.pinyinNumeric).toBe('ge1 ge1'); // LLM value preserved
-    const flag = r.flags.find((f) => f.headword === '哥哥')!;
+    const flag = cedictFlag(r.flags, '哥哥');
     expect(flag.kind).toBe('cedict-disagreement');
     expect(flag.cedictSuggestions).toContain('ge1 ge5');
   });
@@ -52,8 +66,9 @@ describe('processLLMTokens — observation only', () => {
       response([token('休息', 'xiu1 xi2', 'to rest')]),
     );
     expect(r.tokens[0].pinyinNumeric).toBe('xiu1 xi2');
-    expect(r.flags[0].kind).toBe('cedict-disagreement');
-    expect(r.flags[0].cedictSuggestions).toContain('xiu1 xi5');
+    const flag = cedictFlag(r.flags, '休息');
+    expect(flag.kind).toBe('cedict-disagreement');
+    expect(flag.cedictSuggestions).toContain('xiu1 xi5');
   });
 
   it('surfaces segmentation-disagreement when LLM splits a CEDICT compound', () => {
@@ -64,9 +79,11 @@ describe('processLLMTokens — observation only', () => {
       response([token('哥', 'ge1', 'elder brother'), token('哥', 'ge1', 'elder brother')]),
     );
     expect(r.tokens).toHaveLength(2);
-    expect(r.flags).toHaveLength(1);
-    const f = r.flags[0];
-    expect(f.kind).toBe('segmentation-disagreement');
+    // pinyin-pro reads the sentence as 哥哥 = "ge1 ge5" and so also flags the
+    // second 哥 for its non-neutral tone. Both flags are correct and describe
+    // the same underlying mistake from different angles.
+    const f = r.flags.find((x) => x.kind === 'segmentation-disagreement')!;
+    expect(f).toBeDefined();
     if (f.kind === 'segmentation-disagreement') {
       expect(f.headword).toBe('哥哥');
       expect(f.tokenIndices).toEqual([0, 1]);
@@ -90,12 +107,75 @@ describe('processLLMTokens — observation only', () => {
     expect(r.flags).toHaveLength(0);
   });
 
-  it('flags cedict-unknown for novel words', () => {
+  it('flags a pinyin-pro disagreement without overriding the LLM', () => {
+    // 他还钱了 = "he repaid the money", so 还 is huan2. pinyin-pro reads it as
+    // hai2 ("still") because telling them apart needs the sentence's meaning,
+    // and CEDICT has no 还钱 entry to arbitrate. The LLM's value stands; the
+    // user just gets told the two disagree.
+    const r = processLLMTokens(
+      response([
+        token('他', 'ta1', 'he'),
+        token('还', 'huan2', 'to repay'),
+        token('钱', 'qian2', 'money'),
+        token('了', 'le5', 'completion particle'),
+      ]),
+    );
+    const repay = r.tokens.find((t) => t.surfaceForm === '还')!;
+    expect(repay.pinyinNumeric).toBe('huan2'); // LLM value preserved
+
+    const flag = r.flags.find((f) => f.kind === 'pinyin-pro-disagreement')!;
+    expect(flag).toBeDefined();
+    if (flag.kind === 'pinyin-pro-disagreement') {
+      expect(flag.headword).toBe('还');
+      expect(flag.llmValue).toBe('huan2');
+      expect(flag.pinyinProValue).toBe('hai2');
+    }
+  });
+
+  it('does not raise a pinyin-pro flag when the two agree', () => {
+    const r = processLLMTokens(
+      response([token('我', 'wo3'), token('很', 'hen3'), token('好', 'hao3')]),
+    );
+    expect(r.flags.filter((f) => f.kind === 'pinyin-pro-disagreement')).toHaveLength(0);
+  });
+
+  it('tolerates sandhi in pinyinNumeric rather than flagging it', () => {
+    // pinyin-pro is normalized to citation (bu4), the LLM wrote sandhi (bu2).
+    // Not a reading error, so neither checker should fire.
+    const r = processLLMTokens(response([token('不是', 'bu2 shi4', "it's not")]));
+    expect(r.flags).toHaveLength(0);
+  });
+
+  it('derives pinyinSandhi rather than trusting the LLM', () => {
+    // 不 before a 4th tone becomes bu2; ingestion recomputes this at save time,
+    // so review must show the same derived value.
+    const r = processLLMTokens(response([token('不是', 'bu4 shi4', "it's not")]));
+    expect(r.tokens[0].pinyinNumeric).toBe('bu4 shi4'); // citation, untouched
+    expect(r.tokens[0].pinyinSandhi).toBe('bú shì'); // derived
+  });
+
+  it('suppresses cedict-unknown when pinyin-pro confirms the reading', () => {
+    // 佛系青年 is a neologism CEDICT has never heard of, so checkPinyin can only
+    // report "unchecked". But pinyin-pro reads it as fo2 xi4 qing1 nian2 and
+    // agrees — the reading IS checked, so saying otherwise is just noise.
     const r = processLLMTokens(
       response([token('佛系青年', 'fo2 xi4 qing1 nian2', 'apathetic youth')]),
     );
     expect(r.tokens[0].pinyinNumeric).toBe('fo2 xi4 qing1 nian2');
-    expect(r.flags[0].kind).toBe('cedict-unknown');
-    expect(r.flags[0].cedictSuggestions).toEqual([]);
+    expect(r.flags).toHaveLength(0);
+  });
+
+  it('reports a disagreement on a novel word rather than "unchecked"', () => {
+    // Same word CEDICT lacks, but now the model's reading differs. The useful
+    // message is the specific conflict, not that CEDICT has no entry.
+    const r = processLLMTokens(
+      response([token('佛系青年', 'fu2 xi4 qing1 nian2', 'apathetic youth')]),
+    );
+    const flag = r.flags.find((f) => f.kind === 'pinyin-pro-disagreement')!;
+    expect(flag).toBeDefined();
+    if (flag.kind === 'pinyin-pro-disagreement') {
+      expect(flag.llmValue).toBe('fu2 xi4 qing1 nian2');
+      expect(flag.pinyinProValue).toBe('fo2 xi4 qing1 nian2');
+    }
   });
 });

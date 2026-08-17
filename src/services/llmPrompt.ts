@@ -3,10 +3,16 @@
  *
  * Flow: user enters sentence → LLM tokenizes and analyzes → user reviews
  * The LLM handles: segmentation, English translation, pinyin, tone sandhi, character breakdowns, POS.
+ *
+ * CC-CEDICT is deliberately NOT in this prompt (see #185). It was supplying
+ * glosses picked by alphabetical accident — entries[0] of a byte-order sorted
+ * file, which yields "Africa" for 非 and "surname Chang" for 常. CEDICT still
+ * runs as a post-hoc validator in processLLMTokens (checkPinyin,
+ * scanSegmentation), so disagreements surface as review flags instead of
+ * being fed to the model as fact.
  */
 import * as repo from '../db/repo';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
-import { gatherCedictHits, formatCedictBlock } from '../lib/cedictSweep';
 
 export interface ExistingMeaning {
   headword: string;
@@ -31,18 +37,18 @@ export async function getExistingMeanings(
 
 /**
  * Generate LLM prompt that tokenizes and analyzes a Chinese sentence.
- * The LLM handles both segmentation into words and filling in definitions.
  *
- * Async because we sweep CC-CEDICT for every relevant substring and
- * include those readings as authoritative references in the prompt.
- * The write-time pipeline overrides LLM pinyin with CEDICT anyway, but
- * grounding the prompt up-front produces fewer overrides + fewer flags.
+ * @param translationReference Optional machine translation of the sentence.
+ *   When supplied it is authoritative for the sentence-level english — the
+ *   prompt instructs the model to copy it verbatim, and the caller enforces
+ *   that regardless of what comes back.
  */
 export async function generateAnalysisPrompt(
   chinese: string,
   existingMeanings?: ExistingMeaning[],
   /** Characters the previous response omitted — tells the model to include them this time. */
   missingChars?: string[],
+  translationReference?: string,
 ): Promise<string> {
   const retrySection = missingChars && missingChars.length > 0
     ? `\nPrevious attempt omitted: ${missingChars.join(' ')}. Every Hanzi character must appear in exactly one token's surfaceForm.\n`
@@ -54,90 +60,350 @@ export async function generateAnalysisPrompt(
       .map((m) => `  ${m.headword} [${m.pinyin}] = "${m.english}"`)
       .join('\n');
     existingSection = `
-User's existing meanings (reuse the exact english string when it fits this context):
+User's existing character meanings (candidate meanings — reuse the exact English string when it fits this context):
 ${lines}
 `;
   }
 
-  const cedictHits = await gatherCedictHits(chinese);
-  const cedictSection = formatCedictBlock(cedictHits);
+  const referenceSection = translationReference
+    ? `
+Reference translation (independent machine translation of this sentence):
+  "${translationReference}"
+`
+    : '';
 
-  return `Tokenize and analyze a Chinese sentence. Return ONLY the JSON object below — no markdown, no prose, no code fences.
+  const translationRule = translationReference
+    ? `A reference translation is supplied above. Copy it into "english" VERBATIM.
+
+This is not a judgement call. Do not reword it, do not "improve" it, and do not
+replace it with a more literal rendering. The reference comes from a dedicated
+translation system and is authoritative for the sentence level.
+
+In particular: do NOT reason that a more literal gloss is "more accurate". The
+sentence-level english is meant to be natural English, not a literal decomposition.
+The literal reading lives in the token and character glosses, which is where you
+should put it.
+
+If the reference and your instinct disagree, the reference wins. Treat it as a
+constraint on the rest of your analysis: choose token and character glosses that are
+consistent with the reference's reading of the sentence.`
+    : `Translate the complete sentence into natural English.
+
+Prefer the natural contextual meaning over a literal word-for-word translation.`;
+
+  return `Analyze the Chinese sentence below and return ONLY the JSON object specified at the end. No markdown, prose, explanations, or code fences.
 
 Sentence: ${chinese}
-${retrySection}${existingSection}${cedictSection}
-# Critical rules — read before anything else
+${retrySection}${referenceSection}${existingSection}
+# Core task
 
-1. **CEDICT compounds above are one token.** Any multi-character compound listed in the CEDICT block MUST be emitted as a single token with that exact pinyin. Do not split the compound into individual character tokens. Do not build the compound reading by concatenating character readings.
+Analyze the sentence at two levels:
 
-2. **Reduplication always merges.** For any repeated character pattern XX where CEDICT has XX as a compound (哥哥, 看看, 试试, 慢慢, 爸爸), emit ONE token with the CEDICT compound reading — never two separate X tokens.
-    ❌ WRONG:  [{"surfaceForm":"哥","pinyinNumeric":"ge1"}, {"surfaceForm":"哥","pinyinNumeric":"ge1"}]
-    ✅ RIGHT:  [{"surfaceForm":"哥哥","pinyinNumeric":"ge1 ge5"}]
+1. WORD LEVEL
+   Identify the correct words, pronunciation, part of speech, and contextual English meaning.
 
-3. **pinyinNumeric is citation form, no sandhi.** "bu4 shi4" not "bu2 shi4". "yi1 ge4" not "yi2 ge4". Sandhi belongs in pinyinSandhi only.
+2. CHARACTER LEVEL
+   For every character inside every word, provide exactly ONE English gloss representing that character's best semantic or grammatical contribution to that word in this sentence.
 
-# Output schema
+The goal is contextual lexical decomposition: determine what each character contributes to the word as it is actually being used.
+
+# 1. Segmentation
+
+Segment the sentence according to natural Chinese word boundaries.
+
+- Multi-character lexical words should be emitted as one token.
+- Never split a lexical compound into individual character tokens.
+- Do not merge separate words.
+- Reduplicated forms that function as a single lexical or grammatical unit should be emitted as one token (哥哥, 看看, 试试, 慢慢).
+- Skip punctuation.
+- Every character in the input must appear exactly once in exactly one token.
+
+# 2. Whole-sentence English
+
+${translationRule}
+
+# 3. Token-level English
+
+For each token, provide exactly ONE concise English meaning for the token as used in this sentence.
+
+This is the meaning of the WHOLE TOKEN.
+
+Choose the single meaning that best fits the context.
+
+Do not provide multiple alternative translations.
+
+For example, if a Chinese word can reasonably be translated as either "begin" or "start" in a particular context, choose whichever ONE is the best contextual gloss rather than outputting "begin/start".
+
+# 4. Character-level English
+
+Every token MUST contain a "characters" array with exactly one entry for each character in the token, in the original order.
+
+For each character, provide EXACTLY ONE English gloss representing that character's best semantic, lexical, or grammatical contribution to the word in this sentence.
+
+Think:
+
+  character → ONE best contextual gloss within the word
+
+Do NOT think:
+
+  character → all possible dictionary translations
+
+The character gloss should describe the character's contribution to the word, not simply the meaning of the entire word.
+
+### Important distinction
+
+A character can have several possible English translations in isolation. You must select ONE.
+
+For example, for a different sentence:
+
+  他开始跑步
+  他 → "he"
+  开 → "begin"
+  始 → "start"
+  跑 → "run"
+  步 → "step"
+
+The point is not that every compound must decompose perfectly into independently translatable English words. The point is that each character should receive the ONE best contextual gloss that explains its role in the word.
+
+Another example:
+
+  电脑
+  电 → "electricity"
+  脑 → "brain"
+
+The whole word means "computer", but neither character should receive "computer" as its character-level gloss.
+
+Another example:
+
+  火车
+  火 → "fire"
+  车 → "vehicle"
+
+Again, the character glosses represent the characters' contributions, while the token-level gloss represents the meaning of the complete word.
+
+### Single-gloss requirement
+
+Every character's "english" field MUST contain exactly ONE gloss.
+
+Never output:
+- "do/make"
+- "self/oneself"
+- "begin/start"
+- "work/labor"
+- "X or Y"
+- multiple synonyms
+- comma-separated alternatives
+- parenthetical alternatives
+
+If multiple English words are plausible, choose the ONE that best fits the character's role in the word.
+
+The gloss may be:
+- one English word
+- a short English phrase when necessary
+- a grammatical label describing a grammatical contribution
+
+For example, grammatical characters may receive glosses such as:
+- "possession"
+- "completion"
+- "plurality"
+
+The character gloss does not have to be the most common standalone translation of the character.
+
+A character's meaning inside a compound may differ from its meaning as a standalone word. The same character takes different glosses in different compounds; that is expected for polysemous characters, not an inconsistency to smooth over.
+
+Do not force an existing standalone meaning onto a character when it does not fit the character's role inside the word.
+
+# 5. Consistency between levels
+
+The three levels form a hierarchy: characters make up a token, tokens make up the
+sentence. Your analysis must hold together as one reading of the sentence.
+
+Before returning, read your glosses back upward:
+
+  character glosses  →  should plausibly yield the token gloss
+  token glosses      →  should plausibly yield the sentence translation
+
+When a character is polysemous, THIS IS THE TIEBREAKER. Choose the sense that makes
+the whole coherent, not the sense that is most common in isolation.
+
+  他花了很多钱  ("He spent a lot of money")
+    花钱 → "to spend money"
+    花 → "to spend"      ← coherent with the sentence
+    花 → "flower"        ← the common standalone sense, incoherent here
+
+If two senses of a character are both defensible, prefer the one that composes into the
+token gloss. If two token glosses are both defensible, prefer the one that composes into
+the sentence translation.
+
+### Coherence does NOT mean copying the whole meaning downward
+
+Each part contributes to the whole; no part IS the whole.
+
+  冰箱 → "refrigerator"
+    冰 → "ice"           ✅ contributes
+    箱 → "box"           ✅ contributes    ("ice box" → refrigerator)
+    冰 → "refrigerator"  ❌ this is the whole token's meaning, not the character's
+
+### When coherence is not achievable
+
+Some words are lexicalized: the modern meaning is no longer recoverable from the parts,
+usually for historical reasons. Forcing a compositional reading on these produces
+nonsense.
+
+  矛盾  "contradiction"   —  矛 = "spear",  盾 = "shield"
+  消息  "news"            —  消 = "vanish", 息 = "breath"
+
+For these, give each character its most defensible individual gloss and let the
+mismatch stand. Do NOT invent a misleading meaning to make the compound look
+compositional, and do NOT copy the token's meaning into its characters.
+
+But do not reach for this escape hatch first. Use it only when no coherent reading
+exists. If a sense of the character DOES compose into the token's meaning in this
+sentence, that sense is the right answer.
+
+The objective is accuracy, not forced literal decomposition — and not forced
+incoherence either.
+
+# 6. Existing user meanings
+
+The supplied user meanings are candidate meanings, not mandatory meanings.
+
+When an existing meaning fits the character's role in the current context, reuse the EXACT English string.
+
+When it does not fit, choose the best contextual gloss instead.
+
+Do not force a user's existing meaning merely because the same character appears. In particular, Mandarin pronouns are not inherently possessive — 他 is "he", not "his"; 我 is "I", not "my". Possession requires 的.
+
+# 7. Polyphones
+
+Many characters have more than one reading. Which one is correct depends on what the
+character MEANS here, not on which reading is most common in isolation. Different
+readings of the same character are effectively different words.
+
+  觉: 觉得 → jue2;  睡觉 → jiao4
+  教: 教书 → jiao1; 教室 → jiao4
+  空: 空气 → kong1; 有空 → kong4
+  为: 为了 → wei4;  以为 → wei2
+
+The same character can take DIFFERENT readings twice in one sentence, when it is being
+used with different meanings each time. Do not assume that because a character was read
+one way earlier in the sentence, it takes that reading again. Decide each occurrence
+from its own context.
+
+# 8. pinyinNumeric
+
+"pinyinNumeric" is citation-form pinyin.
+
+Readings are verified against a dictionary after you answer, and corrected where
+the dictionary is unambiguous. The place your answer matters most is POLYPHONES —
+characters with more than one reading, where only the sentence tells you which is
+correct. Spend your effort there.
+
+Rules:
+- lowercase ASCII
+- tone numbers 1-5, where 5 = neutral tone
+- spaces between syllables
+- exactly one syllable per character
+- NO tone sandhi
+
+For example:
+
+  不是
+  pinyinNumeric: "bu4 shi4"
+
+  一个
+  pinyinNumeric: "yi1 ge4"
+
+Do not change "pinyinNumeric" according to surface pronunciation.
+
+### Neutral tone in compounds
+
+Many common compounds take a neutral tone (5) on the second syllable, which is NOT
+predictable from the characters' standalone readings. Use the compound's established
+reading, not the concatenation of citation readings:
+
+  哥哥   → "ge1 ge5"     (not "ge1 ge1")
+  休息   → "xiu1 xi5"    (not "xiu1 xi1")
+  早上   → "zao3 shang5" (not "zao3 shang4")
+  不客气 → "bu4 ke4 qi5" (not "bu4 ke4 qi4")
+  朋友   → "peng2 you5"  (not "peng2 you3")
+
+This applies to reduplicated kinship and verb forms, and to many high-frequency
+disyllabic words. When a compound has an established neutral-tone reading, use it.
+
+# 9. Part of speech
+
+Assign exactly ONE part of speech to each TOKEN as used in the sentence.
+
+Use only:
+
+"noun" | "verb" | "adj" | "adv" | "prep" | "conj" | "particle" | "measure" | "pronoun" | "number" | "other"
+
+Do not assign multiple parts of speech.
+
+# 10. Transliteration
+
+Set "isTransliteration" to true only for genuine phonetic loanwords where the characters are primarily being used for their sounds rather than their normal semantic meanings.
+
+For example, in a phonetic borrowing such as 沙发 (sofa), the characters are primarily phonetic rather than semantic.
+
+For transliterations, each character's English should describe the phonetic role rather than inventing ordinary semantic meanings, in the form: phonetic (sounds like '<syllable>').
+
+Set "isTransliteration" to false for ordinary native Chinese words and compounds (好吃, 电脑).
+
+# 11. Output schema
 
 {
-  "chinese": string,              // the input sentence verbatim
-  "english": string,              // natural English translation
-  "pinyinSandhi": string,         // whole-sentence pinyin, diacritics, sandhi applied
+  "chinese": string,
+  "english": string,
   "tokens": [
     {
-      "surfaceForm": string,      // one word or character as segmented
-      "pinyinNumeric": string,    // CITATION form, lowercase ASCII + tone digits 1-5
-      "pinyinSandhi": string,     // same syllables with diacritics, sandhi applied
-      "english": string,          // THIS token's meaning in THIS sentence
+      "surfaceForm": string,
+      "pinyinNumeric": string,
+      "english": string,
       "partOfSpeech": "noun"|"verb"|"adj"|"adv"|"prep"|"conj"|"particle"|"measure"|"pronoun"|"number"|"other",
       "isTransliteration": boolean,
-      "characters": [             // present on EVERY token (including single-char)
-        { "char": string, "pinyinNumeric": string, "pinyinSandhi": string, "english": string }
+      "characters": [
+        {
+          "char": string,
+          "pinyinNumeric": string,
+          "english": string
+        }
       ]
     }
   ]
 }
 
-# Rules
+# 12. Final validation
 
-## pinyinNumeric (most important — get this right)
-- Lowercase ASCII + tone digits 1–5. 5 = neutral. Space between syllables.
-- Citation form only. Do NOT apply sandhi: "bu4 shi4" NOT "bu2 shi4"; "yi1 ge4" NOT "yi2 ge4". Sandhi belongs in pinyinSandhi.
-- When CEDICT above lists a reading for the whole token, copy it verbatim.
-- For multi-character compounds in CEDICT, use the compound's reading — NOT character readings combined:
-    哥哥 → ge1 ge5       (not ge1 ge1)
-    休息 → xiu1 xi5      (not xiu1 xi1)
-    早上 → zao3 shang5   (not zao3 shang4)
-    不客气 → bu4 ke4 qi5 (not bu4 ke4 qi4)
-- For polyphones (multiple CEDICT entries), pick the reading that fits this sentence's context:
-    行: 银行 → hang2; 行走 → xing2
-    为: 为了 → wei4; 以为 → wei2
+Before returning the JSON, verify all of the following:
 
-## Segmentation
-- Linguistically correct word boundaries. Segment as a native speaker would identify distinct words.
-- CEDICT compounds above are one token (see critical rule 1). Reduplication always merges (see critical rule 2).
-- Do NOT split compounds (作业 is one token, not two). Do NOT merge separate words.
-- Skip punctuation (。，！？).
+- "chinese" exactly matches the input sentence.
+- "english" is a natural translation of the complete sentence.
+- "english" is the reference translation verbatim when one was supplied.
+- Word segmentation is linguistically correct.
+- Every character appears exactly once in exactly one token.
+- Every token's "characters" array contains exactly the token's characters in order.
+- Every token has exactly ONE contextual English meaning.
+- Every character has exactly ONE English gloss.
+- Every character gloss is the single best gloss for that character's contribution to its word in context.
+- Token glosses cohere with the sentence translation.
+- Character glosses cohere with their token's gloss, except where the token is genuinely lexicalized.
+- Where a coherent reading was available, it was chosen over the more common standalone sense.
+- Character glosses do not simply repeat the whole word's meaning.
+- Character glosses contain no alternatives.
+- Character glosses contain no "/" characters.
+- Character glosses contain no "or".
+- Character glosses contain no multiple synonyms.
+- Character glosses do not contain comma-separated lists of meanings.
+- Existing meanings are reused exactly when appropriate.
+- Polyphonic readings are resolved according to context.
+- "pinyinNumeric" uses citation-form pronunciation with no sandhi.
+- "pinyinNumeric" contains exactly one syllable per character.
+- "isTransliteration" is true only for genuine phonetic transliterations.
+- The output is valid JSON.
 
-## pinyinSandhi
-- Apply all sandhi (3rd-tone, 不, 一). Use diacritics.
-- Exactly one syllable per character. Never pull syllables from neighboring tokens.
-
-## characters array
-- Required on every token.
-- Each entry's english is THAT CHARACTER's contribution, not the compound's meaning.
-- Test: the gloss should still make sense if the character appeared in a different compound.
-
-## isTransliteration
-- True only for phonetic loanwords: 汉堡 (hamburger), 咖啡 (coffee), 沙发 (sofa), 巧克力 (chocolate).
-- When true, each character's english must be: phonetic (sounds like '<syllable>').
-- Default false. Native compounds (好吃, 电脑) are false.
-
-## english (token-level)
-- Contextual meaning only. For particles (了, 的), give the grammatical function ("completion particle", "possessive particle").
-
-Before returning, verify each token's pinyinSandhi syllable count equals its surfaceForm character count.
-
-Return ONLY the JSON.`;
+Return ONLY the JSON object.`;
 }
 
 export interface LLMCharacterResponse {
@@ -174,8 +440,8 @@ export function parseLLMResponse(raw: string): LLMResponse {
   cleaned = cleaned.trim();
 
   // Normalize curly/smart quotes to straight quotes (LLMs sometimes produce these)
-  cleaned = cleaned.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"');
-  cleaned = cleaned.replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'");
+  cleaned = cleaned.replace(/[“”„‟″‶]/g, '"');
+  cleaned = cleaned.replace(/[‘’‚‛′‵]/g, "'");
 
   try {
     const parsed = JSON.parse(cleaned);

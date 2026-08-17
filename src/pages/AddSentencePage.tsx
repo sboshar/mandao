@@ -6,6 +6,10 @@ import {
   parseLLMResponse,
   getExistingMeanings,
 } from '../services/llmPrompt';
+import {
+  getTranslationReference,
+  prefetchTranslationReference,
+} from '../services/translationReference';
 import { processLLMTokens } from '../services/processLLMTokens';
 import { collapsePinyin } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
@@ -65,6 +69,34 @@ const FLAG_BUTTON_STYLE: React.CSSProperties = {
   border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
 };
 
+/**
+ * Google search for a reading disagreement, phrased as the question the user
+ * actually has. Readings depend on the sentence, so the sentence goes in the
+ * query — a bare "还钱 pinyin" search returns the dictionary form and misses the
+ * point of the disagreement.
+ */
+function searchUrl(sentence: string, headword: string, readings: string[]): string {
+  const options = readings
+    .map((r) => `"${numericStringToDiacritic(r)}"`)
+    .join(' or ');
+  const q = `in the context of the sentence "${sentence}", is ${headword} pronounced ${options}?`;
+  return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+}
+
+function SearchLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline"
+      style={{ color: 'var(--text-tertiary)' }}
+    >
+      Look it up ↗
+    </a>
+  );
+}
+
 function FlagButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick}
@@ -79,11 +111,14 @@ function FlagButton({ onClick, children }: { onClick: () => void; children: Reac
 function FlagRow({
   flag,
   tokens,
+  sentence,
   onApply,
   onMerge,
 }: {
   flag: IngestFlag;
   tokens: TokenFormData[];
+  /** Needed for the lookup link — readings depend on the sentence. */
+  sentence: string;
   onApply: (headword: string, suggestion: string) => void;
   onMerge: (flag: SegmentationFlag) => void;
 }) {
@@ -132,6 +167,32 @@ function FlagRow({
     );
   }
 
+  if (flag.kind === 'pinyin-pro-disagreement') {
+    // The AI's reading stands — picking between a polyphone's readings is a
+    // semantic call it's better placed to make. This is an alert, not a verdict,
+    // so the suggestion is offered rather than the disagreement asserted.
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        <div style={descStyle}>
+          <strong className="font-mono">{flag.headword}:</strong> the AI chose{' '}
+          {renderPinyin(flag.llmValue)}, but pinyin-pro reads it as{' '}
+          {renderPinyin(flag.pinyinProValue)}.
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <FlagButton onClick={() => onApply(flag.headword, flag.pinyinProValue)}>
+            Use {renderPinyin(flag.pinyinProValue)}
+          </FlagButton>
+          <span style={hintStyle}>
+            — or keep the AI's value; it can see the sentence's meaning
+          </span>
+          <SearchLink
+            href={searchUrl(sentence, flag.headword, [flag.llmValue, flag.pinyinProValue])}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={wrapperClass} style={wrapperStyle}>
       <div style={descStyle}>
@@ -146,6 +207,9 @@ function FlagRow({
           </FlagButton>
         ))}
         <span style={hintStyle}>— or keep the AI's value if it's correct</span>
+        <SearchLink
+          href={searchUrl(sentence, flag.headword, [flag.llmValue, ...flag.cedictSuggestions])}
+        />
       </div>
     </div>
   );
@@ -310,8 +374,13 @@ export function AddSentencePage() {
   // Copy LLM prompt (LLM handles tokenization)
   const handleCopyPrompt = async () => {
     setError('');
-    const existingMeanings = await getExistingMeanings(chinese.trim());
-    const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
+    const [existingMeanings, reference] = await Promise.all([
+      getExistingMeanings(chinese.trim()),
+      getTranslationReference(chinese.trim()),
+    ]);
+    const prompt = await generateAnalysisPrompt(
+      chinese.trim(), existingMeanings, undefined, reference ?? undefined,
+    );
     await navigator.clipboard.writeText(prompt);
     setPromptCopied(true);
     setTimeout(() => setPromptCopied(false), 2000);
@@ -319,9 +388,21 @@ export function AddSentencePage() {
 
   /** Apply a parsed LLM response to review-step state: policy, english,
    *  flags, form tokens, missing-char coverage. Callers own setStep. */
-  const applyAnalysis = (parsed: ReturnType<typeof parseLLMResponse>) => {
+  const applyAnalysis = (
+    parsed: ReturnType<typeof parseLLMResponse>,
+    /** The reference translation sent with the prompt, if any. */
+    reference?: string | null,
+  ) => {
     const processed = processLLMTokens(parsed);
-    if (parsed.english) setEnglish(parsed.english);
+    // When a reference translation was supplied it wins outright, and we
+    // enforce that here rather than trusting the model to comply. Gemini Flash
+    // will happily argue that a literal reading is "more accurate" — it
+    // rejected "He becomes completely engrossed in his work" in favour of "He
+    // is very selfless when he works" — and the dedicated translation system is
+    // simply better at this layer. The literal reading still gets expressed, in
+    // the token and character glosses.
+    if (reference) setEnglish(reference);
+    else if (parsed.english) setEnglish(parsed.english);
     setIngestFlags(processed.flags);
 
     const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
@@ -349,12 +430,17 @@ export function AddSentencePage() {
     setError('');
     setAnalyzing(true);
     try {
-      const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings);
+      const [existingMeanings, reference] = await Promise.all([
+        getExistingMeanings(chinese.trim()),
+        getTranslationReference(chinese.trim()),
+      ]);
+      const prompt = await generateAnalysisPrompt(
+        chinese.trim(), existingMeanings, undefined, reference ?? undefined,
+      );
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed);
+      applyAnalysis(parsed, reference);
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -459,12 +545,17 @@ export function AddSentencePage() {
     setError('');
     setReanalyzing(true);
     try {
-      const existingMeanings = await getExistingMeanings(chinese.trim());
-      const prompt = await generateAnalysisPrompt(chinese.trim(), existingMeanings, missingChars);
+      const [existingMeanings, reference] = await Promise.all([
+        getExistingMeanings(chinese.trim()),
+        getTranslationReference(chinese.trim()),
+      ]);
+      const prompt = await generateAnalysisPrompt(
+        chinese.trim(), existingMeanings, missingChars, reference ?? undefined,
+      );
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed);
+      applyAnalysis(parsed, reference);
     } catch (e: any) {
       setError(e.message || 'Re-analyze failed');
     }
@@ -778,6 +869,12 @@ export function AddSentencePage() {
               onClick={() => {
                 if (!chinese.trim()) return;
                 setError('');
+                // Warm the machine translation now. The next screen's Copy
+                // Prompt button needs it, and starting here means the request
+                // overlaps with the user reading that screen instead of
+                // stalling the copy. Fire-and-forget — the result is cached,
+                // and a failure just means the prompt omits the reference.
+                prefetchTranslationReference(chinese.trim());
                 setManualMode(true);
                 setStep('llm');
               }}
@@ -927,7 +1024,7 @@ export function AddSentencePage() {
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               <div className="space-y-1">
                 <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and CC-CEDICT
+                  {ingestFlags.length} disagreement{ingestFlags.length === 1 ? '' : 's'} between the AI and the reference sources (CC-CEDICT, pinyin-pro)
                 </div>
                 <div style={{ color: 'var(--text-tertiary)' }}>
                   Neither source is always right. They commonly differ on polyphone readings, neutral tones,
@@ -940,7 +1037,7 @@ export function AddSentencePage() {
               </div>
 
               {ingestFlags.slice(0, 5).map((f, i) => (
-                <FlagRow key={i} flag={f} tokens={tokens}
+                <FlagRow key={i} flag={f} tokens={tokens} sentence={chinese.trim()}
                   onApply={applyCedictSuggestion}
                   onMerge={mergeTokensIntoCompound}
                 />
