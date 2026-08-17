@@ -18,6 +18,7 @@ import { EnglishCard } from './EnglishCard';
 import { getTokensForSentence } from '../services/ingestion';
 import { TutorialBanner } from './TutorialBanner';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
+import { SuggestedPhrases } from './SuggestedPhrases';
 import { useTutorialStore } from '../stores/tutorialStore';
 import type { SentenceToken } from '../db/schema';
 
@@ -139,6 +140,17 @@ function MeaningContent() {
           </div>
         </div>
       )}
+
+      <div className="px-6 pb-4">
+        <h3 className="text-sm font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
+          More sentences with {meaning.headword}
+        </h3>
+        <SuggestedPhrases
+          headwords={[meaning.headword]}
+          gloss={meaning.englishShort}
+          onNavigate={close}
+        />
+      </div>
 
       {otherMeanings.length > 0 && (
         <div className="px-6 pb-4">
