@@ -246,13 +246,14 @@ that looks supported by the sentence and is still wrong.
 TEST: cover the sentence and read the gloss alone. Does it name the same thing the
 Chinese word names?
 
-  translation "…she burst into laughter"
-    gloss "burst"     ✗ alone this means to rupture. It is a fragment of the
-                        phrase "burst into", not a meaning of the word
+  token 脾气, sentence translated "…he lost his temper"
+    gloss "lost"     ✗ "lost" comes from the English phrase "lost his temper".
+                       脾气 names the temper, not the losing.
+    gloss "temper"   ✓ names what 脾气 names
 
-  translation "…he brought flowers as a thank-you"
-    gloss "thank-you" ✗ that is the sentiment, if the word names the FLOWERS
-    gloss "bouquet"   ✓ names the same thing the word names
+  token 面子, sentence translated "…he didn't want to lose face"
+    gloss "lose"     ✗ again the verb from the English idiom, not the noun
+    gloss "face"     ✓ names what 面子 names
 
 A gloss may be a phrase — many are, and a phrase is often the only accurate
 answer. The requirement is not brevity or that it look like a headword. The
