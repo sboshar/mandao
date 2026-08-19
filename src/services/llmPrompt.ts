@@ -14,6 +14,7 @@
 import * as repo from '../db/repo';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
 import { normalizePinyinNumeric } from './toneSandhi';
+import { PARTICLE_GLOSSES } from '../lib/checkParticleGloss';
 
 export interface ExistingMeaning {
   headword: string;
@@ -21,8 +22,8 @@ export interface ExistingMeaning {
   english: string;
   /** "忘我#1" — what the model writes back to choose this sense (#194). */
   ref: string;
-  /** The Meaning this ref resolves to. */
-  id: string;
+  /** The Meaning this resolves to; absent for a canonical not-yet-stored gloss. */
+  id?: string;
 }
 
 /** Look up existing meanings for characters in the sentence */
@@ -67,19 +68,43 @@ export async function getExistingMeanings(
     .flat()
     .sort((a, b) => b.headword.length - a.headword.length);
 
+  /**
+   * Function words get their canonical glosses offered even when the deck has
+   * never seen them, so the FIRST 了 enters as "completion particle" rather
+   * than whichever of several accurate phrasings the model reached for. Skipped
+   * where the deck already holds that gloss, which would otherwise list it
+   * twice.
+   */
+  const canonical: ExistingMeaning[] = [];
+  for (const ch of new Set(chars)) {
+    const entry = PARTICLE_GLOSSES[ch];
+    if (!entry) continue;
+    const already = new Set(
+      meanings.filter((m) => m.headword === ch).map((m) => m.englishShort.toLowerCase()),
+    );
+    for (const gloss of entry.allowed) {
+      if (already.has(gloss.toLowerCase())) continue;
+      canonical.push({ headword: ch, pinyin: entry.pinyin, english: gloss, ref: '', id: '' });
+    }
+  }
+
   // Numbering must match buildOfferedSenses, since the model writes these refs
   // back and resolveSense looks them up by position.
+  const stored: ExistingMeaning[] = meanings.map((m) => ({
+    headword: m.headword,
+    pinyin: getMeaningPinyin(m),
+    english: m.englishShort,
+    ref: '',
+    id: m.id,
+  }));
+
+  // Number after merging, so refs match the render order exactly. Stored senses
+  // come first — they are the user's own — then any canonical gloss not yet held.
   const seen = new Map<string, number>();
-  return meanings.map((m) => {
+  return [...stored, ...canonical].map((m) => {
     const n = (seen.get(m.headword) ?? 0) + 1;
     seen.set(m.headword, n);
-    return {
-      headword: m.headword,
-      pinyin: getMeaningPinyin(m),
-      english: m.englishShort,
-      ref: `${m.headword}#${n}`,
-      id: m.id,
-    };
+    return { ...m, ref: `${m.headword}#${n}`, id: m.id || undefined };
   });
 }
 
@@ -117,11 +142,15 @@ export async function generateAnalysisPrompt(
       )
       .join('\n');
     existingSection = `
-Senses already in the user's deck for words and characters in this sentence.
+Senses available for words and characters in this sentence — the user's own,
+plus the standard glosses for any function word present.
 
 For each token, set "senseRef" to the id of the sense it carries here. When it
 carries a sense that is NOT listed, set "senseRef" to "new" and put your gloss in
 "english".
+
+Function words are ALWAYS listed here, so a particle should essentially never be
+"new" — pick the listed sense that matches what it is doing.
 
 ${lines}
 `;
@@ -266,39 +295,24 @@ Do not provide multiple alternative translations.
 
 For example, if a Chinese word can reasonably be translated as either "begin" or "start" in a particular context, choose whichever ONE is the best contextual gloss rather than outputting "begin/start".
 
-## Function words use a FIXED gloss
+## Function words: pick from the list, never invent
 
 Particles and grammatical markers do not get a translation — they get a name for
-what they do. Use these EXACT strings. Do not paraphrase them, do not invent
-variants, and do not translate the character.
+what they do, and those names are FIXED. Every function word in this sentence
+appears in the senses list above with its standard glosses. Choose one by
+"senseRef".
 
-  的   possessive particle           妈妈的手机
-  的   modifier particle             漂亮的女孩
-  地   adverbial particle            慢慢地走
-  得   complement particle           说得很好
-  了   completion particle           他睡了
-  了   change-of-state particle      天亮了
-  过   experiential particle         我吃过
-  着   durative particle             门开着
-  吗   yes/no question particle      你好吗
-  呢   follow-up question particle   你呢
-  吧   suggestion particle           走吧
-  啊   emphasis particle             好啊
-  呀   emphasis particle             好呀
-  们   plural suffix                 我们
+Do not write your own description of a particle. "completed action" and
+"perfective marker" may both describe 了 correctly, but a wording that is not on
+the list creates a second card for a morpheme that already has one — and these are
+the highest-frequency items in the deck, so they fragment fastest.
 
-Several characters appear twice because they have genuinely different functions.
-Pick by what the character is doing in THIS sentence — 的 joining a possessor to
-a thing is "possessive particle"; 的 joining a description to a noun is "modifier
-particle".
+Where a character has more than one listed gloss, they are genuinely different
+functions. Pick by what it is doing HERE: 的 joining a possessor to a thing is
+possessive; 的 joining a description to a noun is a modifier.
 
-Wording matters as much as accuracy here. "completed action" and "perfective
-marker" may describe 了 correctly, but only "completion particle" is the string
-this deck uses, and a different wording creates a second card for the same
-morpheme.
-
-These strings apply at BOTH levels — as the token's english when the particle is
-its own token, and as its character gloss inside the token's characters array.
+These apply at BOTH levels — as the token's english when the particle is its own
+token, and as its character gloss inside a token's characters array.
 
 # 4. Character-level English
 
@@ -368,9 +382,8 @@ The gloss may be:
 - a short English phrase when necessary
 - a grammatical label describing a grammatical contribution
 
-For grammatical characters, use the fixed strings from the function-word table
-above ("possessive particle", "completion particle", "plural suffix", …) rather
-than inventing a description.
+For grammatical characters, choose from the senses listed above by "senseRef"
+rather than inventing a description.
 
 The character gloss does not have to be the most common standalone translation of the character.
 

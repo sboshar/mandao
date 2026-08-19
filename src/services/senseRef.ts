@@ -22,8 +22,16 @@ export interface SenseOption {
   english: string;
   /** "冰箱#1" — what the model writes back. */
   ref: string;
-  /** The Meaning this resolves to. */
-  id: string;
+  /**
+   * The Meaning this resolves to, when the deck already has one.
+   *
+   * Absent for CANONICAL options — the fixed glosses for function words, which
+   * are offered even on a first encounter so 了 enters the deck as "completion
+   * particle" rather than whichever of six phrasings the model reached for. A
+   * canonical choice creates a row, but with the listed wording rather than the
+   * model's, which is the same guarantee reuse gives.
+   */
+  id?: string;
 }
 
 export type OfferedSense = SenseOption;
@@ -93,9 +101,12 @@ export function resolveSense(
   const chosen = available[Number(index) - 1];
   if (!chosen) throw new Error(`senseRef "${ref}" was not offered`);
 
-  // The stored gloss wins. Whatever the model wrote in `english` was a claim
-  // about this sense, not a new name for it.
-  return { kind: 'existing', meaningId: chosen.id, english: chosen.english };
+  // Either way the LISTED wording wins; whatever the model wrote in `english`
+  // was a claim about this sense, not a new name for it. The only difference is
+  // whether a row already exists to reuse.
+  return chosen.id
+    ? { kind: 'existing', meaningId: chosen.id, english: chosen.english }
+    : { kind: 'new', english: chosen.english };
 }
 
 /**
