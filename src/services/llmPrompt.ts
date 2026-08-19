@@ -188,11 +188,23 @@ ${translationRule}
 
 # 3. Token-level English
 
-For each token, provide exactly ONE concise English meaning for the token as used in this sentence.
+For each token, provide exactly ONE concise English meaning — THE MEANING IT
+CARRIES IN THIS SENTENCE, not the meaning it has on its own.
+
+This is the single most important instruction in this section. The gloss is not a
+dictionary entry. It is what the word is doing HERE.
+
+Ask: how did I render this word in the sentence translation above? That is the
+gloss. If the sentence says a word means one thing and you are about to write down
+another, you are writing the dictionary's answer instead of the sentence's, and
+that is wrong.
+
+A word can carry a sense in one sentence that is unrelated to the sense it usually
+carries alone. That is normal, and it is exactly what this field is for. Reaching
+for the common standalone meaning when the context points elsewhere is the most
+frequent error in this task.
 
 This is the meaning of the WHOLE TOKEN.
-
-Choose the single meaning that best fits the context.
 
 Do not provide multiple alternative translations.
 
