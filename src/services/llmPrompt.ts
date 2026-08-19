@@ -232,9 +232,16 @@ the word before them:
 Merging a pronoun with 的 also corrupts the pronoun: in 你 + 的 the possessive
 belongs to 的, and 你 still means "you", not "your".
 
-The copula 是 is its own token — it is a verb, not part of what precedes it:
+The copula 是 is its own token — it is a verb, not part of what precedes it. This
+holds for every demonstrative or pronoun before it, without exception:
 
   ❌ 那是 as one token        ✅ 那 + 是
+
+NATURALNESS IS NOT A REASON TO MERGE. It is tempting to keep a pair together
+because the English reads as one unit — "this is", "that was", "I am". That
+belongs in the sentence translation, which is where natural English lives. Tokens
+carry STRUCTURE, and each becomes its own flashcard: a card reading 那是 = "that
+is" teaches a phrase that is not a word, and buries both words that are.
 
 Test: could this token appear in a dictionary as a headword? 你的 and 那是 could
 not. 冰箱 and 教室 could.
@@ -504,6 +511,12 @@ Flag a token when:
 Do NOT flag ordinary vocabulary. A common noun with a direct English equivalent is
 not uncertain because a synonym exists. If most tokens in a sentence are flagged,
 the flag has stopped carrying information.
+
+DO NOT USE THIS FIELD TO EXCUSE BREAKING A RULE IN THIS PROMPT. It records
+uncertainty about the LANGUAGE, not about whether to comply. "Segmented as two
+words per the instructions, but merged here for naturalness" is not uncertainty —
+it is a decision to ignore an instruction, annotated. If a rule here tells you
+what to do, follow it; there is nothing to flag.
 
 The note is for the user reviewing this card, not an apology. Say what the choice
 was, in a few words: "could also be X", "no exact English equivalent", "literal
