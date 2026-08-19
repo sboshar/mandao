@@ -23,6 +23,7 @@ import { buildFlagsForSave } from '../services/ingestFlags';
 import type { IngestFlag } from '../services/processLLMTokens';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
+import { GlossSuggestions } from '../components/GlossSuggestions';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { TagInput } from '../components/TagInput';
@@ -96,19 +97,6 @@ function searchUrl(sentence: string, headword: string, readings: string[]): stri
   return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 }
 
-/**
- * Ask an assistant what a word means in this sentence.
- *
- * Reading disagreements go to a search engine, where dictionaries settle them.
- * Meaning-in-context does not work that way — a search for a word returns its
- * dictionary senses, which is the thing already in doubt — so those go to a
- * chat model, which can be asked about this sentence specifically.
- */
-function askUrl(sentence: string, headword: string): string {
-  const q = `In the Chinese sentence "${sentence}", what does ${headword} mean here? Give a short English gloss suitable for a flashcard, and say why.`;
-  return `https://chatgpt.com/?q=${encodeURIComponent(q)}`;
-}
-
 function ExternalLink({ href, label }: { href: string; label: string }) {
   return (
     <a
@@ -147,7 +135,7 @@ function FlagRow({
   /** Needed for the lookup link — readings depend on the sentence. */
   sentence: string;
   onApply: (headword: string, suggestion: string) => void;
-  onApplyGloss: (headword: string, gloss: string) => void;
+  onApplyGloss: (headword: string, gloss: string, meaningId?: string) => void;
   onMerge: (flag: SegmentationFlag) => void;
 }) {
   const wrapperClass = 'space-y-1 pt-2';
@@ -216,7 +204,12 @@ function FlagRow({
         )}
         <div className="flex flex-wrap items-center gap-2">
           <span style={hintStyle}>Worth checking before saving</span>
-          <ExternalLink href={askUrl(sentence, flag.headword)} label="Ask ChatGPT" />
+          <GlossSuggestions
+            sentence={sentence}
+            headword={flag.headword}
+            currentGloss={flag.llmValue}
+            onChoose={onApplyGloss}
+          />
         </div>
       </div>
     );
@@ -617,11 +610,13 @@ export function AddSentencePage() {
 
   /** Snap a function word's gloss to the canonical wording. Keeps one
    *  morpheme to one Meaning row instead of one per phrasing. */
-  const applyGlossSuggestion = (headword: string, gloss: string) => {
+  const applyGlossSuggestion = (headword: string, gloss: string, meaningId?: string) => {
     setTokens((prev) =>
       prev.map((t) =>
         t.surfaceForm === headword
-          ? { ...t, english: gloss, meaningId: undefined }
+          ? // A chosen deck sense reuses that row; anything else releases the
+            // reference, since the user has described something it does not say.
+            { ...t, english: gloss, meaningId }
           : t,
       ),
     );
