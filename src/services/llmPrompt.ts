@@ -111,9 +111,14 @@ Reference translation (independent machine translation of this sentence):
 It is usually right about WHAT THE SENTENCE MEANS. Treat it as a strong starting
 point, not as text to copy.
 
-Machine translations are often correct, but they do not always produce the most
-natural-sounding English. You have the option to override the reference — aim for
-the version a fluent speaker would actually say.
+YOUR JOB AT THIS LEVEL IS THE MOST NATURAL ENGLISH, not fidelity to the reference.
+
+Machine translations are often correct about meaning but rarely the most natural
+wording. Overriding is expected, not exceptional. If a shorter or more idiomatic
+sentence says the same thing, write that one instead — do not stay close to the
+reference's phrasing out of caution. A rendering that reads as translated English
+rather than as something a fluent speaker would say is the wrong answer, even when
+every word of it is defensible.
 
 What you may NOT do is change what the sentence MEANS, and in particular you may
 not drift toward a more literal or dictionary-flavoured reading. The reference was
@@ -123,9 +128,12 @@ likely right than you are.
 
 Treat its reading as a constraint on the rest of your analysis: token and character
 glosses should be consistent with how the sentence is rendered.`
-    : `Translate the complete sentence into natural English.
+    : `Translate the complete sentence into THE MOST NATURAL ENGLISH — the version a
+fluent speaker would actually say, not a rendering that reads as translated.
 
-Prefer the natural contextual meaning over a literal word-for-word translation.`;
+Prefer the natural contextual meaning over a literal word-for-word mapping. A
+sentence in which every word is defensible but the whole reads as translation
+English is the wrong answer.`;
 
   return `Analyze the Chinese sentence below and return ONLY the JSON object specified at the end. No markdown, prose, explanations, or code fences.
 
@@ -324,6 +332,21 @@ If two senses of a character are both defensible, prefer the one that composes i
 token gloss. If two token glosses are both defensible, prefer the one that composes into
 the sentence translation.
 
+### The sentence translation binds the token glosses
+
+Your sentence translation has already committed to what each word means here. Every
+token gloss must agree with that commitment.
+
+Do not translate a word one way in the sentence and a different way in its own
+gloss. If your sentence renders a word as one thing and an isolated dictionary
+would render it as another, THE SENTENCE WINS — it was written with the whole
+context in view, and the dictionary sense was not.
+
+This is the most common way an analysis goes wrong: the sentence is translated by
+reading the context, while the token gloss is filled in from what the word usually
+means on its own. The two then contradict each other, and the contradiction is the
+error — not a difference of emphasis.
+
 ### Coherence does NOT mean copying the whole meaning downward
 
 Each part contributes to the whole; no part IS the whole.
@@ -492,7 +515,7 @@ Before returning the JSON, verify all of the following:
 - Every token has exactly ONE contextual English meaning.
 - Every character has exactly ONE English gloss.
 - Every character gloss is the single best gloss for that character's contribution to its word in context.
-- Token glosses cohere with the sentence translation.
+- No token gloss contradicts how that token is rendered in the sentence translation.
 - Character glosses cohere with their token's gloss, except where the token is genuinely lexicalized.
 - Where a coherent reading was available, it was chosen over the more common standalone sense.
 - Character glosses do not simply repeat the whole word's meaning.
