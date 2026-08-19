@@ -32,13 +32,7 @@ export function TokenSpan({
   };
 
   return (
-    <span
-      className="inline-flex flex-col items-center px-0.5"
-      // Lets a text selection resolve back to the exact sense being read,
-      // rather than guessing from the headword (#182, #187). Two sentences can
-      // share a word in different senses; only the DOM knows which one this is.
-      data-meaning-id={meaningId}
-    >
+    <span className="inline-flex flex-col items-center px-0.5">
       <span
         onClick={handleWordClick}
         className="cursor-pointer rounded px-0.5 transition-colors text-2xl surface-hover"
