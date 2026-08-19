@@ -484,7 +484,8 @@ Before returning the JSON, verify all of the following:
 
 - "chinese" exactly matches the input sentence.
 - "english" is a natural translation of the complete sentence.
-- "english" is the reference translation verbatim when one was supplied.
+- "english" is natural English, and where a reference translation was supplied it
+  does not contradict that reference's MEANING (rewording is fine).
 - Word segmentation is linguistically correct.
 - Every character appears exactly once in exactly one token.
 - Every token's "characters" array contains exactly the token's characters in order.
