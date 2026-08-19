@@ -238,13 +238,26 @@ Contextual does NOT mean "a piece of my translation". This gloss goes on a
 flashcard with the sentence nowhere in sight, so it has to mean something by
 itself.
 
-Do not lift a fragment out of the sentence translation. A word that only makes
-sense with the surrounding words is not a gloss — it is a quotation.
+DO NOT PICK A WORD OUT OF YOUR OWN TRANSLATION. This is the most common way this
+field goes wrong. Your English sentence contains words that sit NEXT to the right
+meaning without being it, and reaching into it for one of them produces a gloss
+that looks supported by the sentence and is still wrong.
 
-TEST: could this plausibly be a dictionary entry for this word? A gloss that needs
-the rest of the sentence to be understood is too narrow. A gloss that ignores the
-sentence entirely is the error described above. You need the sense the sentence
-points to, expressed so it stands alone.
+TEST: cover the sentence and read the gloss alone. Does it name the same thing the
+Chinese word names?
+
+  translation "…she burst into laughter"
+    gloss "burst"     ✗ alone this means to rupture. It is a fragment of the
+                        phrase "burst into", not a meaning of the word
+
+  translation "…he brought flowers as a thank-you"
+    gloss "thank-you" ✗ that is the sentiment, if the word names the FLOWERS
+    gloss "bouquet"   ✓ names the same thing the word names
+
+A gloss may be a phrase — many are, and a phrase is often the only accurate
+answer. The requirement is not brevity or that it look like a headword. The
+requirement is that it denote what the Chinese word denotes, with the sentence
+taken away.
 
 This is the meaning of the WHOLE TOKEN.
 
@@ -461,7 +474,32 @@ Do not force a listed sense merely because the same character appears. In
 particular, Mandarin pronouns are not inherently possessive — 他 is "he", not
 "his"; 我 is "I", not "my". Possession requires 的.
 
-# 7. Polyphones
+# 7. Flagging your own uncertainty
+
+Set "uncertain" to true on a token when your answer for it is a judgement call
+rather than a fact, and put a brief reason in "uncertaintyNote". Otherwise set it
+to false and leave the note empty.
+
+Flag a token when:
+- no English word denotes it cleanly, and your gloss is an approximation
+- two senses were both defensible here and you picked one
+- the compound does not decompose, so the character glosses do not compose into it
+- the segmentation was arguable — the run could reasonably be split another way
+- the reading depended on a judgement about meaning rather than a lookup
+
+Do NOT flag ordinary vocabulary. A common noun with a direct English equivalent is
+not uncertain because a synonym exists. If most tokens in a sentence are flagged,
+the flag has stopped carrying information.
+
+The note is for the user reviewing this card, not an apology. Say what the choice
+was, in a few words: "could also be X", "no exact English equivalent", "literal
+parts do not compose".
+
+Being uncertain is not a failure and does not lower the quality of your answer. An
+unflagged wrong gloss is worse than a flagged one, because the user has no reason
+to look at it.
+
+# 8. Polyphones
 
 Many characters have more than one reading. Which one is correct depends on what the
 character MEANS here, not on which reading is most common in isolation. Different
@@ -477,7 +515,7 @@ used with different meanings each time. Do not assume that because a character w
 one way earlier in the sentence, it takes that reading again. Decide each occurrence
 from its own context.
 
-# 8. pinyinNumeric
+# 9. pinyinNumeric
 
 "pinyinNumeric" is citation-form pinyin.
 
@@ -521,7 +559,7 @@ reading, not the concatenation of citation readings:
 This applies to reduplicated kinship and verb forms, and to many high-frequency
 disyllabic words. When a compound has an established neutral-tone reading, use it.
 
-# 9. Part of speech
+# 10. Part of speech
 
 Assign exactly ONE part of speech to each TOKEN as used in the sentence.
 
@@ -531,7 +569,7 @@ Use only:
 
 Do not assign multiple parts of speech.
 
-# 10. Transliteration
+# 11. Transliteration
 
 Set "isTransliteration" to true only for genuine phonetic loanwords where the characters are primarily being used for their sounds rather than their normal semantic meanings.
 
@@ -541,7 +579,7 @@ For transliterations, each character's English should describe the phonetic role
 
 Set "isTransliteration" to false for ordinary native Chinese words and compounds (好吃, 电脑).
 
-# 11. Output schema
+# 12. Output schema
 
 {
   "chinese": string,
@@ -552,6 +590,8 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
       "pinyinNumeric": string,
       "english": string,
       "senseRef": string,
+      "uncertain": boolean,
+      "uncertaintyNote": string,
       "partOfSpeech": "noun"|"verb"|"adj"|"adv"|"prep"|"conj"|"particle"|"measure"|"pronoun"|"number"|"other",
       "isTransliteration": boolean,
       "characters": [
@@ -565,7 +605,7 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
   ]
 }
 
-# 12. Final validation
+# 13. Final validation
 
 Before returning the JSON, verify all of the following:
 
@@ -589,6 +629,8 @@ Before returning the JSON, verify all of the following:
 - Character glosses contain no multiple synonyms.
 - Character glosses do not contain comma-separated lists of meanings.
 - Every token has a "senseRef": a listed ref, or "new".
+- "uncertain" is set on tokens that were a judgement call, with a brief note, and
+  not on ordinary vocabulary.
 - A listed ref was used wherever the token carries that sense, even if you would
   have worded it differently.
 - Polyphonic readings are resolved according to context.
@@ -614,6 +656,10 @@ export interface LLMTokenResponse {
   pinyinNumeric: string;
   /** Which stored sense this token uses, or "new" (#194). */
   senseRef?: string;
+  /** The model's own judgement that this token was a close call. */
+  uncertain?: boolean;
+  /** Brief reason, shown at review when uncertain is set. */
+  uncertaintyNote?: string;
   pinyinSandhi?: string;
   english: string;
   partOfSpeech: string;

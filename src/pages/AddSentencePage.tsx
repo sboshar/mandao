@@ -185,6 +185,27 @@ function FlagRow({
     );
   }
 
+  if (flag.kind === 'model-uncertain') {
+    // Volunteered by the model, not measured against anything, so it asks for a
+    // look rather than asserting an error. These are the glosses no external
+    // checker can evaluate — the ones where the model itself had to choose.
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        <div style={descStyle}>
+          <strong className="font-mono">{flag.headword}:</strong> the AI flagged its own
+          answer "{flag.llmValue}" as a close call.
+        </div>
+        {flag.note && (
+          <div style={hintStyle}>Its reason: {flag.note}</div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span style={hintStyle}>Worth checking before saving</span>
+          <SearchLink href={searchUrl(sentence, flag.headword, [])} />
+        </div>
+      </div>
+    );
+  }
+
   if (flag.kind === 'particle-gloss') {
     // Wording, not meaning: the model's gloss may be perfectly accurate but
     // phrased differently, which would still fork a second Meaning row for a
