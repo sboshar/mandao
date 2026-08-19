@@ -115,9 +115,6 @@ Machine translations are often correct, but they do not always produce the most
 natural-sounding English. You have the option to override the reference — aim for
 the version a fluent speaker would actually say.
 
-  reference: "The weather today is extremely good, without a single cloud in the sky."
-  natural:   "It's a beautiful day."
-
 What you may NOT do is change what the sentence MEANS, and in particular you may
 not drift toward a more literal or dictionary-flavoured reading. The reference was
 produced with the whole sentence in view; an isolated dictionary sense was not. If
