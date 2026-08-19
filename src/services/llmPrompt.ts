@@ -204,6 +204,20 @@ carries alone. That is normal, and it is exactly what this field is for. Reachin
 for the common standalone meaning when the context points elsewhere is the most
 frequent error in this task.
 
+### But the gloss must still stand on its own
+
+Contextual does NOT mean "a piece of my translation". This gloss goes on a
+flashcard with the sentence nowhere in sight, so it has to mean something by
+itself.
+
+Do not lift a fragment out of the sentence translation. A word that only makes
+sense with the surrounding words is not a gloss — it is a quotation.
+
+TEST: could this plausibly be a dictionary entry for this word? A gloss that needs
+the rest of the sentence to be understood is too narrow. A gloss that ignores the
+sentence entirely is the error described above. You need the sense the sentence
+points to, expressed so it stands alone.
+
 This is the meaning of the WHOLE TOKEN.
 
 Do not provide multiple alternative translations.

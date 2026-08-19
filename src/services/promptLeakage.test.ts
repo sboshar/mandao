@@ -19,6 +19,7 @@ const RESERVED = [
   // Hand-run during the #185 prompt investigation.
   '他工作时非常忘我',
   '她读书忘我',
+  '她忘我地沉浸在音乐中',
   '他走路上班',
   '他的衣服很干净',
   '这本书很便宜',
