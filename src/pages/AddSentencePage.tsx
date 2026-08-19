@@ -5,12 +5,18 @@ import {
   generateAnalysisPrompt,
   parseLLMResponse,
   getExistingMeanings,
+  type ExistingMeaning,
 } from '../services/llmPrompt';
 import {
   getTranslationReference,
   prefetchTranslationReference,
 } from '../services/translationReference';
 import { processLLMTokens } from '../services/processLLMTokens';
+import {
+  buildOfferedSenses,
+  resolveSense,
+  isUnexpectedNewSense,
+} from '../services/senseRef';
 import { collapsePinyin } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
 import { buildFlagsForSave } from '../services/ingestFlags';
@@ -50,6 +56,13 @@ interface TokenFormData {
   partOfSpeech: string;
   isTransliteration?: boolean;
   characters?: CharacterInput[];
+  /** Resolved from the model's senseRef — reuse this row rather than
+   *  matching on gloss text (#194). */
+  meaningId?: string;
+  /** The model introduced a sense for a headword that already had some.
+   *  Legitimate sometimes, but it is the moment a duplicate appears, so
+   *  review asks about it. */
+  declaredNewSense?: boolean;
 }
 
 function renderPinyin(numeric: string) {
@@ -428,6 +441,8 @@ export function AddSentencePage() {
     parsed: ReturnType<typeof parseLLMResponse>,
     /** The reference translation sent with the prompt, if any. */
     reference?: string | null,
+    /** The senses offered in the prompt, needed to resolve senseRef (#194). */
+    offeredMeanings?: ExistingMeaning[],
   ) => {
     const processed = processLLMTokens(parsed);
     // The model's translation stands, including when a reference was supplied.
@@ -448,11 +463,24 @@ export function AddSentencePage() {
     );
     setIngestFlags(processed.flags);
 
-    const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
+    const offered = buildOfferedSenses(offeredMeanings ?? []);
+
+    const formTokens: TokenFormData[] = processed.tokens.map((t) => {
+      // A malformed or unoffered ref should not sink the whole analysis; fall
+      // back to treating the gloss as new and let review catch it.
+      let resolved;
+      try {
+        resolved = resolveSense(t, offered);
+      } catch {
+        resolved = { kind: 'new' as const, english: t.english };
+      }
+      return {
       surfaceForm: t.surfaceForm,
       pinyinNumeric: t.pinyinNumeric,
       pinyinSandhi: t.pinyinSandhi || '',
-      english: t.english,
+      english: resolved.english,
+      meaningId: resolved.kind === 'existing' ? resolved.meaningId : undefined,
+      declaredNewSense: isUnexpectedNewSense(t, offered),
       partOfSpeech: t.partOfSpeech || '',
       isTransliteration: !!t.isTransliteration,
       characters: t.characters?.map((c) => ({
@@ -461,7 +489,8 @@ export function AddSentencePage() {
         pinyinSandhi: c.pinyinSandhi,
         english: c.english,
       })),
-    }));
+      };
+    });
 
     setTokens(formTokens);
     const cov = computeTokenCoverage(chinese.trim(), formTokens);
@@ -483,7 +512,7 @@ export function AddSentencePage() {
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed, reference);
+      applyAnalysis(parsed, reference, existingMeanings);
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -552,7 +581,11 @@ export function AddSentencePage() {
    *  morpheme to one Meaning row instead of one per phrasing. */
   const applyGlossSuggestion = (headword: string, gloss: string) => {
     setTokens((prev) =>
-      prev.map((t) => (t.surfaceForm === headword ? { ...t, english: gloss } : t)),
+      prev.map((t) =>
+        t.surfaceForm === headword
+          ? { ...t, english: gloss, meaningId: undefined }
+          : t,
+      ),
     );
     setIngestFlags((prev) =>
       prev.filter((f) => !(f.kind === 'particle-gloss' && f.headword === headword)),
@@ -609,7 +642,7 @@ export function AddSentencePage() {
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed, reference);
+      applyAnalysis(parsed, reference, existingMeanings);
     } catch (e: any) {
       setError(e.message || 'Re-analyze failed');
     }
@@ -675,6 +708,10 @@ export function AddSentencePage() {
         surfaceForm: t.surfaceForm,
         pinyinNumeric: t.pinyinNumeric,
         english: t.english,
+        // Dropped when the user edited the gloss: they have described a sense
+        // the referenced row does not carry, so reusing it would overwrite
+        // their edit with the stored wording (#194).
+        meaningId: t.meaningId,
         partOfSpeech: t.partOfSpeech || 'other',
         isTransliteration: t.isTransliteration,
         characters: t.characters,

@@ -49,6 +49,12 @@ export interface TokenInput {
   surfaceForm: string;
   pinyinNumeric: string;
   english: string;
+  /**
+   * Resolved from the model's senseRef (#194). When present, this token uses a
+   * sense the deck already has, and that row is reused outright — no gloss
+   * comparison, so a differently-worded answer cannot fork a duplicate.
+   */
+  meaningId?: string;
   partOfSpeech: string;
   /**
    * True for phonetic loanwords (e.g. 汉堡 "hamburger"). When set, the parent
@@ -288,6 +294,23 @@ function buildIngestPayload(
  */
 async function findOrCreateMeaning(token: TokenInput, acc: IngestAccumulator): Promise<Meaning> {
   const candidates = await repo.getMeaningsByHeadword(token.surfaceForm);
+
+  // The model named the sense, so use it. This replaces comparing englishShort
+  // with === , which answered "did the model type the same characters?" when
+  // the question was "is this the same sense?" — and forked a card whenever it
+  // reworded (#194).
+  if (token.meaningId) {
+    const chosen = candidates.find((m) => m.id === token.meaningId);
+    if (chosen) {
+      acc.allMeanings.set(chosen.id, chosen);
+      return chosen;
+    }
+    // Referenced a meaning that no longer exists — deleted between prompt and
+    // save. Fall through and create rather than fail the whole ingest.
+  }
+
+  // No reference: either nothing was offered for this headword, or an older
+  // response. Gloss equality remains as the fallback.
   const existing = candidates.find(
     (m) =>
       m.pinyinNumeric === token.pinyinNumeric &&

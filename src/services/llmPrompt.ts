@@ -19,6 +19,10 @@ export interface ExistingMeaning {
   headword: string;
   pinyin: string;
   english: string;
+  /** "忘我#1" — what the model writes back to choose this sense (#194). */
+  ref: string;
+  /** The Meaning this ref resolves to. */
+  id: string;
 }
 
 /** Look up existing meanings for characters in the sentence */
@@ -59,14 +63,24 @@ export async function getExistingMeanings(
     [...candidates].map((headword) => repo.getMeaningsByHeadword(headword)),
   );
 
-  return found
+  const meanings = found
     .flat()
-    .sort((a, b) => b.headword.length - a.headword.length)
-    .map((m) => ({
+    .sort((a, b) => b.headword.length - a.headword.length);
+
+  // Numbering must match buildOfferedSenses, since the model writes these refs
+  // back and resolveSense looks them up by position.
+  const seen = new Map<string, number>();
+  return meanings.map((m) => {
+    const n = (seen.get(m.headword) ?? 0) + 1;
+    seen.set(m.headword, n);
+    return {
       headword: m.headword,
       pinyin: getMeaningPinyin(m),
       english: m.englishShort,
-    }));
+      ref: `${m.headword}#${n}`,
+      id: m.id,
+    };
+  });
 }
 
 /**
@@ -90,11 +104,25 @@ export async function generateAnalysisPrompt(
 
   let existingSection = '';
   if (existingMeanings && existingMeanings.length > 0) {
-    const lines = existingMeanings
-      .map((m) => `  ${m.headword} [${m.pinyin}] = "${m.english}"`)
+    const byHeadword = new Map<string, ExistingMeaning[]>();
+    for (const m of existingMeanings) {
+      byHeadword.set(m.headword, [...(byHeadword.get(m.headword) ?? []), m]);
+    }
+    const lines = [...byHeadword.entries()]
+      .map(([headword, senses]) =>
+        [
+          `  ${headword}`,
+          ...senses.map((m) => `    ${m.ref}  [${m.pinyin}]  "${m.english}"`),
+        ].join('\n'),
+      )
       .join('\n');
     existingSection = `
-Meanings already in the user's deck for words and characters in this sentence (reuse the exact English string when it fits this context):
+Senses already in the user's deck for words and characters in this sentence.
+
+For each token, set "senseRef" to the id of the sense it carries here. When it
+carries a sense that is NOT listed, set "senseRef" to "new" and put your gloss in
+"english".
+
 ${lines}
 `;
   }
@@ -402,27 +430,36 @@ sentence, that sense is the right answer.
 The objective is accuracy, not forced literal decomposition — and not forced
 incoherence either.
 
-# 6. Existing user meanings
+# 6. Choosing a sense — "senseRef"
 
-These are meanings the user has already studied. They are candidates, not
-mandatory — but reusing one is the default, and departing from one has a cost.
+EVERY token needs a "senseRef". It says which sense of that word the token
+carries.
 
-When an existing meaning fits, reuse the EXACT English string. A different
-wording for the same sense does not read as a synonym downstream; it creates a
-SECOND card for a word that already has one, with its own review schedule.
+  senseRef: "<ref>"   the token carries that listed sense
+  senseRef: "new"     the token carries a sense that is NOT listed
 
-This matters most for WORDS. A multi-character word listed above has already
-been given a settled gloss, so unless that gloss is plainly wrong for this
-sentence, use it verbatim. Writing a fresh paraphrase of a sense that is already
-listed is the same word, glossed twice.
+Use a listed ref whenever the token carries that sense, EVEN IF you would have
+worded the gloss differently. A different wording of a listed sense is not a new
+sense — it is the same card described twice, and choosing "new" for it creates a
+duplicate with its own review schedule.
 
-For single CHARACTERS the bar is lower, because the same character legitimately
-contributes different senses to different compounds (§4). Depart freely when the
-listed sense does not fit the compound at hand.
+  listed:  冰箱#1  "refrigerator"
+  you would have written "fridge"
+  → senseRef: "冰箱#1"     ✅ same sense, listed wording wins
+  → senseRef: "new"        ❌ this is not a new sense
 
-Do not force a user's existing meaning merely because the same character
-appears. In particular, Mandarin pronouns are not inherently possessive — 他 is
-"he", not "his"; 我 is "I", not "my". Possession requires 的.
+Choose "new" only when the token genuinely carries a sense none of the listed
+ones covers — a different meaning, not a different phrasing.
+
+When a token's headword has no listed senses, use "new".
+
+Still write "english" either way. When you reference a listed sense it is read as
+a claim about that sense and checked against it; the listed wording is what gets
+stored. When you choose "new", "english" is the gloss that will be stored.
+
+Do not force a listed sense merely because the same character appears. In
+particular, Mandarin pronouns are not inherently possessive — 他 is "he", not
+"his"; 我 is "I", not "my". Possession requires 的.
 
 # 7. Polyphones
 
@@ -514,6 +551,7 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
       "surfaceForm": string,
       "pinyinNumeric": string,
       "english": string,
+      "senseRef": string,
       "partOfSpeech": "noun"|"verb"|"adj"|"adv"|"prep"|"conj"|"particle"|"measure"|"pronoun"|"number"|"other",
       "isTransliteration": boolean,
       "characters": [
@@ -550,7 +588,9 @@ Before returning the JSON, verify all of the following:
 - Character glosses contain no "or".
 - Character glosses contain no multiple synonyms.
 - Character glosses do not contain comma-separated lists of meanings.
-- Existing meanings are reused exactly when appropriate.
+- Every token has a "senseRef": a listed ref, or "new".
+- A listed ref was used wherever the token carries that sense, even if you would
+  have worded it differently.
 - Polyphonic readings are resolved according to context.
 - "pinyinNumeric" uses citation-form pronunciation with no sandhi.
 - "pinyinNumeric" contains exactly one syllable per character.
@@ -572,6 +612,8 @@ export interface LLMCharacterResponse {
 export interface LLMTokenResponse {
   surfaceForm: string;
   pinyinNumeric: string;
+  /** Which stored sense this token uses, or "new" (#194). */
+  senseRef?: string;
   pinyinSandhi?: string;
   english: string;
   partOfSpeech: string;
