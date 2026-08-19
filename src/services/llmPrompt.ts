@@ -111,13 +111,12 @@ Reference translation (independent machine translation of this sentence):
 It is usually right about WHAT THE SENTENCE MEANS. Treat it as a strong starting
 point, not as text to copy.
 
-You may reword it, and often should. Aim for the most natural English rendering of
-the Chinese — the version a fluent speaker would actually say. Machine translations
-tend to over-explain: where the reference unpacks a word into a clause, a tighter
-phrasing is better, as long as nothing is lost.
+Machine translations are often correct, but they do not always produce the most
+natural-sounding English. You have the option to override the reference — aim for
+the version a fluent speaker would actually say.
 
   reference: "The weather today is extremely good, without a single cloud in the sky."
-  tighter:   "It's a beautiful day."
+  natural:   "It's a beautiful day."
 
 What you may NOT do is change what the sentence MEANS, and in particular you may
 not drift toward a more literal or dictionary-flavoured reading. The reference was
