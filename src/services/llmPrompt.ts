@@ -107,20 +107,26 @@ Reference translation (independent machine translation of this sentence):
     : '';
 
   const translationRule = translationReference
-    ? `A reference translation is supplied above. Copy it into "english" VERBATIM.
+    ? `A reference translation is supplied above, from a dedicated translation system.
+It is usually right about WHAT THE SENTENCE MEANS. Treat it as a strong starting
+point, not as text to copy.
 
-This is not a judgement call. Do not reword it, do not "improve" it, and do not
-replace it with a more literal rendering. The reference comes from a dedicated
-translation system and is authoritative for the sentence level.
+You may reword it, and often should. Aim for the most natural English rendering of
+the Chinese — the version a fluent speaker would actually say. Machine translations
+tend to over-explain: where the reference unpacks a word into a clause, a tighter
+phrasing is better, as long as nothing is lost.
 
-In particular: do NOT reason that a more literal gloss is "more accurate". The
-sentence-level english is meant to be natural English, not a literal decomposition.
-The literal reading lives in the token and character glosses, which is where you
-should put it.
+  reference: "The weather today is extremely good, without a single cloud in the sky."
+  tighter:   "It's a beautiful day."
 
-If the reference and your instinct disagree, the reference wins. Treat it as a
-constraint on the rest of your analysis: choose token and character glosses that are
-consistent with the reference's reading of the sentence.`
+What you may NOT do is change what the sentence MEANS, and in particular you may
+not drift toward a more literal or dictionary-flavoured reading. The reference was
+produced with the whole sentence in view; an isolated dictionary sense was not. If
+you disagree with the reference about meaning rather than wording, it is more
+likely right than you are.
+
+Treat its reading as a constraint on the rest of your analysis: token and character
+glosses should be consistent with how the sentence is rendered.`
     : `Translate the complete sentence into natural English.
 
 Prefer the natural contextual meaning over a literal word-for-word translation.`;

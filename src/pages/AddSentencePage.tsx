@@ -231,6 +231,8 @@ export function AddSentencePage() {
   const [chinese, setChinese] = useState(() => searchParams.get('chinese') ?? '');
   const prefill = searchParams.get('chinese');
   const [english, setEnglish] = useState('');
+  /** The machine translation, when the model's own differs from it. */
+  const [translationReference, setTranslationReference] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenFormData[]>([]);
   const [step, setStep] = useState<'input' | 'llm' | 'review' | 'confirm'>('input');
   const [error, setError] = useState('');
@@ -428,15 +430,22 @@ export function AddSentencePage() {
     reference?: string | null,
   ) => {
     const processed = processLLMTokens(parsed);
-    // When a reference translation was supplied it wins outright, and we
-    // enforce that here rather than trusting the model to comply. Gemini Flash
-    // will happily argue that a literal reading is "more accurate" — it
-    // rejected "He becomes completely engrossed in his work" in favour of "He
-    // is very selfless when he works" — and the dedicated translation system is
-    // simply better at this layer. The literal reading still gets expressed, in
-    // the token and character glosses.
-    if (reference) setEnglish(reference);
-    else if (parsed.english) setEnglish(parsed.english);
+    // The model's translation stands, including when a reference was supplied.
+    // The reference used to be forced in here, because with CC-CEDICT in the
+    // prompt the model would argue its way to a literal reading — it once
+    // rejected "He becomes completely engrossed in his work" for "He is very
+    // selfless when he works". CEDICT left the prompt in #186, and the
+    // reference in turn was over-explaining: Google renders 她读书忘我 as "She
+    // becomes so engrossed in reading that she loses all sense of herself",
+    // which is a gloss, not a flashcard. So the reference now informs the
+    // translation rather than replacing it.
+    if (parsed.english) setEnglish(parsed.english);
+    // Kept for display only. Now that the model may legitimately reword the
+    // reference, seeing what it diverged from is the only way to tell a useful
+    // tightening from a drift in meaning.
+    setTranslationReference(
+      reference && reference.trim() !== parsed.english?.trim() ? reference : null,
+    );
     setIngestFlags(processed.flags);
 
     const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
@@ -1177,6 +1186,12 @@ export function AddSentencePage() {
                 color: 'var(--text-primary)',
               }}
             />
+            {translationReference && (
+              <div className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                Machine translation was: “{translationReference}” — the AI reworded it.
+                A tighter phrasing is fine; a change in meaning is worth a look.
+              </div>
+            )}
           </div>
 
           {/* Per-token detail forms */}
