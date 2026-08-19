@@ -22,18 +22,51 @@ export interface ExistingMeaning {
 }
 
 /** Look up existing meanings for characters in the sentence */
+/** Longest headword worth sweeping for. Meanings are words, not clauses; six
+ *  characters covers compounds and four-character idioms. */
+const MAX_HEADWORD_LEN = 6;
+
+/**
+ * Look up every meaning the deck already has for anything appearing in this
+ * sentence — words as well as characters.
+ *
+ * This used to sweep single characters only, which quietly defeated the whole
+ * point. If 忘我 was already stored as "engrossed" and a new sentence used it,
+ * the model was never told, glossed it "forget self" from scratch, and
+ * findOrCreateMeaning forked a SECOND 忘我 row on the differing englishShort.
+ * Adding a second context to a word is exactly what the suggestion feature
+ * exists to do, so the omission turned that feature against itself.
+ *
+ * Longest headwords come first: seeing 忘我 before 忘 and 我 is the order in
+ * which the information is useful.
+ */
 export async function getExistingMeanings(
   chinese: string
 ): Promise<ExistingMeaning[]> {
-  const chars = [...new Set(Array.from(chinese.replace(/\s/g, '')))];
-  const perChar = await Promise.all(
-    chars.map((ch) => repo.getMeaningsByHeadword(ch)),
+  const text = chinese.replace(/\s/g, '');
+  const chars = Array.from(text);
+
+  // Every distinct substring up to MAX_HEADWORD_LEN. Deduped, because a
+  // repeated character would otherwise be queried once per occurrence.
+  const candidates = new Set<string>();
+  for (let i = 0; i < chars.length; i++) {
+    for (let len = 1; len <= MAX_HEADWORD_LEN && i + len <= chars.length; len++) {
+      candidates.add(chars.slice(i, i + len).join(''));
+    }
+  }
+
+  const found = await Promise.all(
+    [...candidates].map((headword) => repo.getMeaningsByHeadword(headword)),
   );
-  return perChar.flat().map((m) => ({
-    headword: m.headword,
-    pinyin: getMeaningPinyin(m),
-    english: m.englishShort,
-  }));
+
+  return found
+    .flat()
+    .sort((a, b) => b.headword.length - a.headword.length)
+    .map((m) => ({
+      headword: m.headword,
+      pinyin: getMeaningPinyin(m),
+      english: m.englishShort,
+    }));
 }
 
 /**
@@ -61,7 +94,7 @@ export async function generateAnalysisPrompt(
       .map((m) => `  ${m.headword} [${m.pinyin}] = "${m.english}"`)
       .join('\n');
     existingSection = `
-User's existing character meanings (candidate meanings — reuse the exact English string when it fits this context):
+Meanings already in the user's deck for words and characters in this sentence (reuse the exact English string when it fits this context):
 ${lines}
 `;
   }
@@ -74,23 +107,33 @@ Reference translation (independent machine translation of this sentence):
     : '';
 
   const translationRule = translationReference
-    ? `A reference translation is supplied above. Copy it into "english" VERBATIM.
+    ? `A reference translation is supplied above, from a dedicated translation system.
+It is usually right about WHAT THE SENTENCE MEANS. Treat it as a strong starting
+point, not as text to copy.
 
-This is not a judgement call. Do not reword it, do not "improve" it, and do not
-replace it with a more literal rendering. The reference comes from a dedicated
-translation system and is authoritative for the sentence level.
+YOUR JOB AT THIS LEVEL IS THE MOST NATURAL ENGLISH, not fidelity to the reference.
 
-In particular: do NOT reason that a more literal gloss is "more accurate". The
-sentence-level english is meant to be natural English, not a literal decomposition.
-The literal reading lives in the token and character glosses, which is where you
-should put it.
+Machine translations are often correct about meaning but rarely the most natural
+wording. Overriding is expected, not exceptional. If a shorter or more idiomatic
+sentence says the same thing, write that one instead — do not stay close to the
+reference's phrasing out of caution. A rendering that reads as translated English
+rather than as something a fluent speaker would say is the wrong answer, even when
+every word of it is defensible.
 
-If the reference and your instinct disagree, the reference wins. Treat it as a
-constraint on the rest of your analysis: choose token and character glosses that are
-consistent with the reference's reading of the sentence.`
-    : `Translate the complete sentence into natural English.
+What you may NOT do is change what the sentence MEANS, and in particular you may
+not drift toward a more literal or dictionary-flavoured reading. The reference was
+produced with the whole sentence in view; an isolated dictionary sense was not. If
+you disagree with the reference about meaning rather than wording, it is more
+likely right than you are.
 
-Prefer the natural contextual meaning over a literal word-for-word translation.`;
+Treat its reading as a constraint on the rest of your analysis: token and character
+glosses should be consistent with how the sentence is rendered.`
+    : `Translate the complete sentence into THE MOST NATURAL ENGLISH — the version a
+fluent speaker would actually say, not a rendering that reads as translated.
+
+Prefer the natural contextual meaning over a literal word-for-word mapping. A
+sentence in which every word is defensible but the whole reads as translation
+English is the wrong answer.`;
 
   return `Analyze the Chinese sentence below and return ONLY the JSON object specified at the end. No markdown, prose, explanations, or code fences.
 
@@ -126,18 +169,18 @@ tokens, however often they co-occur.
 Particles are ALWAYS their own token. Never attach 的, 了, 着, 吗, 呢, 吧, 过 to
 the word before them:
 
-  ❌ 我的 as one token        ✅ 我 + 的
-  ❌ 吃了 as one token        ✅ 吃 + 了
+  ❌ 你的 as one token        ✅ 你 + 的
+  ❌ 他睡了 as one token      ✅ 他 + 睡 + 了
 
-Merging a pronoun with 的 also corrupts the pronoun: in 我 + 的 the possessive
-belongs to 的, and 我 still means "I", not "my".
+Merging a pronoun with 的 also corrupts the pronoun: in 你 + 的 the possessive
+belongs to 的, and 你 still means "you", not "your".
 
 The copula 是 is its own token — it is a verb, not part of what precedes it:
 
-  ❌ 这是 as one token        ✅ 这 + 是
+  ❌ 那是 as one token        ✅ 那 + 是
 
-Test: could this token appear in a dictionary as a headword? 我的 and 这是 could
-not. 上班 and 非常 could.
+Test: could this token appear in a dictionary as a headword? 你的 and 那是 could
+not. 冰箱 and 教室 could.
 
 # 2. Whole-sentence English
 
@@ -145,11 +188,37 @@ ${translationRule}
 
 # 3. Token-level English
 
-For each token, provide exactly ONE concise English meaning for the token as used in this sentence.
+For each token, provide exactly ONE concise English meaning — THE MEANING IT
+CARRIES IN THIS SENTENCE, not the meaning it has on its own.
+
+This is the single most important instruction in this section. The gloss is not a
+dictionary entry. It is what the word is doing HERE.
+
+Ask: how did I render this word in the sentence translation above? That is the
+gloss. If the sentence says a word means one thing and you are about to write down
+another, you are writing the dictionary's answer instead of the sentence's, and
+that is wrong.
+
+A word can carry a sense in one sentence that is unrelated to the sense it usually
+carries alone. That is normal, and it is exactly what this field is for. Reaching
+for the common standalone meaning when the context points elsewhere is the most
+frequent error in this task.
+
+### But the gloss must still stand on its own
+
+Contextual does NOT mean "a piece of my translation". This gloss goes on a
+flashcard with the sentence nowhere in sight, so it has to mean something by
+itself.
+
+Do not lift a fragment out of the sentence translation. A word that only makes
+sense with the surrounding words is not a gloss — it is a quotation.
+
+TEST: could this plausibly be a dictionary entry for this word? A gloss that needs
+the rest of the sentence to be understood is too narrow. A gloss that ignores the
+sentence entirely is the error described above. You need the sense the sentence
+points to, expressed so it stands alone.
 
 This is the meaning of the WHOLE TOKEN.
-
-Choose the single meaning that best fits the context.
 
 Do not provide multiple alternative translations.
 
@@ -161,12 +230,12 @@ Particles and grammatical markers do not get a translation — they get a name f
 what they do. Use these EXACT strings. Do not paraphrase them, do not invent
 variants, and do not translate the character.
 
-  的   possessive particle           我的书
+  的   possessive particle           妈妈的手机
   的   modifier particle             漂亮的女孩
   地   adverbial particle            慢慢地走
   得   complement particle           说得很好
-  了   completion particle           我吃了饭
-  了   change-of-state particle      天黑了
+  了   completion particle           他睡了
+  了   change-of-state particle      天亮了
   过   experiential particle         我吃过
   着   durative particle             门开着
   吗   yes/no question particle      你好吗
@@ -289,6 +358,21 @@ If two senses of a character are both defensible, prefer the one that composes i
 token gloss. If two token glosses are both defensible, prefer the one that composes into
 the sentence translation.
 
+### The sentence translation binds the token glosses
+
+Your sentence translation has already committed to what each word means here. Every
+token gloss must agree with that commitment.
+
+Do not translate a word one way in the sentence and a different way in its own
+gloss. If your sentence renders a word as one thing and an isolated dictionary
+would render it as another, THE SENTENCE WINS — it was written with the whole
+context in view, and the dictionary sense was not.
+
+This is the most common way an analysis goes wrong: the sentence is translated by
+reading the context, while the token gloss is filled in from what the word usually
+means on its own. The two then contradict each other, and the contradiction is the
+error — not a difference of emphasis.
+
 ### Coherence does NOT mean copying the whole meaning downward
 
 Each part contributes to the whole; no part IS the whole.
@@ -320,13 +404,25 @@ incoherence either.
 
 # 6. Existing user meanings
 
-The supplied user meanings are candidate meanings, not mandatory meanings.
+These are meanings the user has already studied. They are candidates, not
+mandatory — but reusing one is the default, and departing from one has a cost.
 
-When an existing meaning fits the character's role in the current context, reuse the EXACT English string.
+When an existing meaning fits, reuse the EXACT English string. A different
+wording for the same sense does not read as a synonym downstream; it creates a
+SECOND card for a word that already has one, with its own review schedule.
 
-When it does not fit, choose the best contextual gloss instead.
+This matters most for WORDS. A multi-character word listed above has already
+been given a settled gloss, so unless that gloss is plainly wrong for this
+sentence, use it verbatim. Writing a fresh paraphrase of a sense that is already
+listed is the same word, glossed twice.
 
-Do not force a user's existing meaning merely because the same character appears. In particular, Mandarin pronouns are not inherently possessive — 他 is "he", not "his"; 我 is "I", not "my". Possession requires 的.
+For single CHARACTERS the bar is lower, because the same character legitimately
+contributes different senses to different compounds (§4). Depart freely when the
+listed sense does not fit the compound at hand.
+
+Do not force a user's existing meaning merely because the same character
+appears. In particular, Mandarin pronouns are not inherently possessive — 他 is
+"he", not "his"; 我 is "I", not "my". Possession requires 的.
 
 # 7. Polyphones
 
@@ -437,14 +533,15 @@ Before returning the JSON, verify all of the following:
 
 - "chinese" exactly matches the input sentence.
 - "english" is a natural translation of the complete sentence.
-- "english" is the reference translation verbatim when one was supplied.
+- "english" is natural English, and where a reference translation was supplied it
+  does not contradict that reference's MEANING (rewording is fine).
 - Word segmentation is linguistically correct.
 - Every character appears exactly once in exactly one token.
 - Every token's "characters" array contains exactly the token's characters in order.
 - Every token has exactly ONE contextual English meaning.
 - Every character has exactly ONE English gloss.
 - Every character gloss is the single best gloss for that character's contribution to its word in context.
-- Token glosses cohere with the sentence translation.
+- No token gloss contradicts how that token is rendered in the sentence translation.
 - Character glosses cohere with their token's gloss, except where the token is genuinely lexicalized.
 - Where a coherent reading was available, it was chosen over the more common standalone sense.
 - Character glosses do not simply repeat the whole word's meaning.
