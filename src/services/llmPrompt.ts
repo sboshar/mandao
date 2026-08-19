@@ -159,18 +159,18 @@ tokens, however often they co-occur.
 Particles are ALWAYS their own token. Never attach 的, 了, 着, 吗, 呢, 吧, 过 to
 the word before them:
 
-  ❌ 我的 as one token        ✅ 我 + 的
-  ❌ 吃了 as one token        ✅ 吃 + 了
+  ❌ 你的 as one token        ✅ 你 + 的
+  ❌ 他睡了 as one token      ✅ 他 + 睡 + 了
 
-Merging a pronoun with 的 also corrupts the pronoun: in 我 + 的 the possessive
-belongs to 的, and 我 still means "I", not "my".
+Merging a pronoun with 的 also corrupts the pronoun: in 你 + 的 the possessive
+belongs to 的, and 你 still means "you", not "your".
 
 The copula 是 is its own token — it is a verb, not part of what precedes it:
 
-  ❌ 这是 as one token        ✅ 这 + 是
+  ❌ 那是 as one token        ✅ 那 + 是
 
-Test: could this token appear in a dictionary as a headword? 我的 and 这是 could
-not. 上班 and 非常 could.
+Test: could this token appear in a dictionary as a headword? 你的 and 那是 could
+not. 冰箱 and 教室 could.
 
 # 2. Whole-sentence English
 
@@ -194,12 +194,12 @@ Particles and grammatical markers do not get a translation — they get a name f
 what they do. Use these EXACT strings. Do not paraphrase them, do not invent
 variants, and do not translate the character.
 
-  的   possessive particle           我的书
+  的   possessive particle           妈妈的手机
   的   modifier particle             漂亮的女孩
   地   adverbial particle            慢慢地走
   得   complement particle           说得很好
-  了   completion particle           我吃了饭
-  了   change-of-state particle      天黑了
+  了   completion particle           他睡了
+  了   change-of-state particle      天亮了
   过   experiential particle         我吃过
   着   durative particle             门开着
   吗   yes/no question particle      你好吗
@@ -362,8 +362,8 @@ SECOND card for a word that already has one, with its own review schedule.
 
 This matters most for WORDS. A multi-character word listed above has already
 been given a settled gloss, so unless that gloss is plainly wrong for this
-sentence, use it verbatim. If 忘我 is listed as "engrossed", do not write
-"forget self" — that is the same word, glossed twice.
+sentence, use it verbatim. Writing a fresh paraphrase of a sense that is already
+listed is the same word, glossed twice.
 
 For single CHARACTERS the bar is lower, because the same character legitimately
 contributes different senses to different compounds (§4). Depart freely when the
