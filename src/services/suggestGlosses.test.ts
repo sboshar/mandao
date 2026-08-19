@@ -99,3 +99,18 @@ describe('parseGlossSuggestions', () => {
     expect(r.reasoning).toBe('hm');
   });
 });
+
+describe('buildGlossPrompt — scope rules', () => {
+  it('forbids absorbing a neighbouring token’s meaning', () => {
+    // "small token of sincerity" for 意思 folded in 一点's "a little" — a
+    // meaning another token already carries and gets its own card for.
+    const p = buildGlossPrompt('x', '意思', 'g', []);
+    expect(p).toContain('covers only what 意思 contributes');
+    expect(p).toContain('get their own cards');
+  });
+
+  it('names degree, measure and quantifier neighbours as the risky case', () => {
+    const p = buildGlossPrompt('x', '高', 'tall', []);
+    expect(p).toMatch(/degree word, measure word or quantifier/);
+  });
+});

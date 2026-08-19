@@ -296,6 +296,19 @@ answer. The requirement is not brevity or that it look like a headword. The
 requirement is that it denote what the Chinese word denotes, with the sentence
 taken away.
 
+### A gloss covers only what ITS OWN token contributes
+
+The other tokens in the sentence carry their own meaning and get their own cards.
+Do not absorb any of it.
+
+  他很高    很 → "very"    高 → "tall"
+                           高 → "very tall"  ✗ "very" is 很's job, not 高's
+
+This is easy to miss when the neighbour is a degree word, a measure word, or a
+quantifier, because the English phrase reads naturally with it folded in. Ask what
+this token alone contributes, and leave the rest to the tokens that carry it.
+
+
 This is the meaning of the WHOLE TOKEN.
 
 Do not provide multiple alternative translations.

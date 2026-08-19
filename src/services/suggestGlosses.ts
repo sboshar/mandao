@@ -77,6 +77,11 @@ Then give up to ${MAX_CANDIDATES} candidate glosses, best first.
 - It stands alone. This goes on a flashcard with the sentence nowhere in sight,
   so a fragment lifted out of a translation is not a candidate — "lost" is not a
   gloss for a word meaning absorbed, it is a piece of the phrase "lost in".
+- It covers only what ${surfaceForm} contributes. The other words in the sentence
+  carry their own meaning and get their own cards, so do not fold any of it in.
+  A degree word, measure word or quantifier next to it is especially easy to
+  absorb, because the English reads naturally with it included — in 他很高, 高 is
+  "tall", not "very tall"; "very" is 很's job.
 - A phrase is fine when a phrase is the accurate answer. Brevity is not the goal.
 - Include the current gloss as a candidate if it is defensible, so the learner can
   keep it deliberately.
