@@ -16,26 +16,16 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { suggestPhrases, type SuggestionResult } from '../services/suggestPhrases';
 import { isAIConfigured } from '../services/aiProvider';
-import * as repo from '../db/repo';
 
 export function SuggestedPhrases({
   headwords,
   gloss,
-  meaningIds,
   autoFetch = false,
   onNavigate,
 }: {
   /** One word, or several that must appear together. */
   headwords: string[];
   gloss?: string;
-  /**
-   * Meanings the highlight actually touched, when opened from a selection.
-   *
-   * Preferred over a headword lookup, because it names the sense on screen
-   * rather than guessing: 意思 may exist in the deck as both "meaning" and
-   * "a small gift", and only the rendered token knows which one is being read.
-   */
-  meaningIds?: string[];
   /** Fetch on mount instead of waiting for a button press. */
   autoFetch?: boolean;
   /** Lets the host close its modal before we route away. */
@@ -52,35 +42,20 @@ export function SuggestedPhrases({
     setLoading(true);
     setError('');
     try {
-      // Prefer the senses the highlight resolved to; fall back to an
-      // explicitly supplied gloss (the MeaningCard path, which already knows
-      // exactly which meaning the user is looking at).
-      let glossMap: Map<string, string> | undefined;
-      let targets = headwords;
-
-      if (meaningIds && meaningIds.length > 0) {
-        const meanings = await repo.getMeaningsByIds(meaningIds);
-        if (meanings.length > 0) {
-          // Target the resolved words, not the raw selection string. Highlighting
-          // 走路上班 yields one string, but it is two words — asking for sentences
-          // containing "走路上班" verbatim asks for something that isn't a word,
-          // and the per-token glosses would never match that key, leaving the
-          // sense lock referring to glosses it never printed.
-          targets = meanings.map((m) => m.headword);
-          glossMap = new Map(meanings.map((m) => [m.headword, m.englishShort]));
-        }
-      } else if (gloss && headwords.length === 1) {
-        glossMap = new Map([[headwords[0], gloss]]);
-      }
-
-      setResult(await suggestPhrases(targets, glossMap));
+      // MeaningCard knows exactly which sense the user is looking at, so the
+      // gloss comes straight from it. The sense lock in the prompt depends on
+      // this: without it, suggestions can drift to another sense of the same
+      // word and accepting one would create an unrelated Meaning row.
+      const glossMap =
+        gloss && headwords.length === 1 ? new Map([[headwords[0], gloss]]) : undefined;
+      setResult(await suggestPhrases(headwords, glossMap));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not fetch suggestions');
       setResult(null);
     } finally {
       setLoading(false);
     }
-  }, [headwords, gloss, meaningIds]);
+  }, [headwords, gloss]);
 
   useEffect(() => {
     if (autoFetch) void fetchSuggestions();
