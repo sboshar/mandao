@@ -22,18 +22,51 @@ export interface ExistingMeaning {
 }
 
 /** Look up existing meanings for characters in the sentence */
+/** Longest headword worth sweeping for. Meanings are words, not clauses; six
+ *  characters covers compounds and four-character idioms. */
+const MAX_HEADWORD_LEN = 6;
+
+/**
+ * Look up every meaning the deck already has for anything appearing in this
+ * sentence — words as well as characters.
+ *
+ * This used to sweep single characters only, which quietly defeated the whole
+ * point. If 忘我 was already stored as "engrossed" and a new sentence used it,
+ * the model was never told, glossed it "forget self" from scratch, and
+ * findOrCreateMeaning forked a SECOND 忘我 row on the differing englishShort.
+ * Adding a second context to a word is exactly what the suggestion feature
+ * exists to do, so the omission turned that feature against itself.
+ *
+ * Longest headwords come first: seeing 忘我 before 忘 and 我 is the order in
+ * which the information is useful.
+ */
 export async function getExistingMeanings(
   chinese: string
 ): Promise<ExistingMeaning[]> {
-  const chars = [...new Set(Array.from(chinese.replace(/\s/g, '')))];
-  const perChar = await Promise.all(
-    chars.map((ch) => repo.getMeaningsByHeadword(ch)),
+  const text = chinese.replace(/\s/g, '');
+  const chars = Array.from(text);
+
+  // Every distinct substring up to MAX_HEADWORD_LEN. Deduped, because a
+  // repeated character would otherwise be queried once per occurrence.
+  const candidates = new Set<string>();
+  for (let i = 0; i < chars.length; i++) {
+    for (let len = 1; len <= MAX_HEADWORD_LEN && i + len <= chars.length; len++) {
+      candidates.add(chars.slice(i, i + len).join(''));
+    }
+  }
+
+  const found = await Promise.all(
+    [...candidates].map((headword) => repo.getMeaningsByHeadword(headword)),
   );
-  return perChar.flat().map((m) => ({
-    headword: m.headword,
-    pinyin: getMeaningPinyin(m),
-    english: m.englishShort,
-  }));
+
+  return found
+    .flat()
+    .sort((a, b) => b.headword.length - a.headword.length)
+    .map((m) => ({
+      headword: m.headword,
+      pinyin: getMeaningPinyin(m),
+      english: m.englishShort,
+    }));
 }
 
 /**
@@ -61,7 +94,7 @@ export async function generateAnalysisPrompt(
       .map((m) => `  ${m.headword} [${m.pinyin}] = "${m.english}"`)
       .join('\n');
     existingSection = `
-User's existing character meanings (candidate meanings — reuse the exact English string when it fits this context):
+Meanings already in the user's deck for words and characters in this sentence (reuse the exact English string when it fits this context):
 ${lines}
 `;
   }
@@ -320,13 +353,25 @@ incoherence either.
 
 # 6. Existing user meanings
 
-The supplied user meanings are candidate meanings, not mandatory meanings.
+These are meanings the user has already studied. They are candidates, not
+mandatory — but reusing one is the default, and departing from one has a cost.
 
-When an existing meaning fits the character's role in the current context, reuse the EXACT English string.
+When an existing meaning fits, reuse the EXACT English string. A different
+wording for the same sense does not read as a synonym downstream; it creates a
+SECOND card for a word that already has one, with its own review schedule.
 
-When it does not fit, choose the best contextual gloss instead.
+This matters most for WORDS. A multi-character word listed above has already
+been given a settled gloss, so unless that gloss is plainly wrong for this
+sentence, use it verbatim. If 忘我 is listed as "engrossed", do not write
+"forget self" — that is the same word, glossed twice.
 
-Do not force a user's existing meaning merely because the same character appears. In particular, Mandarin pronouns are not inherently possessive — 他 is "he", not "his"; 我 is "I", not "my". Possession requires 的.
+For single CHARACTERS the bar is lower, because the same character legitimately
+contributes different senses to different compounds (§4). Depart freely when the
+listed sense does not fit the compound at hand.
+
+Do not force a user's existing meaning merely because the same character
+appears. In particular, Mandarin pronouns are not inherently possessive — 他 is
+"he", not "his"; 我 is "I", not "my". Possession requires 的.
 
 # 7. Polyphones
 
