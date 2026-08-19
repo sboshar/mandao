@@ -12,12 +12,16 @@
  * how iOS Safari, Kindle and Pleco already behave, so there is no mode to
  * enter or leave.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 /** Longest selection we treat as a lookup target. Beyond this it's a sentence,
  *  not a word or phrase, and "suggest sentences using this sentence" is not a
  *  question anyone is asking. */
 const MAX_CHARS = 12;
+
+/** How long the selection must hold still before selectionchange is believed.
+ *  Long enough to ride out a handle drag, short enough not to feel laggy. */
+const SELECTION_SETTLE_MS = 350;
 
 const CJK = /[一-鿿]/;
 /** Everything that isn't a Han character. */
@@ -97,6 +101,16 @@ function isEditable(node: Node | null): boolean {
   return false;
 }
 
+/**
+ * Reports the current Chinese selection, and KEEPS REPORTING IT after the
+ * browser drops the highlight.
+ *
+ * That stickiness is what makes the feature work on touch. Tapping the action
+ * popup clears the selection before the tap resolves, so a component rendering
+ * straight off the live selection would unmount mid-tap and the tap would never
+ * land. Holding the last real selection decouples the popup's lifetime from the
+ * highlight; callers dismiss it explicitly via clear().
+ */
 export function useChineseSelection(): {
   selection: ChineseSelection | null;
   clear: () => void;
@@ -113,31 +127,21 @@ export function useChineseSelection(): {
       const sel = window.getSelection();
       const raw = sel?.toString() ?? '';
 
-      if (!sel || sel.rangeCount === 0 || !CJK.test(raw)) {
-        setSelection(null);
-        return;
-      }
+      // Losing the highlight is not the same as choosing nothing — see the
+      // stickiness note above. Only a real selection replaces the current one.
+      if (!sel || sel.rangeCount === 0 || !CJK.test(raw)) return;
 
       // Length is judged on the Han characters alone. The raw string is padded
       // with interleaved pinyin, so measuring it would reject short selections
       // for being long.
       const text = hanOnly(raw);
-      if (!text || text.length > MAX_CHARS) {
-        setSelection(null);
-        return;
-      }
-      if (isEditable(sel.anchorNode)) {
-        setSelection(null);
-        return;
-      }
+      if (!text || text.length > MAX_CHARS) return;
+      if (isEditable(sel.anchorNode)) return;
 
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       // A zero-size rect means the range isn't laid out (collapsed or hidden).
-      if (rect.width === 0 && rect.height === 0) {
-        setSelection(null);
-        return;
-      }
+      if (rect.width === 0 && rect.height === 0) return;
 
       setSelection({ text, rect, meaningIds: meaningIdsInRange(range) });
     };
@@ -146,27 +150,45 @@ export function useChineseSelection(): {
     // on touch especially, the selection isn't final at touchend time.
     // Only one is ever pending; a rapid second release supersedes the first.
     let pending: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
+    const schedule = (delay: number) => {
       clearTimeout(pending);
-      pending = setTimeout(read, 0);
+      pending = setTimeout(read, delay);
     };
+    const onRelease = () => schedule(0);
 
-    document.addEventListener('mouseup', schedule);
-    document.addEventListener('touchend', schedule);
-    document.addEventListener('keyup', schedule);
+    /**
+     * selectionchange is the only event iOS fires for selection-handle drags.
+     * After a long-press the handles are native UI, so adjusting them changes
+     * the selection without any touchend reaching document — meaning a mobile
+     * user could widen their highlight and the popup would still describe the
+     * original word.
+     *
+     * It also fires continuously mid-drag, which is why it isn't the primary
+     * signal: reading on every tick would make the popup chase the cursor. The
+     * delay waits for the selection to settle instead.
+     */
+    const onSelectionChange = () => schedule(SELECTION_SETTLE_MS);
+
+    document.addEventListener('mouseup', onRelease);
+    document.addEventListener('touchend', onRelease);
+    document.addEventListener('keyup', onRelease);
+    document.addEventListener('selectionchange', onSelectionChange);
     return () => {
       // Otherwise a release just before unmount lands in a dead component.
       clearTimeout(pending);
-      document.removeEventListener('mouseup', schedule);
-      document.removeEventListener('touchend', schedule);
-      document.removeEventListener('keyup', schedule);
+      document.removeEventListener('mouseup', onRelease);
+      document.removeEventListener('touchend', onRelease);
+      document.removeEventListener('keyup', onRelease);
+      document.removeEventListener('selectionchange', onSelectionChange);
     };
   }, []);
 
-  const clear = () => {
+  // Stable identity: consumers put this in effect dependencies, and a new
+  // function each render would resubscribe their listeners on every render.
+  const clear = useCallback(() => {
     setSelection(null);
     window.getSelection()?.removeAllRanges();
-  };
+  }, []);
 
   return { selection, clear };
 }

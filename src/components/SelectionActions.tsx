@@ -11,7 +11,7 @@
  * word-scoped features too (#14 drill cards containing a word, #34, lookups);
  * this ships with one action rather than being built around one.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useChineseSelection } from '../hooks/useChineseSelection';
 import { SuggestedPhrases } from './SuggestedPhrases';
 import { isAIConfigured } from '../services/aiProvider';
@@ -23,9 +23,30 @@ const POPUP_W = 220;
 
 export function SelectionActions() {
   const { selection, clear } = useChineseSelection();
+  const popupRef = useRef<HTMLDivElement | null>(null);
   const [target, setTarget] = useState<{ text: string; meaningIds: string[] } | null>(
     null,
   );
+
+  /**
+   * Dismiss on an interaction outside the popup.
+   *
+   * Because the popup no longer disappears when the selection does, it needs
+   * its own way out. Listening on pointerdown covers mouse, touch and pen in
+   * one handler, and the capture phase runs before React's onClick so a tap
+   * on the popup itself is excluded by the containment check rather than by
+   * event ordering.
+   */
+  useEffect(() => {
+    if (!selection) return;
+    const onDown = (e: Event) => {
+      const node = e.target as Node | null;
+      if (node && popupRef.current?.contains(node)) return;
+      clear();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [selection, clear]);
 
   const openFor = (text: string, meaningIds: string[]) => {
     setTarget({ text, meaningIds });
@@ -36,6 +57,7 @@ export function SelectionActions() {
     <>
       {selection && !target && isAIConfigured() && (
         <div
+          ref={popupRef}
           className="fixed z-50 rounded-lg shadow-lg surface p-1"
           style={{
             // Prefer above the selection; flip below when there's no room, so
@@ -54,8 +76,10 @@ export function SelectionActions() {
             width: POPUP_W,
             border: '1px solid var(--border)',
           }}
-          // mousedown would clear the selection before our click handler runs.
+          // Both are needed: mousedown for pointers, touchstart for touch.
+          // Either would otherwise clear the selection before the tap resolves.
           onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.stopPropagation()}
         >
           <button
             type="button"
