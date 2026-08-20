@@ -246,3 +246,27 @@ describe('SANDHI_RULES', () => {
     }
   });
 });
+
+describe('read-more links', () => {
+  it('gives every applied rule somewhere to read the rule stated independently', () => {
+    for (const rule of APPLIED_RULES) {
+      expect(rule.readMore?.length, rule.id).toBeGreaterThan(0);
+    }
+  });
+
+  it('points only at https URLs, so nothing renders a dead scheme', () => {
+    for (const rule of Object.values(SANDHI_RULES)) {
+      for (const r of rule.readMore ?? []) {
+        expect(r.url, rule.id).toMatch(/^https:\/\//);
+        expect(r.label.length, rule.id).toBeGreaterThan(3);
+      }
+    }
+  });
+
+  it('sends the A-不-A caveat somewhere that explains A-不-A', () => {
+    // The note raises a construction it has no room to teach; the link is the
+    // answer to the question the note provokes.
+    const urls = SANDHI_RULES['bu-before-fourth'].readMore!.map((r) => r.url);
+    expect(urls.some((u) => /Affirmative-negative_question/.test(u))).toBe(true);
+  });
+});
