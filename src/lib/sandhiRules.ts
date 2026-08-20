@@ -55,6 +55,15 @@ export interface SandhiRule {
   /** Why it happens, or what to listen for. */
   note?: string;
   /**
+   * Where to read the rule stated by somebody other than this app.
+   *
+   * A one-line statement in a popover is enough to act on and not enough to
+   * understand, and the caveats especially invite a follow-up question this app
+   * has no room to answer. Linking out is also what makes the table checkable
+   * rather than something the learner has to take on trust.
+   */
+  readMore?: { label: string; url: string }[];
+  /**
    * Whether this app rewrites the pinyin for it.
    *
    * False does not mean the rule is wrong — half-third tone is real and
@@ -73,6 +82,15 @@ export interface SandhiRule {
  * these contexts (一月 comes out yí yuè), the caveat has to travel with the
  * applied rules or a learner would never see it.
  */
+/**
+ * Wikipedia's phonology article, which states each of these rules with section
+ * anchors that line up with the table below. Chosen over a textbook because a
+ * learner can actually open it, and over a course site because the anchors are
+ * stable and it cites its own sources.
+ */
+const WIKI = 'https://en.wikipedia.org/wiki/Standard_Chinese_phonology';
+const WIKI_SPECIAL = { label: 'Wikipedia: 不 and 一', url: `${WIKI}#Tones_on_special_syllables` };
+
 const YI_CONTEXT_NOTE =
   '一 keeps its first tone when it is an ordinal, a date, or a digit being ' +
   'read out, and this app cannot tell those apart — 第一 is dì yī and 一月 is ' +
@@ -86,6 +104,9 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
       'A third tone becomes a second tone when the syllable after it is also a third tone.',
     note:
       'Two full third tones cannot follow one another. The syllable that changes keeps its written third tone in the dictionary — only the pronunciation moves.',
+    readMore: [
+      { label: 'Wikipedia: third-tone sandhi', url: `${WIKI}#Third_tone_sandhi` },
+    ],
     applied: true,
   },
   'bu-before-fourth': {
@@ -93,7 +114,14 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
     name: '不 before a fourth tone',
     statement: '不 (bù) becomes bú when the syllable after it is a fourth tone.',
     note:
-      'Before any other tone it stays bù — 不好 is bù hǎo. The exception is an A-不-A question, where 不 is unstressed and reduces to a neutral bu: 好不好 is hǎo bu hǎo.',
+      'Before any other tone it stays bù — 不好 is bù hǎo. The exception is an A-不-A question — the "X or not X" way of asking yes/no, like 好不好 or 是不是 — where 不 is unstressed and flattens to a neutral bu: hǎo bu hǎo, shì bu shì.',
+    readMore: [
+      WIKI_SPECIAL,
+      {
+        label: 'A-不-A questions',
+        url: 'https://resources.allsetlearning.com/chinese/grammar/Affirmative-negative_question',
+      },
+    ],
     applied: true,
   },
   'yi-before-fourth': {
@@ -101,6 +129,7 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
     name: '一 before a fourth tone',
     statement: '一 (yī) becomes yí when the syllable after it is a fourth tone.',
     note: YI_CONTEXT_NOTE,
+    readMore: [WIKI_SPECIAL],
     applied: true,
   },
   'yi-before-others': {
@@ -109,6 +138,7 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
     statement:
       '一 (yī) becomes yì when the syllable after it is a first, second or third tone.',
     note: YI_CONTEXT_NOTE,
+    readMore: [WIKI_SPECIAL],
     applied: true,
   },
   'yi-unchanged': {
@@ -118,6 +148,7 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
       '一 stays yī when it is an ordinal, when counting or reciting digits, and at the end of a phrase.',
     note:
       'So 第一 is dì yī and 一月 is yī yuè, even though a fourth or first tone follows. This app does not detect these cases; the caveat is repeated on the two 一 rules above, which are the ones a learner will actually see fire.',
+    readMore: [WIKI_SPECIAL],
     applied: false,
   },
   'half-third': {
@@ -127,6 +158,7 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
       'A third tone before any tone other than a third is pronounced low and level, without the rise back up.',
     note:
       'Real and pervasive, but pinyin does not write it — 好吃 is still written hǎo chī. Worth knowing because the full dipping contour only appears in isolation or before a pause.',
+    readMore: [{ label: 'Wikipedia: the third tone', url: `${WIKI}#Third_tone` }],
     applied: false,
   },
   'neutral-tone': {
@@ -136,6 +168,7 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
       'Some syllables carry no tone of their own and are pronounced short and light.',
     note:
       'NOT sandhi. It is part of how a word is stored — 休息 is xiū xi because that is the word, not because of what surrounds it. Listed here to keep the distinction clear.',
+    readMore: [{ label: 'Wikipedia: neutral tone', url: `${WIKI}#Neutral_tone` }],
     applied: false,
   },
   'qi-ba-optional': {
@@ -145,6 +178,7 @@ export const SANDHI_RULES: Record<SandhiRuleId, SandhiRule> = {
       '七 (qī) and 八 (bā) were once said as qí and bá before a fourth tone.',
     note:
       'Largely gone from modern standard speech and treated as optional. This app leaves them alone.',
+    readMore: [WIKI_SPECIAL],
     applied: false,
   },
 };

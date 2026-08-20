@@ -122,11 +122,13 @@ export function PinyinDisplay({
                 setOpenFor(isOpen ? null : { pinyin, index: i })
               }
               aria-expanded={isOpen}
-              className="py-1 -my-1 underline decoration-dotted underline-offset-2 cursor-pointer"
-              style={{
-                color: 'var(--text-primary)',
-                textDecorationColor: 'var(--sandhi-underline)',
-              }}
+              // No underline. The syllable is already set apart by being
+              // rendered in the primary text colour while its neighbours carry
+              // tone colours, and that contrast is the marker this feature was
+              // asked to make clickable — a second decoration on top of it reads
+              // as an error state rather than an affordance.
+              className="py-1 -my-1 cursor-pointer"
+              style={{ color: 'var(--text-primary)' }}
               title={`Dictionary: ${baseSyllables![i]} → Spoken: ${syllable}. Click for the rule.`}
             >
               {syllable}
@@ -171,6 +173,24 @@ export function PinyinDisplay({
           {rule.note && (
             <span className="block mt-1" style={{ color: 'var(--text-secondary)' }}>
               {rule.note}
+            </span>
+          )}
+          {rule.readMore && (
+            <span className="block mt-1.5">
+              {rule.readMore.map((r, n) => (
+                <span key={r.url}>
+                  {n > 0 && <span aria-hidden="true">{' · '}</span>}
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    {r.label} ↗
+                  </a>
+                </span>
+              ))}
             </span>
           )}
         </span>
