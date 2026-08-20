@@ -75,10 +75,24 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
 
   // Sandhi spans token boundaries — 不 and 一 shift based on the following
   // syllable, which may belong to the next token — so flatten, transform, slice.
-  const allSyllables = tokens.flatMap((t) =>
-    t.pinyinNumeric.split(/\s+/).filter(Boolean),
-  );
-  const sandhied = applyToneSandhi(allSyllables);
+  //
+  // The characters travel alongside, because 一 and 不 are rules about
+  // CHARACTERS: 医院 reads yi1 yuan4 and 部队 reads bu4 dui4, and matching on the
+  // reading alone turns them into yí yuàn and bú duì. Where a token's characters
+  // do not line up one-to-one with its syllables the slots are left blank rather
+  // than guessed, which costs the fix for that token and nothing else.
+  const allSyllables: string[] = [];
+  const allHanzi: (string | undefined)[] = [];
+  for (const t of tokens) {
+    const syls = t.pinyinNumeric.split(/\s+/).filter(Boolean);
+    const chars = Array.from(t.surfaceForm);
+    allSyllables.push(...syls);
+    allHanzi.push(
+      ...(chars.length === syls.length ? chars : syls.map(() => undefined)),
+    );
+  }
+
+  const sandhied = applyToneSandhi(allSyllables, allHanzi);
   let offset = 0;
   for (const t of tokens) {
     const count = t.pinyinNumeric.split(/\s+/).filter(Boolean).length;

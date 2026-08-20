@@ -1,3 +1,5 @@
+import type { SandhiRuleId, SandhiCaveatId } from '../lib/sandhiRules';
+
 /**
  * Tone sandhi computation.
  * Takes an array of pinyin syllables (with tone numbers) and applies sandhi rules.
@@ -15,43 +17,176 @@ function setToneNumber(syllable: string, tone: number): string {
   return syllable.replace(/\d$/, String(tone));
 }
 
+/** One syllable the sandhi pass rewrote, and why (#196). */
+export interface SandhiChange {
+  /** Index of the syllable that changed. */
+  index: number;
+  /** Citation form, e.g. "hao3". */
+  from: string;
+  /** Sandhi form, e.g. "hao2". */
+  to: string;
+  ruleId: SandhiRuleId;
+  /**
+   * Index of the syllable that caused the change.
+   *
+   * Every rule here is conditioned on what FOLLOWS, so naming the trigger is
+   * what makes an explanation about this sentence rather than a generic
+   * statement of the rule.
+   */
+  triggerIndex: number;
+  /**
+   * The trigger's CITATION tone, which is what the rule is conditioned on.
+   *
+   * Naming the trigger syllable instead reads as a contradiction: in 我很好 the
+   * rule fires on wǒ because 很 is a third tone, but 很 is itself raised, so a
+   * panel saying "because the next syllable is hěn" sits directly under a line
+   * reading hén. The tone is the true and un-confusing thing to state.
+   */
+  triggerTone: number;
+  /**
+   * Whether the character behind a character-specific rule was verified.
+   *
+   * False means the transformation was applied on the reading alone, which is
+   * right for 一 and 不 and wrong for every other character that happens to read
+   * yi1 or bu4. An unconfirmed change may still be displayed — that is existing
+   * behaviour — but nothing should cite a rule for it.
+   */
+  characterConfirmed?: boolean;
+  /** A warning that applies to this change specifically. See SANDHI_CAVEATS. */
+  caveatId?: SandhiCaveatId;
+}
+
 /**
- * Apply tone sandhi rules to a sequence of pinyin-numeric syllables.
- * Returns a new array with sandhi applied.
+ * Rules that depend on WHICH CHARACTER it is, not just how it reads.
  *
- * Rules implemented:
- * 1. Third tone sandhi: 3+3 → 2+3
- * 2. 不 (bù) before 4th tone → bú (2nd)
- * 3. 一 (yī) before 4th → yí (2nd), before 1st/2nd/3rd → yì (4th)
+ * Matching on the reading alone is a real bug, not a hypothetical: 医院 is
+ * yi1 yuan4 and 部队 is bu4 dui4, and a reading-only rule turns them into
+ * yí yuàn and bú duì. Nothing about the pinyin distinguishes them from 一 and
+ * 不, so the character is the only way to tell.
  */
-export function applyToneSandhi(syllables: string[]): string[] {
+const CHARACTER_RULES: { char: string; reading: string }[] = [
+  { char: '不', reading: 'bu4' },
+  { char: '一', reading: 'yi1' },
+];
+
+/** Citation-tone run lengths, so a change can say it sits in a long run. */
+function thirdToneRunLengths(syllables: string[]): number[] {
+  const runs = new Array<number>(syllables.length).fill(0);
+  let i = 0;
+  while (i < syllables.length) {
+    if (getToneNumber(syllables[i]) !== 3) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < syllables.length && getToneNumber(syllables[j]) === 3) j++;
+    for (let k = i; k < j; k++) runs[k] = j - i;
+    i = j;
+  }
+  return runs;
+}
+
+/**
+ * Apply tone sandhi, and record what changed.
+ *
+ * Rules applied, with explanations, live in lib/sandhiRules.ts — deliberately a
+ * fixed table rather than a model call, since these are mechanical and a table
+ * is right every time.
+ */
+export function applyToneSandhiDetailed(
+  syllables: string[],
+  /**
+   * The character each syllable came from, index-aligned, where the caller knows
+   * it. Supplying it fixes the 医院/部队 misreadings; omitting it preserves the
+   * previous behaviour and marks the affected changes unconfirmed.
+   */
+  hanzi?: (string | undefined)[],
+): { syllables: string[]; changes: SandhiChange[] } {
   const result = [...syllables];
+  const changes: SandhiChange[] = [];
+  const runs = thirdToneRunLengths(syllables);
+
+  const record = (
+    index: number,
+    from: string,
+    ruleId: SandhiRuleId,
+    extra?: Partial<SandhiChange>,
+  ) => {
+    changes.push({
+      index,
+      from,
+      to: result[index],
+      ruleId,
+      triggerIndex: index + 1,
+      // Iteration i only ever writes index i, so result[i + 1] is still the
+      // citation form when it is read here.
+      triggerTone: getToneNumber(result[index + 1]),
+      ...extra,
+    });
+  };
+
+  /**
+   * Does syllable i belong to `char`?
+   *
+   * Three answers, and the third is the interesting one: yes, no, or the caller
+   * did not say. "Did not say" has to keep applying the rule, because that is
+   * what every existing caller relies on — but it is recorded so the UI can mark
+   * without explaining.
+   */
+  const isChar = (i: number, char: string): 'yes' | 'no' | 'unknown' => {
+    const h = hanzi?.[i];
+    if (h === undefined || h === '') return 'unknown';
+    return h === char ? 'yes' : 'no';
+  };
 
   for (let i = 0; i < result.length - 1; i++) {
     const current = result[i].toLowerCase();
+    const before = result[i];
     const nextTone = getToneNumber(result[i + 1]);
 
-    // Rule 1: Third tone sandhi
+    // Third tone sandhi. No character dependency — any third tone before another
+    // raises, whatever the character — so this one is always safe to cite.
     if (getToneNumber(current) === 3 && nextTone === 3) {
       result[i] = setToneNumber(result[i], 2);
+      record(i, before, 'third-tone', {
+        characterConfirmed: true,
+        caveatId: runs[i] >= 3 ? 'long-third-run' : undefined,
+      });
+      continue;
     }
 
-    // Rule 2: 不 sandhi
-    if (current === 'bu4' && nextTone === 4) {
+    const charRule = CHARACTER_RULES.find((r) => r.reading === current);
+    if (!charRule) continue;
+    const match = isChar(i, charRule.char);
+    if (match === 'no') continue; // 医院, 部队 — reading collision, not sandhi
+    const characterConfirmed = match === 'yes';
+
+    if (charRule.char === '不' && nextTone === 4) {
       result[i] = 'bu2';
+      record(i, before, 'bu-before-fourth', { characterConfirmed });
+      continue;
     }
 
-    // Rule 3: 一 sandhi
-    if (current === 'yi1') {
+    if (charRule.char === '一') {
       if (nextTone === 4) {
         result[i] = 'yi2';
+        record(i, before, 'yi-before-fourth', { characterConfirmed });
       } else if (nextTone >= 1 && nextTone <= 3) {
         result[i] = 'yi4';
+        record(i, before, 'yi-before-others', { characterConfirmed });
       }
     }
   }
 
-  return result;
+  return { syllables: result, changes };
+}
+
+/** Sandhi forms only. Kept for callers that do not need the explanations. */
+export function applyToneSandhi(
+  syllables: string[],
+  hanzi?: (string | undefined)[],
+): string[] {
+  return applyToneSandhiDetailed(syllables, hanzi).syllables;
 }
 
 /**

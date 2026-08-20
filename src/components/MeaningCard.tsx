@@ -274,6 +274,7 @@ function SentenceContent() {
         <PinyinDisplay
           pinyin={sentence.pinyinSandhi}
           basePinyin={sentence.pinyin}
+                        chinese={sentence.chinese}
           className="text-sm"
         />
         <div className="text-base mt-1" style={{ color: 'var(--text-secondary)' }}>
