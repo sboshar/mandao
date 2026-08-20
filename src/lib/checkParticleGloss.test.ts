@@ -49,19 +49,21 @@ describe('checkParticleGloss', () => {
     expect(checkParticleGloss('在', 'zai4', 'at')).toBeNull(); // deliberately omitted
   });
 
-  it('agrees with the prompt table, so the two cannot drift apart', () => {
-    // The prompt tells the model these strings; the checker enforces them. If
-    // one is edited without the other, the model is instructed to produce a
-    // gloss that is then flagged as wrong.
-    const prompt = readFileSync(
-      resolve(__dirname, '../services/llmPrompt.ts'),
-      'utf-8',
-    );
-    for (const { allowed } of Object.values(PARTICLE_GLOSSES)) {
-      for (const gloss of allowed) {
-        expect(prompt).toContain(gloss);
-      }
-    }
+  it('is the single source of these glosses, so nothing can drift', () => {
+    // The prompt used to restate the table as literal text, and a test asserted
+    // the two agreed. The prompt now renders the menu FROM this map, so there is
+    // no second copy to disagree with — asserted by checking the glosses appear
+    // nowhere in the template as hardcoded strings.
+    // Comments are stripped: a gloss named in a code comment is documentation,
+    // not a second copy the model can be sent.
+    const src = readFileSync(resolve(__dirname, '../services/llmPrompt.ts'), 'utf-8');
+    const prompt = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const hardcoded = Object.values(PARTICLE_GLOSSES)
+      .flatMap((e) => e.allowed)
+      .filter((gloss) => prompt.includes(`"${gloss}"`) || prompt.includes(`  ${gloss}  `));
+    expect(hardcoded).toEqual([]);
   });
 
   it('lists every canonical gloss as self-consistent', () => {

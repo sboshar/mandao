@@ -14,11 +14,16 @@
 import * as repo from '../db/repo';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
 import { normalizePinyinNumeric } from './toneSandhi';
+import { PARTICLE_GLOSSES } from '../lib/checkParticleGloss';
 
 export interface ExistingMeaning {
   headword: string;
   pinyin: string;
   english: string;
+  /** "忘我#1" — what the model writes back to choose this sense (#194). */
+  ref: string;
+  /** The Meaning this resolves to; absent for a canonical not-yet-stored gloss. */
+  id?: string;
 }
 
 /** Look up existing meanings for characters in the sentence */
@@ -59,14 +64,48 @@ export async function getExistingMeanings(
     [...candidates].map((headword) => repo.getMeaningsByHeadword(headword)),
   );
 
-  return found
+  const meanings = found
     .flat()
-    .sort((a, b) => b.headword.length - a.headword.length)
-    .map((m) => ({
-      headword: m.headword,
-      pinyin: getMeaningPinyin(m),
-      english: m.englishShort,
-    }));
+    .sort((a, b) => b.headword.length - a.headword.length);
+
+  /**
+   * Function words get their canonical glosses offered even when the deck has
+   * never seen them, so the FIRST 了 enters as "completion particle" rather
+   * than whichever of several accurate phrasings the model reached for. Skipped
+   * where the deck already holds that gloss, which would otherwise list it
+   * twice.
+   */
+  const canonical: ExistingMeaning[] = [];
+  for (const ch of new Set(chars)) {
+    const entry = PARTICLE_GLOSSES[ch];
+    if (!entry) continue;
+    const already = new Set(
+      meanings.filter((m) => m.headword === ch).map((m) => m.englishShort.toLowerCase()),
+    );
+    for (const gloss of entry.allowed) {
+      if (already.has(gloss.toLowerCase())) continue;
+      canonical.push({ headword: ch, pinyin: entry.pinyin, english: gloss, ref: '', id: '' });
+    }
+  }
+
+  // Numbering must match buildOfferedSenses, since the model writes these refs
+  // back and resolveSense looks them up by position.
+  const stored: ExistingMeaning[] = meanings.map((m) => ({
+    headword: m.headword,
+    pinyin: getMeaningPinyin(m),
+    english: m.englishShort,
+    ref: '',
+    id: m.id,
+  }));
+
+  // Number after merging, so refs match the render order exactly. Stored senses
+  // come first — they are the user's own — then any canonical gloss not yet held.
+  const seen = new Map<string, number>();
+  return [...stored, ...canonical].map((m) => {
+    const n = (seen.get(m.headword) ?? 0) + 1;
+    seen.set(m.headword, n);
+    return { ...m, ref: `${m.headword}#${n}`, id: m.id || undefined };
+  });
 }
 
 /**
@@ -90,11 +129,29 @@ export async function generateAnalysisPrompt(
 
   let existingSection = '';
   if (existingMeanings && existingMeanings.length > 0) {
-    const lines = existingMeanings
-      .map((m) => `  ${m.headword} [${m.pinyin}] = "${m.english}"`)
+    const byHeadword = new Map<string, ExistingMeaning[]>();
+    for (const m of existingMeanings) {
+      byHeadword.set(m.headword, [...(byHeadword.get(m.headword) ?? []), m]);
+    }
+    const lines = [...byHeadword.entries()]
+      .map(([headword, senses]) =>
+        [
+          `  ${headword}`,
+          ...senses.map((m) => `    ${m.ref}  [${m.pinyin}]  "${m.english}"`),
+        ].join('\n'),
+      )
       .join('\n');
     existingSection = `
-Meanings already in the user's deck for words and characters in this sentence (reuse the exact English string when it fits this context):
+Senses available for words and characters in this sentence — the user's own,
+plus the standard glosses for any function word present.
+
+For each token, set "senseRef" to the id of the sense it carries here. When it
+carries a sense that is NOT listed, set "senseRef" to "new" and put your gloss in
+"english".
+
+Function words are ALWAYS listed here, so a particle should essentially never be
+"new" — pick the listed sense that matches what it is doing.
+
 ${lines}
 `;
   }
@@ -175,9 +232,16 @@ the word before them:
 Merging a pronoun with 的 also corrupts the pronoun: in 你 + 的 the possessive
 belongs to 的, and 你 still means "you", not "your".
 
-The copula 是 is its own token — it is a verb, not part of what precedes it:
+The copula 是 is its own token — it is a verb, not part of what precedes it. This
+holds for every demonstrative or pronoun before it, without exception:
 
   ❌ 那是 as one token        ✅ 那 + 是
+
+NATURALNESS IS NOT A REASON TO MERGE. It is tempting to keep a pair together
+because the English reads as one unit — "this is", "that was", "I am". That
+belongs in the sentence translation, which is where natural English lives. Tokens
+carry STRUCTURE, and each becomes its own flashcard: a card reading 那是 = "that
+is" teaches a phrase that is not a word, and buries both words that are.
 
 Test: could this token appear in a dictionary as a headword? 你的 and 那是 could
 not. 冰箱 and 教室 could.
@@ -210,13 +274,40 @@ Contextual does NOT mean "a piece of my translation". This gloss goes on a
 flashcard with the sentence nowhere in sight, so it has to mean something by
 itself.
 
-Do not lift a fragment out of the sentence translation. A word that only makes
-sense with the surrounding words is not a gloss — it is a quotation.
+DO NOT PICK A WORD OUT OF YOUR OWN TRANSLATION. This is the most common way this
+field goes wrong. Your English sentence contains words that sit NEXT to the right
+meaning without being it, and reaching into it for one of them produces a gloss
+that looks supported by the sentence and is still wrong.
 
-TEST: could this plausibly be a dictionary entry for this word? A gloss that needs
-the rest of the sentence to be understood is too narrow. A gloss that ignores the
-sentence entirely is the error described above. You need the sense the sentence
-points to, expressed so it stands alone.
+TEST: cover the sentence and read the gloss alone. Does it name the same thing the
+Chinese word names?
+
+  token 脾气, sentence translated "…he lost his temper"
+    gloss "lost"     ✗ "lost" comes from the English phrase "lost his temper".
+                       脾气 names the temper, not the losing.
+    gloss "temper"   ✓ names what 脾气 names
+
+  token 面子, sentence translated "…he didn't want to lose face"
+    gloss "lose"     ✗ again the verb from the English idiom, not the noun
+    gloss "face"     ✓ names what 面子 names
+
+A gloss may be a phrase — many are, and a phrase is often the only accurate
+answer. The requirement is not brevity or that it look like a headword. The
+requirement is that it denote what the Chinese word denotes, with the sentence
+taken away.
+
+### A gloss covers only what ITS OWN token contributes
+
+The other tokens in the sentence carry their own meaning and get their own cards.
+Do not absorb any of it.
+
+  他很高    很 → "very"    高 → "tall"
+                           高 → "very tall"  ✗ "very" is 很's job, not 高's
+
+This is easy to miss when the neighbour is a degree word, a measure word, or a
+quantifier, because the English phrase reads naturally with it folded in. Ask what
+this token alone contributes, and leave the rest to the tokens that carry it.
+
 
 This is the meaning of the WHOLE TOKEN.
 
@@ -224,39 +315,24 @@ Do not provide multiple alternative translations.
 
 For example, if a Chinese word can reasonably be translated as either "begin" or "start" in a particular context, choose whichever ONE is the best contextual gloss rather than outputting "begin/start".
 
-## Function words use a FIXED gloss
+## Function words: pick from the list, never invent
 
 Particles and grammatical markers do not get a translation — they get a name for
-what they do. Use these EXACT strings. Do not paraphrase them, do not invent
-variants, and do not translate the character.
+what they do, and those names are FIXED. Every function word in this sentence
+appears in the senses list above with its standard glosses. Choose one by
+"senseRef".
 
-  的   possessive particle           妈妈的手机
-  的   modifier particle             漂亮的女孩
-  地   adverbial particle            慢慢地走
-  得   complement particle           说得很好
-  了   completion particle           他睡了
-  了   change-of-state particle      天亮了
-  过   experiential particle         我吃过
-  着   durative particle             门开着
-  吗   yes/no question particle      你好吗
-  呢   follow-up question particle   你呢
-  吧   suggestion particle           走吧
-  啊   emphasis particle             好啊
-  呀   emphasis particle             好呀
-  们   plural suffix                 我们
+Do not write your own description of a particle. "completed action" and
+"perfective marker" may both describe 了 correctly, but a wording that is not on
+the list creates a second card for a morpheme that already has one — and these are
+the highest-frequency items in the deck, so they fragment fastest.
 
-Several characters appear twice because they have genuinely different functions.
-Pick by what the character is doing in THIS sentence — 的 joining a possessor to
-a thing is "possessive particle"; 的 joining a description to a noun is "modifier
-particle".
+Where a character has more than one listed gloss, they are genuinely different
+functions. Pick by what it is doing HERE: 的 joining a possessor to a thing is
+possessive; 的 joining a description to a noun is a modifier.
 
-Wording matters as much as accuracy here. "completed action" and "perfective
-marker" may describe 了 correctly, but only "completion particle" is the string
-this deck uses, and a different wording creates a second card for the same
-morpheme.
-
-These strings apply at BOTH levels — as the token's english when the particle is
-its own token, and as its character gloss inside the token's characters array.
+These apply at BOTH levels — as the token's english when the particle is its own
+token, and as its character gloss inside a token's characters array.
 
 # 4. Character-level English
 
@@ -326,9 +402,8 @@ The gloss may be:
 - a short English phrase when necessary
 - a grammatical label describing a grammatical contribution
 
-For grammatical characters, use the fixed strings from the function-word table
-above ("possessive particle", "completion particle", "plural suffix", …) rather
-than inventing a description.
+For grammatical characters, choose from the senses listed above by "senseRef"
+rather than inventing a description.
 
 The character gloss does not have to be the most common standalone translation of the character.
 
@@ -402,29 +477,69 @@ sentence, that sense is the right answer.
 The objective is accuracy, not forced literal decomposition — and not forced
 incoherence either.
 
-# 6. Existing user meanings
+# 6. Choosing a sense — "senseRef"
 
-These are meanings the user has already studied. They are candidates, not
-mandatory — but reusing one is the default, and departing from one has a cost.
+EVERY token needs a "senseRef". It says which sense of that word the token
+carries.
 
-When an existing meaning fits, reuse the EXACT English string. A different
-wording for the same sense does not read as a synonym downstream; it creates a
-SECOND card for a word that already has one, with its own review schedule.
+  senseRef: "<ref>"   the token carries that listed sense
+  senseRef: "new"     the token carries a sense that is NOT listed
 
-This matters most for WORDS. A multi-character word listed above has already
-been given a settled gloss, so unless that gloss is plainly wrong for this
-sentence, use it verbatim. Writing a fresh paraphrase of a sense that is already
-listed is the same word, glossed twice.
+Use a listed ref whenever the token carries that sense, EVEN IF you would have
+worded the gloss differently. A different wording of a listed sense is not a new
+sense — it is the same card described twice, and choosing "new" for it creates a
+duplicate with its own review schedule.
 
-For single CHARACTERS the bar is lower, because the same character legitimately
-contributes different senses to different compounds (§4). Depart freely when the
-listed sense does not fit the compound at hand.
+  listed:  冰箱#1  "refrigerator"
+  you would have written "fridge"
+  → senseRef: "冰箱#1"     ✅ same sense, listed wording wins
+  → senseRef: "new"        ❌ this is not a new sense
 
-Do not force a user's existing meaning merely because the same character
-appears. In particular, Mandarin pronouns are not inherently possessive — 他 is
-"he", not "his"; 我 is "I", not "my". Possession requires 的.
+Choose "new" only when the token genuinely carries a sense none of the listed
+ones covers — a different meaning, not a different phrasing.
 
-# 7. Polyphones
+When a token's headword has no listed senses, use "new".
+
+Still write "english" either way. When you reference a listed sense it is read as
+a claim about that sense and checked against it; the listed wording is what gets
+stored. When you choose "new", "english" is the gloss that will be stored.
+
+Do not force a listed sense merely because the same character appears. In
+particular, Mandarin pronouns are not inherently possessive — 他 is "he", not
+"his"; 我 is "I", not "my". Possession requires 的.
+
+# 7. Flagging your own uncertainty
+
+Set "uncertain" to true on a token when your answer for it is a judgement call
+rather than a fact, and put a brief reason in "uncertaintyNote". Otherwise set it
+to false and leave the note empty.
+
+Flag a token when:
+- no English word denotes it cleanly, and your gloss is an approximation
+- two senses were both defensible here and you picked one
+- the compound does not decompose, so the character glosses do not compose into it
+- the segmentation was arguable — the run could reasonably be split another way
+- the reading depended on a judgement about meaning rather than a lookup
+
+Do NOT flag ordinary vocabulary. A common noun with a direct English equivalent is
+not uncertain because a synonym exists. If most tokens in a sentence are flagged,
+the flag has stopped carrying information.
+
+DO NOT USE THIS FIELD TO EXCUSE BREAKING A RULE IN THIS PROMPT. It records
+uncertainty about the LANGUAGE, not about whether to comply. "Segmented as two
+words per the instructions, but merged here for naturalness" is not uncertainty —
+it is a decision to ignore an instruction, annotated. If a rule here tells you
+what to do, follow it; there is nothing to flag.
+
+The note is for the user reviewing this card, not an apology. Say what the choice
+was, in a few words: "could also be X", "no exact English equivalent", "literal
+parts do not compose".
+
+Being uncertain is not a failure and does not lower the quality of your answer. An
+unflagged wrong gloss is worse than a flagged one, because the user has no reason
+to look at it.
+
+# 8. Polyphones
 
 Many characters have more than one reading. Which one is correct depends on what the
 character MEANS here, not on which reading is most common in isolation. Different
@@ -440,7 +555,7 @@ used with different meanings each time. Do not assume that because a character w
 one way earlier in the sentence, it takes that reading again. Decide each occurrence
 from its own context.
 
-# 8. pinyinNumeric
+# 9. pinyinNumeric
 
 "pinyinNumeric" is citation-form pinyin.
 
@@ -484,7 +599,7 @@ reading, not the concatenation of citation readings:
 This applies to reduplicated kinship and verb forms, and to many high-frequency
 disyllabic words. When a compound has an established neutral-tone reading, use it.
 
-# 9. Part of speech
+# 10. Part of speech
 
 Assign exactly ONE part of speech to each TOKEN as used in the sentence.
 
@@ -494,7 +609,7 @@ Use only:
 
 Do not assign multiple parts of speech.
 
-# 10. Transliteration
+# 11. Transliteration
 
 Set "isTransliteration" to true only for genuine phonetic loanwords where the characters are primarily being used for their sounds rather than their normal semantic meanings.
 
@@ -504,7 +619,7 @@ For transliterations, each character's English should describe the phonetic role
 
 Set "isTransliteration" to false for ordinary native Chinese words and compounds (好吃, 电脑).
 
-# 11. Output schema
+# 12. Output schema
 
 {
   "chinese": string,
@@ -514,6 +629,9 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
       "surfaceForm": string,
       "pinyinNumeric": string,
       "english": string,
+      "senseRef": string,
+      "uncertain": boolean,
+      "uncertaintyNote": string,
       "partOfSpeech": "noun"|"verb"|"adj"|"adv"|"prep"|"conj"|"particle"|"measure"|"pronoun"|"number"|"other",
       "isTransliteration": boolean,
       "characters": [
@@ -527,7 +645,7 @@ Set "isTransliteration" to false for ordinary native Chinese words and compounds
   ]
 }
 
-# 12. Final validation
+# 13. Final validation
 
 Before returning the JSON, verify all of the following:
 
@@ -550,7 +668,11 @@ Before returning the JSON, verify all of the following:
 - Character glosses contain no "or".
 - Character glosses contain no multiple synonyms.
 - Character glosses do not contain comma-separated lists of meanings.
-- Existing meanings are reused exactly when appropriate.
+- Every token has a "senseRef": a listed ref, or "new".
+- "uncertain" is set on tokens that were a judgement call, with a brief note, and
+  not on ordinary vocabulary.
+- A listed ref was used wherever the token carries that sense, even if you would
+  have worded it differently.
 - Polyphonic readings are resolved according to context.
 - "pinyinNumeric" uses citation-form pronunciation with no sandhi.
 - "pinyinNumeric" contains exactly one syllable per character.
@@ -572,6 +694,12 @@ export interface LLMCharacterResponse {
 export interface LLMTokenResponse {
   surfaceForm: string;
   pinyinNumeric: string;
+  /** Which stored sense this token uses, or "new" (#194). */
+  senseRef?: string;
+  /** The model's own judgement that this token was a close call. */
+  uncertain?: boolean;
+  /** Brief reason, shown at review when uncertain is set. */
+  uncertaintyNote?: string;
   pinyinSandhi?: string;
   english: string;
   partOfSpeech: string;

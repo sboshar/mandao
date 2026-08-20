@@ -5,18 +5,25 @@ import {
   generateAnalysisPrompt,
   parseLLMResponse,
   getExistingMeanings,
+  type ExistingMeaning,
 } from '../services/llmPrompt';
 import {
   getTranslationReference,
   prefetchTranslationReference,
 } from '../services/translationReference';
 import { processLLMTokens } from '../services/processLLMTokens';
+import {
+  buildOfferedSenses,
+  resolveSense,
+  isUnexpectedNewSense,
+} from '../services/senseRef';
 import { collapsePinyin } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
 import { buildFlagsForSave } from '../services/ingestFlags';
 import type { IngestFlag } from '../services/processLLMTokens';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
+import { GlossSuggestions } from '../components/GlossSuggestions';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { TagInput } from '../components/TagInput';
@@ -50,6 +57,13 @@ interface TokenFormData {
   partOfSpeech: string;
   isTransliteration?: boolean;
   characters?: CharacterInput[];
+  /** Resolved from the model's senseRef — reuse this row rather than
+   *  matching on gloss text (#194). */
+  meaningId?: string;
+  /** The model introduced a sense for a headword that already had some.
+   *  Legitimate sometimes, but it is the moment a duplicate appears, so
+   *  review asks about it. */
+  declaredNewSense?: boolean;
 }
 
 function renderPinyin(numeric: string) {
@@ -83,7 +97,7 @@ function searchUrl(sentence: string, headword: string, readings: string[]): stri
   return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 }
 
-function SearchLink({ href }: { href: string }) {
+function ExternalLink({ href, label }: { href: string; label: string }) {
   return (
     <a
       href={href}
@@ -92,7 +106,7 @@ function SearchLink({ href }: { href: string }) {
       className="underline"
       style={{ color: 'var(--text-tertiary)' }}
     >
-      Look it up ↗
+      {label} ↗
     </a>
   );
 }
@@ -121,7 +135,7 @@ function FlagRow({
   /** Needed for the lookup link — readings depend on the sentence. */
   sentence: string;
   onApply: (headword: string, suggestion: string) => void;
-  onApplyGloss: (headword: string, gloss: string) => void;
+  onApplyGloss: (headword: string, gloss: string, meaningId?: string) => void;
   onMerge: (flag: SegmentationFlag) => void;
 }) {
   const wrapperClass = 'space-y-1 pt-2';
@@ -166,7 +180,36 @@ function FlagRow({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span style={hintStyle}>Worth a check before saving</span>
-          <SearchLink href={searchUrl(sentence, flag.headword, [flag.llmValue])} />
+          <ExternalLink
+            href={searchUrl(sentence, flag.headword, [flag.llmValue])}
+            label="Look it up"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (flag.kind === 'model-uncertain') {
+    // Volunteered by the model, not measured against anything, so it asks for a
+    // look rather than asserting an error. These are the glosses no external
+    // checker can evaluate — the ones where the model itself had to choose.
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        <div style={descStyle}>
+          <strong className="font-mono">{flag.headword}:</strong> the AI flagged its own
+          answer "{flag.llmValue}" as a close call.
+        </div>
+        {flag.note && (
+          <div style={hintStyle}>Its reason: {flag.note}</div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span style={hintStyle}>Worth checking before saving</span>
+          <GlossSuggestions
+            sentence={sentence}
+            headword={flag.headword}
+            currentGloss={flag.llmValue}
+            onChoose={onApplyGloss}
+          />
         </div>
       </div>
     );
@@ -210,8 +253,9 @@ function FlagRow({
           </FlagButton>
         ))}
         <span style={hintStyle}>— or keep the AI's value if it's correct</span>
-        <SearchLink
+        <ExternalLink
           href={searchUrl(sentence, flag.headword, [flag.llmValue, ...flag.cedictSuggestions])}
+          label="Look it up"
         />
       </div>
     </div>
@@ -428,6 +472,8 @@ export function AddSentencePage() {
     parsed: ReturnType<typeof parseLLMResponse>,
     /** The reference translation sent with the prompt, if any. */
     reference?: string | null,
+    /** The senses offered in the prompt, needed to resolve senseRef (#194). */
+    offeredMeanings?: ExistingMeaning[],
   ) => {
     const processed = processLLMTokens(parsed);
     // The model's translation stands, including when a reference was supplied.
@@ -448,11 +494,24 @@ export function AddSentencePage() {
     );
     setIngestFlags(processed.flags);
 
-    const formTokens: TokenFormData[] = processed.tokens.map((t) => ({
+    const offered = buildOfferedSenses(offeredMeanings ?? []);
+
+    const formTokens: TokenFormData[] = processed.tokens.map((t) => {
+      // A malformed or unoffered ref should not sink the whole analysis; fall
+      // back to treating the gloss as new and let review catch it.
+      let resolved;
+      try {
+        resolved = resolveSense(t, offered);
+      } catch {
+        resolved = { kind: 'new' as const, english: t.english };
+      }
+      return {
       surfaceForm: t.surfaceForm,
       pinyinNumeric: t.pinyinNumeric,
       pinyinSandhi: t.pinyinSandhi || '',
-      english: t.english,
+      english: resolved.english,
+      meaningId: resolved.kind === 'existing' ? resolved.meaningId : undefined,
+      declaredNewSense: isUnexpectedNewSense(t, offered),
       partOfSpeech: t.partOfSpeech || '',
       isTransliteration: !!t.isTransliteration,
       characters: t.characters?.map((c) => ({
@@ -461,7 +520,8 @@ export function AddSentencePage() {
         pinyinSandhi: c.pinyinSandhi,
         english: c.english,
       })),
-    }));
+      };
+    });
 
     setTokens(formTokens);
     const cov = computeTokenCoverage(chinese.trim(), formTokens);
@@ -483,7 +543,7 @@ export function AddSentencePage() {
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed, reference);
+      applyAnalysis(parsed, reference, existingMeanings);
       setStep('review');
     } catch (e: any) {
       setError(e.message);
@@ -550,9 +610,15 @@ export function AddSentencePage() {
 
   /** Snap a function word's gloss to the canonical wording. Keeps one
    *  morpheme to one Meaning row instead of one per phrasing. */
-  const applyGlossSuggestion = (headword: string, gloss: string) => {
+  const applyGlossSuggestion = (headword: string, gloss: string, meaningId?: string) => {
     setTokens((prev) =>
-      prev.map((t) => (t.surfaceForm === headword ? { ...t, english: gloss } : t)),
+      prev.map((t) =>
+        t.surfaceForm === headword
+          ? // A chosen deck sense reuses that row; anything else releases the
+            // reference, since the user has described something it does not say.
+            { ...t, english: gloss, meaningId }
+          : t,
+      ),
     );
     setIngestFlags((prev) =>
       prev.filter((f) => !(f.kind === 'particle-gloss' && f.headword === headword)),
@@ -609,7 +675,7 @@ export function AddSentencePage() {
       const raw = await generateCompletion(prompt);
       setRawLLMResponse(raw);
       const parsed = parseLLMResponse(raw);
-      applyAnalysis(parsed, reference);
+      applyAnalysis(parsed, reference, existingMeanings);
     } catch (e: any) {
       setError(e.message || 'Re-analyze failed');
     }
@@ -675,6 +741,10 @@ export function AddSentencePage() {
         surfaceForm: t.surfaceForm,
         pinyinNumeric: t.pinyinNumeric,
         english: t.english,
+        // Dropped when the user edited the gloss: they have described a sense
+        // the referenced row does not carry, so reusing it would overwrite
+        // their edit with the stored wording (#194).
+        meaningId: t.meaningId,
         partOfSpeech: t.partOfSpeech || 'other',
         isTransliteration: t.isTransliteration,
         characters: t.characters,

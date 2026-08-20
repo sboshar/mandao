@@ -1,10 +1,15 @@
 import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
 import { checkParticleGloss, type ParticleGlossFlag } from '../lib/checkParticleGloss';
+import { checkModelUncertainty, type ModelUncertaintyFlag } from '../lib/checkModelUncertainty';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
 import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 import type { LLMResponse, LLMTokenResponse } from './llmPrompt';
 
-export type IngestFlag = CheckPinyinFlag | SegmentationFlag | ParticleGlossFlag;
+export type IngestFlag =
+  | CheckPinyinFlag
+  | SegmentationFlag
+  | ParticleGlossFlag
+  | ModelUncertaintyFlag;
 
 export interface ProcessedToken extends LLMTokenResponse {
   pinyinNumeric: string;
@@ -58,6 +63,10 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
     // its own Meaning row for a morpheme that already has one.
     const glossFlag = checkParticleGloss(t.surfaceForm, t.pinyinNumeric, t.english);
     if (glossFlag) flags.push(glossFlag);
+
+    // The model's own doubt — the only signal here no external source can give.
+    const doubt = checkModelUncertainty(t);
+    if (doubt) flags.push(doubt);
   }
 
   for (const flag of scanSegmentation(tokens)) {
