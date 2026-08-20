@@ -1,3 +1,5 @@
+import type { SandhiRuleId } from '../lib/sandhiRules';
+
 /**
  * Tone sandhi computation.
  * Takes an array of pinyin syllables (with tone numbers) and applies sandhi rules.
@@ -15,43 +17,79 @@ function setToneNumber(syllable: string, tone: number): string {
   return syllable.replace(/\d$/, String(tone));
 }
 
+/** One syllable the sandhi pass rewrote, and why (#196). */
+export interface SandhiChange {
+  /** Index of the syllable that changed. */
+  index: number;
+  /** Citation form, e.g. "hao3". */
+  from: string;
+  /** Sandhi form, e.g. "hao2". */
+  to: string;
+  ruleId: SandhiRuleId;
+  /**
+   * Index of the syllable that caused the change.
+   *
+   * Every rule here is conditioned on what FOLLOWS, so naming the trigger is
+   * what makes an explanation about this sentence rather than a generic
+   * statement of the rule.
+   */
+  triggerIndex: number;
+}
+
 /**
- * Apply tone sandhi rules to a sequence of pinyin-numeric syllables.
- * Returns a new array with sandhi applied.
+ * Apply tone sandhi, and record what changed.
  *
- * Rules implemented:
- * 1. Third tone sandhi: 3+3 → 2+3
- * 2. 不 (bù) before 4th tone → bú (2nd)
- * 3. 一 (yī) before 4th → yí (2nd), before 1st/2nd/3rd → yì (4th)
+ * Rules applied, with explanations, live in lib/sandhiRules.ts — deliberately a
+ * fixed table rather than a model call, since these are mechanical and a table
+ * is right every time.
  */
-export function applyToneSandhi(syllables: string[]): string[] {
+export function applyToneSandhiDetailed(
+  syllables: string[],
+): { syllables: string[]; changes: SandhiChange[] } {
   const result = [...syllables];
+  const changes: SandhiChange[] = [];
+
+  const record = (index: number, from: string, ruleId: SandhiRuleId) => {
+    changes.push({ index, from, to: result[index], ruleId, triggerIndex: index + 1 });
+  };
 
   for (let i = 0; i < result.length - 1; i++) {
     const current = result[i].toLowerCase();
+    const before = result[i];
     const nextTone = getToneNumber(result[i + 1]);
 
-    // Rule 1: Third tone sandhi
+    // Third tone sandhi
     if (getToneNumber(current) === 3 && nextTone === 3) {
       result[i] = setToneNumber(result[i], 2);
+      record(i, before, 'third-tone');
+      continue;
     }
 
-    // Rule 2: 不 sandhi
+    // 不 sandhi
     if (current === 'bu4' && nextTone === 4) {
       result[i] = 'bu2';
+      record(i, before, 'bu-before-fourth');
+      continue;
     }
 
-    // Rule 3: 一 sandhi
+    // 一 sandhi
     if (current === 'yi1') {
       if (nextTone === 4) {
         result[i] = 'yi2';
+        record(i, before, 'yi-before-fourth');
       } else if (nextTone >= 1 && nextTone <= 3) {
         result[i] = 'yi4';
+        record(i, before, 'yi-before-others');
       }
     }
   }
 
-  return result;
+  return { syllables: result, changes };
+}
+
+/** Sandhi forms only. Kept for callers that do not need the explanations. */
+export function applyToneSandhi(syllables: string[]): string[] {
+  return applyToneSandhiDetailed(syllables).syllables;
 }
 
 /**

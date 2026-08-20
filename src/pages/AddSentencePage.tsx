@@ -20,10 +20,11 @@ import {
 import { collapsePinyin } from '../lib/checkPinyin';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
 import { buildFlagsForSave } from '../services/ingestFlags';
-import type { IngestFlag } from '../services/processLLMTokens';
+import type { IngestFlag, ProcessedToken } from '../services/processLLMTokens';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
 import { GlossSuggestions } from '../components/GlossSuggestions';
+import { SandhiPinyin } from '../components/SandhiPinyin';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
 import { TutorialBanner } from '../components/TutorialBanner';
 import { TagInput } from '../components/TagInput';
@@ -64,6 +65,8 @@ interface TokenFormData {
    *  Legitimate sometimes, but it is the moment a duplicate appears, so
    *  review asks about it. */
   declaredNewSense?: boolean;
+  /** Which syllables a sandhi rule rewrote, so review can explain them (#196). */
+  sandhiChanges?: ProcessedToken['sandhiChanges'];
 }
 
 function renderPinyin(numeric: string) {
@@ -509,6 +512,7 @@ export function AddSentencePage() {
       surfaceForm: t.surfaceForm,
       pinyinNumeric: t.pinyinNumeric,
       pinyinSandhi: t.pinyinSandhi || '',
+      sandhiChanges: t.sandhiChanges,
       english: resolved.english,
       meaningId: resolved.kind === 'existing' ? resolved.meaningId : undefined,
       declaredNewSense: isUnexpectedNewSense(t, offered),
@@ -1271,7 +1275,12 @@ export function AddSentencePage() {
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{t.surfaceForm}</span>
                   {t.pinyinSandhi && (
-                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t.pinyinSandhi}</span>
+                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      <SandhiPinyin
+                        pinyinSandhi={t.pinyinSandhi}
+                        changes={t.sandhiChanges}
+                      />
+                    </span>
                   )}
                   {!t.pinyinSandhi && t.pinyinNumeric && (
                     <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
