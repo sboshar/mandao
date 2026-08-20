@@ -28,7 +28,10 @@
   --tone-4: #9065b0;
   --tone-5: #9b9a97;
 
-  --sandhi-underline: #cb7b37;
+  /* Deep enough to read as text: it is used as a text colour in IntroModal
+     and as an underline on clickable sandhi syllables, and #cb7b37 was 2.65:1
+     against --bg-inset, below the 4.5:1 needed for either. */
+  --sandhi-underline: #9c5518;
 
   /* Accent — warm muted */
   --accent: #8b7355;

@@ -335,6 +335,7 @@ export function BrowsePage() {
                       <PinyinDisplay
                         pinyin={s.pinyinSandhi}
                         basePinyin={s.pinyin}
+                        chinese={s.chinese}
                       />
                     </div>
                     <div className="flex flex-wrap gap-1">

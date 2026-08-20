@@ -426,6 +426,7 @@ export function ReviewCard() {
                       <PinyinDisplay
                         pinyin={sentence.pinyinSandhi}
                         basePinyin={sentence.pinyin}
+                        chinese={sentence.chinese}
                         className="text-base"
                       />
                     </div>
@@ -772,6 +773,7 @@ export function ReviewCard() {
                   <PinyinDisplay
                     pinyin={sentence.pinyinSandhi}
                     basePinyin={sentence.pinyin}
+                        chinese={sentence.chinese}
                     className="text-base"
                   />
                 </div>

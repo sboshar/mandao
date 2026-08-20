@@ -2,11 +2,7 @@ import { checkPinyin, type CheckPinyinFlag } from '../lib/checkPinyin';
 import { checkParticleGloss, type ParticleGlossFlag } from '../lib/checkParticleGloss';
 import { checkModelUncertainty, type ModelUncertaintyFlag } from '../lib/checkModelUncertainty';
 import { scanSegmentation, type SegmentationFlag } from '../lib/segmentationCheck';
-import {
-  applyToneSandhiDetailed,
-  numericStringToDiacritic,
-  type SandhiChange,
-} from './toneSandhi';
+import { applyToneSandhi, numericStringToDiacritic } from './toneSandhi';
 import type { LLMResponse, LLMTokenResponse } from './llmPrompt';
 
 export type IngestFlag =
@@ -17,14 +13,6 @@ export type IngestFlag =
 
 export interface ProcessedToken extends LLMTokenResponse {
   pinyinNumeric: string;
-  /**
-   * Sandhi changes inside this token, with indexes rebased to the token (#196).
-   *
-   * triggerIndex may be -1 when the syllable that caused the change belongs to
-   * the NEXT token — 不 shifting before a following fourth tone is the common
-   * case. The rule still applies; there is simply no local syllable to point at.
-   */
-  sandhiChanges?: (SandhiChange & { triggerSyllable?: string })[];
 }
 
 export interface ProcessResult {
@@ -87,33 +75,30 @@ export function processLLMTokens(response: LLMResponse): ProcessResult {
 
   // Sandhi spans token boundaries — 不 and 一 shift based on the following
   // syllable, which may belong to the next token — so flatten, transform, slice.
-  const allSyllables = tokens.flatMap((t) =>
-    t.pinyinNumeric.split(/\s+/).filter(Boolean),
-  );
-  const { syllables: sandhied, changes } = applyToneSandhiDetailed(allSyllables);
+  //
+  // The characters travel alongside, because 一 and 不 are rules about
+  // CHARACTERS: 医院 reads yi1 yuan4 and 部队 reads bu4 dui4, and matching on the
+  // reading alone turns them into yí yuàn and bú duì. Where a token's characters
+  // do not line up one-to-one with its syllables the slots are left blank rather
+  // than guessed, which costs the fix for that token and nothing else.
+  const allSyllables: string[] = [];
+  const allHanzi: (string | undefined)[] = [];
+  for (const t of tokens) {
+    const syls = t.pinyinNumeric.split(/\s+/).filter(Boolean);
+    const chars = Array.from(t.surfaceForm);
+    allSyllables.push(...syls);
+    allHanzi.push(
+      ...(chars.length === syls.length ? chars : syls.map(() => undefined)),
+    );
+  }
+
+  const sandhied = applyToneSandhi(allSyllables, allHanzi);
   let offset = 0;
   for (const t of tokens) {
     const count = t.pinyinNumeric.split(/\s+/).filter(Boolean).length;
     t.pinyinSandhi = numericStringToDiacritic(
       sandhied.slice(offset, offset + count).join(' '),
     );
-
-    // Rebase to the token so the UI can line changes up with the syllables it
-    // renders. The trigger keeps its own syllable text, since it may sit in the
-    // next token and be unreachable from here.
-    const start = offset;
-    const end = offset + count;
-    t.sandhiChanges = changes
-      .filter((c) => c.index >= start && c.index < end)
-      .map((c) => ({
-        ...c,
-        index: c.index - start,
-        triggerIndex: c.triggerIndex >= start && c.triggerIndex < end
-          ? c.triggerIndex - start
-          : -1,
-        triggerSyllable: allSyllables[c.triggerIndex],
-      }));
-
     offset += count;
   }
 

@@ -101,12 +101,25 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
   const acc: IngestAccumulator = { meanings: [], meaningLinks: [], allMeanings: new Map() };
   const tokenRecords: SentenceToken[] = [];
   const allPinyinNumeric: string[] = [];
+  // Index-aligned with allPinyinNumeric, so 一 and 不 can be told apart from the
+  // other characters that read yi1 and bu4. See applyToneSandhiDetailed.
+  const allHanzi: (string | undefined)[] = [];
 
   for (let i = 0; i < input.tokens.length; i++) {
     const token = input.tokens[i];
     const meaning = await findOrCreateMeaning(token, acc);
-    const syllables = token.pinyinNumeric.split(/\s+/);
+    // filter(Boolean) to match processLLMTokens: a trailing space typed into the
+    // pinyin field would otherwise insert an empty syllable here, which reads as
+    // a neutral tone and silently blocks sandhi across that boundary — so review
+    // would show wó hǎo and save would write wǒ hǎo.
+    const syllables = token.pinyinNumeric.split(/\s+/).filter(Boolean);
     allPinyinNumeric.push(...syllables);
+    const chars = Array.from(token.surfaceForm);
+    allHanzi.push(
+      ...(chars.length === syllables.length
+        ? chars
+        : syllables.map(() => undefined)),
+    );
 
     if (token.surfaceForm.length > 1 && meaning.type === 'word') {
       await decomposeWord(meaning, token, acc);
@@ -122,14 +135,14 @@ export async function ingestSentence(input: SentenceInput): Promise<string> {
     });
   }
 
-  const sandhiSyllables = applyToneSandhi(allPinyinNumeric);
+  const sandhiSyllables = applyToneSandhi(allPinyinNumeric, allHanzi);
   const basePinyin = numericStringToDiacritic(allPinyinNumeric.join(' '));
   const sandhiPinyin = numericStringToDiacritic(sandhiSyllables.join(' '));
 
   let syllableIdx = 0;
   for (const tokenRec of tokenRecords) {
     const token = input.tokens[tokenRecords.indexOf(tokenRec)];
-    const count = token.pinyinNumeric.split(/\s+/).length;
+    const count = token.pinyinNumeric.split(/\s+/).filter(Boolean).length;
     const tokenSandhiSyllables = sandhiSyllables.slice(
       syllableIdx,
       syllableIdx + count
