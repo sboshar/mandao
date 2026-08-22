@@ -16,6 +16,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { suggestPhrases, type SuggestionResult } from '../services/suggestPhrases';
 import { isAIConfigured } from '../services/aiProvider';
+import { AIKeyRequired } from './AIKeyRequired';
 
 export function SuggestedPhrases({
   headwords,
@@ -64,7 +65,21 @@ export function SuggestedPhrases({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFetch, label]);
 
-  if (!isAIConfigured()) return null;
+  // Greyed rather than hidden: MeaningCard renders the "More sentences with X"
+  // heading outside this component, so returning null left a heading with
+  // nothing under it — which looks broken rather than unconfigured (#202).
+  if (!isAIConfigured()) {
+    return (
+      <div className="space-y-2">
+        <AIKeyRequired
+          label={`Suggest sentences using ${label}`}
+          className="w-full px-3 py-2 rounded text-sm inset"
+          style={{ color: 'var(--text-secondary)' }}
+          onNavigate={onNavigate}
+        />
+      </div>
+    );
+  }
 
   const suggestions = result?.suggestions ?? null;
 
