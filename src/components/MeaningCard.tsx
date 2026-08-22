@@ -19,6 +19,7 @@ import { getTokensForSentence } from '../services/ingestion';
 import { TutorialBanner } from './TutorialBanner';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
 import { SuggestedPhrases } from './SuggestedPhrases';
+import { CharWords } from './CharWords';
 import { useTutorialStore } from '../stores/tutorialStore';
 import type { SentenceToken } from '../db/schema';
 
@@ -28,7 +29,10 @@ interface CharBreakdownItem {
 }
 
 function MeaningContent() {
-  const { current, push } = useNavigationStore();
+  // `close` was previously not destructured here, so onNavigate={close} below
+  // resolved to window.close — a silent no-op in most browsers, leaving the
+  // panel covering the page it had just routed to.
+  const { current, push, close } = useNavigationStore();
   const [meaning, setMeaning] = useState<Meaning | null>(null);
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [otherMeanings, setOtherMeanings] = useState<Meaning[]>([]);
@@ -170,6 +174,10 @@ function MeaningContent() {
             ))}
           </div>
         </div>
+      )}
+
+      {headwordChars.length === 1 && (
+        <CharWords key={meaning.headword} char={meaning.headword} onNavigate={close} />
       )}
 
       {charBreakdown.length > 0 && (
