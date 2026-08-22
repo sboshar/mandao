@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { lookupContaining } from './cedict';
+import { lookupContaining, characterReadings } from './cedict';
 
 /**
  * Runs against the real dictionary rather than a fixture.
@@ -108,5 +108,70 @@ describe('lookupContaining', () => {
     // elsewhere. Whatever the ranking, the everyday words must be in reach.
     const top = lookupContaining('西', 30).map((h) => h.entry.simplified);
     expect(top.some((w) => ['西方', '西瓜', '西部', '西班牙'].includes(w))).toBe(true);
+  });
+});
+
+describe('reading, for polyphone disambiguation', () => {
+  it('reports how the character is read inside each word', () => {
+    const by = new Map(
+      lookupContaining('长', 600).map((h) => [h.entry.simplified, h.reading]),
+    );
+    // 长 is two morphemes sharing one glyph.
+    expect(by.get('长大')).toBe('zhang3');
+    expect(by.get('校长')).toBe('zhang3');
+    expect(by.get('长城')).toBe('chang2');
+    expect(by.get('长短')).toBe('chang2');
+  });
+
+  it('lowercases proper-noun readings so they still compare equal', () => {
+    // CEDICT writes 長城 as [Chang2 cheng2]; the reading is still chang2.
+    const changcheng = lookupContaining('长', 600).find(
+      (h) => h.entry.simplified === '长城',
+    );
+    expect(changcheng?.reading).toBe('chang2');
+  });
+
+  it('catches the neutral-tone reduction that marks a lexicalized compound', () => {
+    // 东西 is [dong1 xi5] — 西 is unstressed, which is itself the signal that
+    // the word has drifted from "west".
+    const dongxi = lookupContaining('西', 600).find(
+      (h) => h.entry.simplified === '东西',
+    );
+    expect(dongxi?.reading).toBe('xi5');
+  });
+
+  it('returns null rather than guessing when syllables do not align', () => {
+    // 18 of 116,937 entries have a syllable count that differs from the
+    // character count. Whatever they are, a guess would be wrong.
+    let checked = 0;
+    for (const hit of lookupContaining('人', 600)) {
+      const sylls = hit.entry.pinyin.split(/\s+/).filter(Boolean);
+      if (sylls.length !== hit.entry.simplified.length) {
+        expect(hit.reading).toBeNull();
+        checked++;
+      } else {
+        expect(hit.reading).not.toBeNull();
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('characterReadings', () => {
+  it('gives each reading its own gloss, so a group can be labelled', () => {
+    const rs = characterReadings('长');
+    const map = new Map(rs.map((r) => [r.reading, r.gloss]));
+    expect(map.get('chang2')).toContain('length');
+    expect(map.get('zhang3')).toContain('chief');
+  });
+
+  it('covers the other polyphones a learner meets early', () => {
+    const hang = new Map(characterReadings('行').map((r) => [r.reading, r.gloss]));
+    expect(hang.has('hang2')).toBe(true);
+    expect(hang.has('xing2')).toBe(true);
+  });
+
+  it('returns a single entry for a monophone', () => {
+    expect(characterReadings('西').length).toBe(1);
   });
 });

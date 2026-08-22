@@ -177,7 +177,13 @@ function MeaningContent() {
       )}
 
       {headwordChars.length === 1 && (
-        <CharWords key={meaning.headword} char={meaning.headword} onNavigate={close} />
+        <CharWords
+          key={meaning.id}
+          char={meaning.headword}
+          reading={meaning.pinyinNumeric}
+          sense={meaning.englishShort}
+          onNavigate={close}
+        />
       )}
 
       {charBreakdown.length > 0 && (

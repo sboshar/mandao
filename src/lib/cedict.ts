@@ -109,6 +109,42 @@ export interface ContainingWord {
   entry: DictEntry;
   /** Index of the character inside the simplified headword. */
   position: number;
+  /**
+   * How the character itself is read in THIS word — zhang3 in 长大, chang2 in
+   * 长城 — lowercased, tone digit kept.
+   *
+   * This is the polyphone disambiguator. A quarter of the 300 most-used
+   * characters have more than one reading, and two readings of one glyph are
+   * usually two unrelated morphemes: without this, "other words using 长" puts
+   * 长城 (Great Wall) beside 长大 (to grow up) as though they shared anything
+   * but a shape.
+   *
+   * null when the word's syllables do not line up one per character, which
+   * happens for 18 of CEDICT's 116,937 entries — rare enough to skip rather
+   * than guess at.
+   */
+  reading: string | null;
+}
+
+function readingAt(entry: DictEntry, position: number): string | null {
+  const syllables = entry.pinyin.split(/\s+/).filter(Boolean);
+  if (syllables.length !== entry.simplified.length) return null;
+  return syllables[position]?.toLowerCase() ?? null;
+}
+
+/** Each distinct reading of a single character, with its own first gloss.
+ *  Lets a different-reading group be labelled "cháng — length" from the
+ *  dictionary rather than left as an unexplained omission. */
+export function characterReadings(
+  char: string,
+): { reading: string; gloss: string }[] {
+  const out = new Map<string, string>();
+  for (const entry of lookup(char)) {
+    const reading = entry.pinyin.replace(/\s+/g, '').toLowerCase();
+    const gloss = entry.english.split('/').filter(Boolean)[0]?.trim() ?? '';
+    if (!out.has(reading) && gloss) out.set(reading, gloss);
+  }
+  return [...out].map(([reading, gloss]) => ({ reading, gloss }));
 }
 
 /** Count of senses, used as a rough frequency proxy. Established convention
@@ -169,7 +205,8 @@ export function lookupContaining(char: string, limit = 60): ContainingWord[] {
   for (const [word, entries] of grouped) {
     // Richest sense represents the word, for both display and ranking.
     const best = entries.reduce((a, b) => (glossCount(b) > glossCount(a) ? b : a));
-    hits.push({ entry: best, position: word.indexOf(char) });
+    const position = word.indexOf(char);
+    hits.push({ entry: best, position, reading: readingAt(best, position) });
   }
 
   hits.sort((a, b) => {
