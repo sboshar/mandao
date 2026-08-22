@@ -14,6 +14,7 @@ import {
   type GlossSuggestions as Suggestions,
 } from '../services/suggestGlosses';
 import { isAIConfigured } from '../services/aiProvider';
+import { AIKeyRequired } from './AIKeyRequired';
 
 /**
  * Open a chat model with the question already framed.
@@ -58,7 +59,26 @@ export function GlossSuggestions({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  if (!isAIConfigured()) return null;
+  const pillStyle: React.CSSProperties = {
+    background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+    color: 'var(--accent)',
+    border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+  };
+
+  // The Ask ChatGPT link is just a URL — it needs no key and costs nothing, so
+  // returning null here was gating a free feature behind a paid one (#202).
+  if (!isAIConfigured()) {
+    return (
+      <span className="flex flex-wrap items-center gap-2">
+        <AIKeyRequired
+          label="Suggest alternatives"
+          className="px-2 py-0.5 rounded text-xs"
+          style={pillStyle}
+        />
+        <AskLink href={askUrl(sentence, headword, currentGloss)} />
+      </span>
+    );
+  }
 
   const fetchSuggestions = async () => {
     setLoading(true);
@@ -70,12 +90,6 @@ export function GlossSuggestions({
     } finally {
       setLoading(false);
     }
-  };
-
-  const pillStyle: React.CSSProperties = {
-    background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
-    color: 'var(--accent)',
-    border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
   };
 
   if (result === null) {
