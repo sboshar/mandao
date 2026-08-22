@@ -104,6 +104,85 @@ export function lookupByEnglish(words: string[], limit = 50): DictEntry[] {
   return results;
 }
 
+/** A CEDICT word that contains some character, and where it sits (#204). */
+export interface ContainingWord {
+  entry: DictEntry;
+  /** Index of the character inside the simplified headword. */
+  position: number;
+}
+
+/** Count of senses, used as a rough frequency proxy. Established convention
+ *  here — lookupByPinyin already ranks on it. */
+function glossCount(entry: DictEntry): number {
+  return entry.english.split('/').filter(Boolean).length;
+}
+
+/**
+ * Proper nouns, by CEDICT's own convention of capitalizing their pinyin.
+ *
+ *   帕西 [Pa4 xi1]    Parsi
+ *   廣西 [Guang3 xi1] Guangxi
+ *   徹西 [Che4 xi1]   Chelsea
+ *   東西 [dong1 xi5]  thing        <- lowercase
+ *   西瓜 [xi1 gua1]   watermelon   <- lowercase
+ *
+ * Without this, a scan for 西 surfaces Parsi, Chelsea and three district names
+ * above 东西 and 西瓜, because they all have one gloss and then fall back to
+ * dictionary order. Place names are not what someone asking "what else uses
+ * this character" wants first.
+ */
+function isProperNoun(entry: DictEntry): boolean {
+  return /[A-Z]/.test(entry.pinyin);
+}
+
+/**
+ * Every word that contains `char` somewhere other than as the whole word.
+ *
+ * This is a LOOKUP, not a judgement, which is why it belongs here rather than in
+ * a prompt: asking a model for "words containing 西" invites invented compounds,
+ * while a scan over the dictionary can only return words that exist.
+ *
+ * Ranking is admittedly rough. CC-CEDICT carries no frequency data, so this
+ * sorts short-before-long (two-character compounds are overwhelmingly the common
+ * ones) and then by sense count, which is the same weak proxy lookupByPinyin
+ * uses. Good enough to put 西方 above some Ming-dynasty place name; not a real
+ * frequency ranking, and shouldn't be described as one.
+ */
+export function lookupContaining(char: string, limit = 60): ContainingWord[] {
+  if (allEntries.length === 0 || !char) return [];
+
+  // Grouped, not first-seen-wins. A headword often has several entries and the
+  // first is not the useful one: 東西 is [dong1 xi1] "east and west" followed by
+  // [dong1 xi5] "thing/stuff/person", so keeping the first would show the
+  // literal reading and discard the sense anyone actually means.
+  const grouped = new Map<string, DictEntry[]>();
+  for (const entry of allEntries) {
+    const word = entry.simplified;
+    // The character on its own is not a word "using" it.
+    if (word === char || !word.includes(char)) continue;
+    const list = grouped.get(word);
+    if (list) list.push(entry);
+    else grouped.set(word, [entry]);
+  }
+
+  const hits: ContainingWord[] = [];
+  for (const [word, entries] of grouped) {
+    // Richest sense represents the word, for both display and ranking.
+    const best = entries.reduce((a, b) => (glossCount(b) > glossCount(a) ? b : a));
+    hits.push({ entry: best, position: word.indexOf(char) });
+  }
+
+  hits.sort((a, b) => {
+    const byNoun = Number(isProperNoun(a.entry)) - Number(isProperNoun(b.entry));
+    if (byNoun !== 0) return byNoun;
+    const byLen = a.entry.simplified.length - b.entry.simplified.length;
+    if (byLen !== 0) return byLen;
+    return glossCount(b.entry) - glossCount(a.entry);
+  });
+
+  return hits.slice(0, limit);
+}
+
 /** Look up all entries that start with the given prefix */
 export function lookupPrefix(prefix: string): DictEntry[] {
   if (!simplifiedTrie || !traditionalTrie) return [];
