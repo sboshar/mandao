@@ -21,12 +21,24 @@ import type {
 
 let cachedUserId: string | null = null;
 
-supabase.auth.onAuthStateChange((_event, session) => {
-  cachedUserId = session?.user?.id ?? null;
+supabase.auth.onAuthStateChange((event, session) => {
+  if (session?.user) {
+    cachedUserId = session.user.id;
+  } else if (event === 'SIGNED_OUT') {
+    // Only an explicit sign-out clears the cache. Other null-session events
+    // (INITIAL_SESSION after a failed offline token refresh) must not clobber
+    // an id seeded by the offline-boot path in authStore.
+    cachedUserId = null;
+  }
 });
 
 export function clearCachedUserId() {
   cachedUserId = null;
+}
+
+/** Seed the cache without a live session — used on offline cold start. */
+export function setCachedUserId(id: string) {
+  cachedUserId = id;
 }
 
 export async function getUserId(): Promise<string> {

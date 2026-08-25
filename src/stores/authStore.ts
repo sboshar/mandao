@@ -1,11 +1,52 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import { clearCachedUserId } from '../db/repo';
+import { clearCachedUserId, setCachedUserId } from '../db/repo';
 import { clearLocalDb } from '../db/localDb';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import type { User } from '@supabase/supabase-js';
 
 const GENERIC_AUTH_ERROR = 'Something went wrong. Please try again.';
 const RATE_LIMIT_ERROR = 'Too many attempts. Please try again later.';
+
+// Last authenticated user, cached so an offline cold start can boot into the
+// app. Supabase keeps the session in localStorage too, but getSession()
+// refuses to return it once the access token has expired and a network
+// refresh fails — which is exactly the no-signal case.
+const CACHED_USER_KEY = 'mandao:last-auth-user';
+
+// How long to let getSession() block boot before falling back to the cached
+// user. Offline, its token-refresh retries take ~25s; navigator.onLine can
+// report true on dead connections, so a timeout is needed either way.
+const SESSION_RESTORE_TIMEOUT_MS = 3000;
+
+function readCachedUser(): User | null {
+  try {
+    const raw = localStorage.getItem(CACHED_USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as User;
+    // An id-less user would pass App's auth gate but never start hydration,
+    // wedging the app on the loading screen with no way out.
+    return typeof parsed?.id === 'string' && parsed.id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(user: User): void {
+  try {
+    localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+  } catch {
+    // Quota/private-mode failures just lose the offline-boot optimization.
+  }
+}
+
+function clearCachedUser(): void {
+  try {
+    localStorage.removeItem(CACHED_USER_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 function isRateLimited(error: { status?: number; message?: string }): boolean {
   return error.status === 429 || /rate limit|too many/i.test(error.message ?? '');
@@ -37,8 +78,13 @@ interface AuthState {
 
 let initialized = false;
 let authSubscription: { unsubscribe: () => void } | null = null;
+// Bumped by signOut() (and each initialize()) so a reconciliation still
+// awaiting getSession() can detect it went stale and must not touch state —
+// otherwise a refresh resolving mid-sign-out resurrects the user and
+// re-populates the cache signOut() just cleared.
+let authEpoch = 0;
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: true,
   needsPasswordReset: false,
@@ -46,12 +92,22 @@ export const useAuthStore = create<AuthState>((set) => ({
   initialize: async () => {
     if (initialized) return;
     initialized = true;
+    const epoch = ++authEpoch;
 
     // Subscribe first so PASSWORD_RECOVERY events during session
     // restoration are not missed.
     let lastUserId: string | null = null;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        writeCachedUser(session.user);
+      } else if (event === 'SIGNED_OUT') {
+        clearCachedUser();
+      }
       const newUserId = session?.user?.id ?? null;
+      // A null session outside SIGNED_OUT is not a sign-out: INITIAL_SESSION
+      // fires with null when an expired token can't be refreshed offline, and
+      // must not kick a cached-user boot back to the login screen.
+      if (!newUserId && event !== 'SIGNED_OUT') return;
       if (newUserId === lastUserId && event !== 'PASSWORD_RECOVERY') return;
       lastUserId = newUserId;
       set({
@@ -62,21 +118,91 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
     authSubscription = subscription;
 
-    const { data: { session } } = await supabase.auth.getSession();
-    lastUserId = session?.user?.id ?? null;
-    set({ user: session?.user ?? null, loading: false });
+    const cached = readCachedUser();
+    const applyCachedUser = (user: User) => {
+      lastUserId = user.id;
+      // Local writes (reviews, decks, audio) stamp rows with this id; there
+      // is no live session to seed it from, so do it here.
+      setCachedUserId(user.id);
+      set({ user, loading: false });
+    };
+
+    const sessionPromise = supabase.auth.getSession();
+
+    // Offline cold start: don't leave the user staring at the loading screen
+    // while getSession() retries a doomed token refresh. Boot with the cached
+    // user and reconcile below whenever getSession() settles.
+    let bootedFromCache = false;
+    if (cached && !navigator.onLine) {
+      bootedFromCache = true;
+      applyCachedUser(cached);
+    } else if (cached) {
+      // .catch: a getSession() rejection (e.g. another tab stealing the auth
+      // navigator lock) must fall back to the cached user like a timeout,
+      // not escape and leave the app stuck on the loading screen.
+      const winner = await Promise.race([
+        sessionPromise,
+        new Promise<'timeout'>((resolve) =>
+          setTimeout(() => resolve('timeout'), SESSION_RESTORE_TIMEOUT_MS)
+        ),
+      ]).catch(() => 'timeout' as const);
+      if (epoch !== authEpoch) return;
+      if (winner === 'timeout') {
+        bootedFromCache = true;
+        applyCachedUser(cached);
+      }
+    }
+
+    try {
+      const { data: { session }, error } = await sessionPromise;
+      if (epoch !== authEpoch) return;
+      if (session?.user) {
+        writeCachedUser(session.user);
+        lastUserId = session.user.id;
+        set({ user: session.user, loading: false });
+      } else if (cached && error && isAuthRetryableFetchError(error)) {
+        // Network unreachable — the stored session is intact and Supabase
+        // will refresh it automatically once we're back online. Keep the
+        // cached user so the app works offline.
+        if (!bootedFromCache) applyCachedUser(cached);
+      } else {
+        // Genuinely signed out (no stored session, or refresh token rejected
+        // by the server).
+        clearCachedUser();
+        lastUserId = null;
+        set({ user: null, loading: false });
+      }
+    } catch (e) {
+      if (epoch !== authEpoch) return;
+      // Unexpected failure — with a cached user, prefer keeping the app
+      // usable over forcing a login we may not be able to complete.
+      console.error('Session restore failed', e);
+      if (cached) {
+        if (!bootedFromCache) applyCachedUser(cached);
+      } else {
+        set({ user: null, loading: false });
+      }
+    }
   },
 
   signInWithEmail: async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (!error) return null;
+    if (!error) {
+      // After an explicit sign-out the auth listener is unsubscribed, so the
+      // SIGNED_IN event goes unheard; re-arm it. No-op if still initialized.
+      void get().initialize();
+      return null;
+    }
     if (isRateLimited(error)) return RATE_LIMIT_ERROR;
     return 'Invalid email or password';
   },
 
   signUpWithEmail: async (email, password) => {
     const { error } = await supabase.auth.signUp({ email, password });
-    if (!error) return null;
+    if (!error) {
+      void get().initialize();
+      return null;
+    }
     if (isRateLimited(error)) return RATE_LIMIT_ERROR;
     if (error.message?.toLowerCase().includes('password'))
       return 'Password must be at least 8 characters';
@@ -108,10 +234,33 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    authEpoch++;
     authSubscription?.unsubscribe();
     authSubscription = null;
     initialized = false;
-    await supabase.auth.signOut();
+    clearCachedUser();
+    let signOutError: unknown = null;
+    try {
+      ({ error: signOutError } = await supabase.auth.signOut());
+    } catch (e) {
+      signOutError = e;
+    }
+    if (signOutError) {
+      // Offline sign-out: the revocation call failed and auth-js kept its
+      // stored session, which would silently sign the account back in (onto
+      // the wiped local DB) on the next online launch. Drop the stored
+      // session locally; the refresh token itself can only be revoked
+      // server-side once we're back online.
+      try {
+        for (const key of Object.keys(localStorage)) {
+          if (key.startsWith('sb-') && key.includes('-auth-token')) {
+            localStorage.removeItem(key);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
     await clearLocalDb();
     await deleteLegacyIndexedDb();
     clearCachedUserId();
