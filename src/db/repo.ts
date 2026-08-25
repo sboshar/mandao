@@ -30,6 +30,7 @@ import { v4 as uuid } from 'uuid';
 import { useSyncStore } from '../stores/syncStore';
 
 export { clearRemoteCache as clearCachedUserId };
+export { setCachedUserId } from './remoteRepo';
 export { getRemoteUserId as getUserId };
 
 async function enqueue(op: Pick<SyncOp, 'op' | 'payload'>): Promise<void> {
