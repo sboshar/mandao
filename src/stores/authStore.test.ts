@@ -31,6 +31,7 @@ vi.mock('../lib/supabase', () => ({
         return { data: { subscription: { unsubscribe: vi.fn() } } };
       },
       getSession: () => mocks.getSession(),
+      signOut: () => Promise.resolve({ error: null }),
     },
   },
 }));
@@ -165,6 +166,49 @@ describe('initialize', () => {
 
     mocks.authCallback('INITIAL_SESSION', null);
     expect(store.getState().user?.id).toBe('user-1');
+  });
+
+  it('boots from cache when getSession() rejects within the grace window', async () => {
+    // e.g. another tab stealing the auth navigator lock while offline.
+    localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+    mocks.getSession = () => Promise.reject(new Error('lock stolen'));
+
+    const store = await loadStore();
+    await store.getState().initialize();
+
+    expect(store.getState().user?.id).toBe('user-1');
+    expect(store.getState().loading).toBe(false);
+  });
+
+  it('ignores a cached user without an id', async () => {
+    localStorage.setItem(CACHED_USER_KEY, JSON.stringify({ email: 'a@b.c' }));
+
+    const store = await loadStore();
+    await store.getState().initialize();
+
+    expect(store.getState().user).toBeNull();
+    expect(store.getState().loading).toBe(false);
+  });
+
+  it('does not resurrect the user when sign-out races a pending session restore', async () => {
+    vi.stubGlobal('navigator', { onLine: false });
+    localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+    let resolveSession!: (v: { data: { session: Session | null }; error: Error | null }) => void;
+    mocks.getSession = () => new Promise((resolve) => (resolveSession = resolve));
+
+    const store = await loadStore();
+    const done = store.getState().initialize();
+    expect(store.getState().user?.id).toBe('user-1');
+
+    await store.getState().signOut();
+    expect(store.getState().user).toBeNull();
+
+    // The stalled refresh finally succeeds with the signed-out user's session.
+    resolveSession({ data: { session }, error: null });
+    await done;
+
+    expect(store.getState().user).toBeNull();
+    expect(localStorage.getItem(CACHED_USER_KEY)).toBeNull();
   });
 
   it('still signs out on an explicit SIGNED_OUT event', async () => {
