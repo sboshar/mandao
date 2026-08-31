@@ -18,6 +18,7 @@ import { EnglishCard } from './EnglishCard';
 import { getTokensForSentence } from '../services/ingestion';
 import { TutorialBanner } from './TutorialBanner';
 import { getMeaningPinyin } from '../lib/meaningPinyin';
+import { SentenceUsagePanel } from './SentenceUsagePanel';
 import { SuggestedPhrases } from './SuggestedPhrases';
 import { useTutorialStore } from '../stores/tutorialStore';
 import type { SentenceToken } from '../db/schema';
@@ -220,7 +221,7 @@ function formatDue(due: number): string {
 }
 
 function SentenceContent() {
-  const { current } = useNavigationStore();
+  const { current, close } = useNavigationStore();
   const [sentence, setSentence] = useState<Sentence | null>(null);
   const [tokens, setTokens] = useState<TokenWithMeaning[]>([]);
   const [srsCards, setSrsCards] = useState<SrsCard[]>([]);
@@ -281,6 +282,14 @@ function SentenceContent() {
           <ClickableEnglish text={sentence.english} />
         </div>
         <AudioButton text={sentence.chinese} className="mt-2" />
+      </div>
+
+      <div className="mb-4">
+        <SentenceUsagePanel
+          sentence={sentence}
+          onUsage={(usage) => setSentence((prev) => (prev ? { ...prev, usage } : prev))}
+          onNavigate={close}
+        />
       </div>
 
       {srsCards.length > 0 && (

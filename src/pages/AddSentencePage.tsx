@@ -23,6 +23,8 @@ import { buildFlagsForSave } from '../services/ingestFlags';
 import type { IngestFlag } from '../services/processLLMTokens';
 import { numericStringToDiacritic } from '../services/toneSandhi';
 import { generateCompletion, isAIConfigured } from '../services/aiProvider';
+import { generateSentenceUsage } from '../services/sentenceUsage';
+import { SentenceUsageNotes } from '../components/SentenceUsagePanel';
 import { GlossSuggestions } from '../components/GlossSuggestions';
 import { PinyinDisplay } from '../components/PinyinDisplay';
 import { PinyinIMEInput } from '../components/PinyinIMEInput';
@@ -48,7 +50,7 @@ import { pinyin as toPinyin } from 'pinyin-pro';
 import { computeTokenCoverage } from '../services/tokenCoverage';
 import { v4 as uuid } from 'uuid';
 import * as repo from '../db/repo';
-import type { AudioRecording } from '../db/schema';
+import type { AudioRecording, SentenceUsage } from '../db/schema';
 
 interface TokenFormData {
   surfaceForm: string;
@@ -297,6 +299,15 @@ export function AddSentencePage() {
    *  disagreement could never be read or acted on. */
   const [showAllFlags, setShowAllFlags] = useState(false);
   const [rawLLMResponse, setRawLLMResponse] = useState<string | null>(null);
+  /**
+   * Usage notes for the sentence being added (#212), tagged with the Chinese
+   * they describe. The tag is what makes a late response safe: the request is
+   * fired without being awaited, so it can land after the user has moved on to
+   * a different sentence, and notes about the previous one must not be shown or
+   * saved against this one.
+   */
+  const [pendingUsage, setPendingUsage] = useState<{ chinese: string; usage: SentenceUsage } | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
 
   /**
    * Re-apply the ?chinese= prefill when it changes.
@@ -315,6 +326,7 @@ export function AddSentencePage() {
     setMissingChars([]);
     setIngestFlags([]);
     setRawLLMResponse(null);
+    setPendingUsage(null);
     setError('');
     setStep('input');
     // chinese is intentionally excluded: this fires on prefill changes only,
@@ -529,6 +541,28 @@ export function AddSentencePage() {
     setMissingChars(cov.missing.map((m) => m.surfaceForm));
   };
 
+  /**
+   * Start the usage-notes call for the sentence about to be reviewed (#212).
+   *
+   * Deliberately not awaited. The notes need the English translation, so they
+   * cannot be fetched alongside the analysis, and holding the review screen for
+   * a second round-trip would be a bad trade — the tokens are what the user came
+   * to check. Whatever has arrived by the time they press Save is saved with the
+   * sentence; if nothing has, the card offers the same button later, so a slow
+   * or failed call costs nothing but the note.
+   */
+  const startUsageFetch = (chineseText: string, englishText: string) => {
+    if (!isAIConfigured()) return;
+    setPendingUsage(null);
+    setUsageLoading(true);
+    generateSentenceUsage(chineseText, englishText)
+      .then((usage) => setPendingUsage({ chinese: chineseText, usage }))
+      // Silent: this was not something the user asked for directly, and an
+      // error banner here would sit above the token forms they are working on.
+      .catch(() => {})
+      .finally(() => setUsageLoading(false));
+  };
+
   // Auto-analyze using configured AI provider
   const handleAutoAnalyze = async () => {
     setError('');
@@ -546,6 +580,7 @@ export function AddSentencePage() {
       const parsed = parseLLMResponse(raw);
       applyAnalysis(parsed, reference, existingMeanings);
       setStep('review');
+      startUsageFetch(chinese.trim(), parsed.english ?? '');
     } catch (e: any) {
       setError(e.message);
     }
@@ -561,6 +596,9 @@ export function AddSentencePage() {
       setLlmPasteValue('');
       setStep('review');
       setError('');
+      // No-op when this device has no key, which is the usual reason for
+      // pasting an analysis in the first place.
+      startUsageFetch(chinese.trim(), parsed.english ?? '');
     } catch (e: any) {
       setError(e.message);
     }
@@ -774,6 +812,18 @@ export function AddSentencePage() {
         }
       }
 
+      // Attach the usage notes (#212). Separate from the ingest bundle on
+      // purpose: they are optional and often still in flight when Save is
+      // pressed. The outbox is FIFO, so an op enqueued after the bundle also
+      // reaches the server after it — the row exists by the time this lands.
+      if (createdSentenceId && pendingUsage?.chinese === chinese.trim()) {
+        try {
+          await repo.setSentenceUsage(createdSentenceId, pendingUsage.usage);
+        } catch {
+          // A note is not worth failing a save over; the card can rewrite it.
+        }
+      }
+
       // Persist the voice-input recording as a named audio clip on the new sentence.
       if (createdSentenceId && pendingVoiceClip && pendingVoiceClip.blob.size > 0) {
         const rec: AudioRecording = {
@@ -805,6 +855,7 @@ export function AddSentencePage() {
         setEnglish('');
         setTokens([]);
         setTags([]);
+        setPendingUsage(null);
         setStep('input');
         setPendingVoiceClip(null);
         stopVoicePlaybackRef.current?.();
@@ -1264,6 +1315,24 @@ export function AddSentencePage() {
               </div>
             )}
           </div>
+
+          {/* Usage notes (#212). Read-only here: they describe the sentence as
+              a whole, so there is nothing to correct token by token, and the
+              card offers a rewrite once the sentence is saved. */}
+          {(usageLoading || pendingUsage?.chinese === chinese.trim()) && (
+            <div className="rounded-lg p-3 inset space-y-2">
+              <div className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>
+                When you&rsquo;d use this
+              </div>
+              {pendingUsage?.chinese === chinese.trim() ? (
+                <SentenceUsageNotes usage={pendingUsage.usage} />
+              ) : (
+                <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                  Working out when you&rsquo;d use this&hellip;
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Per-token detail forms */}
           <div className="space-y-3">

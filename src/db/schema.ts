@@ -46,6 +46,93 @@ export interface MeaningLink {
   usn?: number;
 }
 
+// ============================================================
+// Usage context — what kind of sentence this is (#212)
+// ============================================================
+
+/**
+ * How formal the sentence is.
+ *
+ * Register in Chinese is largely a fact about the RELATIONSHIP between speakers,
+ * not about vocabulary difficulty, which is why it is worth stating separately
+ * from anything on the word cards.
+ */
+export type SentenceRegister = 'formal' | 'neutral' | 'casual' | 'slang' | 'literary';
+
+/** Whether you would say this, read it, or both. */
+export type SentenceMedium = 'spoken' | 'written' | 'both';
+
+/** Runtime lists for validating a model's answer and for rendering labels. */
+export const SENTENCE_REGISTERS: readonly SentenceRegister[] = [
+  'formal', 'neutral', 'casual', 'slang', 'literary',
+] as const;
+
+export const SENTENCE_MEDIUMS: readonly SentenceMedium[] = [
+  'spoken', 'written', 'both',
+] as const;
+
+/**
+ * One situation the sentence belongs to, with a Mandarin line from it.
+ *
+ * The English says WHEN; the Mandarin is what that moment actually sounds like,
+ * and is a sentence in its own right — either the line that prompts the one
+ * being studied (周末怎么样？ before 还行) or a fuller reply that carries it. It is
+ * offered for adding to the deck, so it has to stand alone as a card: a
+ * situation described only in English can be read, but it cannot be studied.
+ *
+ * `chinese` and `english` are optional because notes written before they
+ * existed have only the English situation, and because one missing pair should
+ * not cost the learner the other three situations.
+ */
+export interface UsageSituation {
+  /** The situation, in English: "A friend asks how your weekend was." */
+  situation: string;
+  /** A natural Mandarin line from that situation, characters only. */
+  chinese?: string;
+  /** Natural English translation of `chinese` — not a restatement of the situation. */
+  english?: string;
+}
+
+/**
+ * When and where you would use or meet a sentence — English prose about USAGE,
+ * never a second translation (#212).
+ *
+ * A sentence card teaches what the sentence means and how to say it, and says
+ * nothing about whether you could say it to your boss, whether anyone says it
+ * at all, or what situation it belongs to. That is the part a learner cannot
+ * recover from the characters, and the part a textbook example most often gets
+ * wrong.
+ *
+ * Structured rather than one prose blob so the parts that are categorical stay
+ * categorical: `register` and `medium` render as labels and could later be
+ * filtered or sorted on, while `description` and `situations` carry the things
+ * only prose can say. A free-text answer would have buried "you would not say
+ * this to a stranger" in paragraph three.
+ *
+ * A note is a SNAPSHOT of one model's answer at one time, so `generatedAt` and
+ * `model` are stored with it — a description written by a cheap model months ago
+ * should be identifiable as such, not silently trusted as fact about Mandarin.
+ */
+export interface SentenceUsage {
+  register: SentenceRegister;
+  medium: SentenceMedium;
+  /** What the sentence DOES: "declining an invitation", "asking a price". */
+  speechAct: string;
+  /** Two to four sentences on how and when you would use or see this. */
+  description: string;
+  /**
+   * Concrete situations where it fits — a conversation, not a category. Read
+   * these through readSituations(), which also copes with the legacy
+   * English-only string form.
+   */
+  situations: UsageSituation[];
+  /** Where it would land wrong: who not to say it to, what it implies. */
+  caution?: string;
+  generatedAt: number;
+  /** Model id that produced it, when known. */
+  model?: string;
+}
+
 export interface Sentence {
   id: string;
   /** Full Chinese sentence */
@@ -67,6 +154,12 @@ export interface Sentence {
   normalizedChinese?: string;
   /** User-defined tags, e.g. "restaurant", "travel" */
   tags: string[];
+  /**
+   * LLM-written notes on when this sentence is used (#212). Absent until
+   * generated — every sentence added before the feature existed, and every one
+   * added on a device with no API key, has none.
+   */
+  usage?: SentenceUsage;
   createdAt: number;
   updatedAt?: number;
   usn?: number;

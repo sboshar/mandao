@@ -9,6 +9,7 @@ import type {
   MeaningLink,
   Sentence,
   SentenceToken,
+  SentenceUsage,
   SrsCard,
   Deck,
   ReviewLog,
@@ -273,6 +274,26 @@ export async function insertSentence(sentence: Sentence): Promise<void> {
 
 export async function updateSentenceTags(id: string, tags: string[]): Promise<void> {
   await localDb.sentences.update(id, { tags });
+}
+
+/**
+ * Write or clear a sentence's usage notes (#212).
+ *
+ * Clearing uses modify + delete rather than update({ usage: undefined }): the
+ * key has to actually leave the record, or a stale note would keep rendering
+ * from the local row after the server was told to drop it.
+ */
+export async function setSentenceUsage(
+  id: string,
+  usage: SentenceUsage | null,
+): Promise<void> {
+  if (usage === null) {
+    await localDb.sentences.where('id').equals(id).modify((row) => {
+      delete row.usage;
+    });
+    return;
+  }
+  await localDb.sentences.update(id, { usage });
 }
 
 export async function deleteSentenceById(id: string): Promise<void> {

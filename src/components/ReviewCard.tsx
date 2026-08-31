@@ -5,6 +5,7 @@ import { getTokensForSentence, updateSentenceTags } from '../services/ingestion'
 import { TokenSpan } from './TokenSpan';
 import { PinyinDisplay } from './PinyinDisplay';
 import { SentenceAudioControls } from './SentenceAudioControls';
+import { SentenceUsagePanel } from './SentenceUsagePanel';
 import { TagInput } from './TagInput';
 import { useReviewStore } from '../stores/reviewStore';
 import { ClickableEnglish } from './ClickableEnglish';
@@ -786,6 +787,13 @@ export function ReviewCard() {
                   autoPlayKey={autoPlayKey}
                 />
               </div>
+
+              {/* When you'd use this (#212). Back face only — on the front it
+                  would give away the answer it is describing. */}
+              <SentenceUsagePanel
+                sentence={sentence}
+                onUsage={(usage) => setSentence((prev) => (prev ? { ...prev, usage } : prev))}
+              />
 
               {/* Tags */}
               <div className="flex items-center justify-center gap-1 flex-wrap">

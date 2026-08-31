@@ -42,6 +42,7 @@ export function sentenceFromRow(r: any): Sentence {
     pinyin: r.pinyin, pinyinSandhi: r.pinyin_sandhi,
     audioUrl: r.audio_url, source: r.source,
     tags: r.tags || [], createdAt: r.created_at,
+    usage: r.usage ?? undefined,
     usn: r.usn,
     normalizedChinese: normalizeChinese(chinese),
   };

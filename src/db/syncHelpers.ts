@@ -49,6 +49,21 @@ export function extensionFromMime(mime: string): string {
 }
 
 /**
+ * Re-arm one op that had given up, so the next push picks it up again.
+ *
+ * The stale error text goes with it. Pressing Retry is a claim that something
+ * changed on the server, and leaving "Could not find the 'usage' column" on a
+ * row that is about to be retried would describe a state that no longer holds —
+ * then reappear unchanged if the retry failed for an entirely different reason.
+ */
+export function rearmFailedOp(op: SyncOp): void {
+  op.status = 'pending';
+  op.attempts = 0;
+  delete op.lastError;
+  delete op.lastErrorCode;
+}
+
+/**
  * Group outbox ops into consecutive runs of the same type.
  * Preserves causal ordering (e.g. ingest before its delete).
  */

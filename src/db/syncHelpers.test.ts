@@ -3,6 +3,7 @@ import {
   computeSafeUsn,
   extensionFromMime,
   groupConsecutiveRuns,
+  rearmFailedOp,
   type TableStats,
 } from './syncHelpers';
 import type { SyncOp } from './localDb';
@@ -203,5 +204,54 @@ describe('extensionFromMime', () => {
   it('falls back to bin on unknown types', () => {
     expect(extensionFromMime('application/octet-stream')).toBe('bin');
     expect(extensionFromMime('')).toBe('bin');
+  });
+});
+
+// ============================================================
+// rearmFailedOp
+// ============================================================
+
+describe('rearmFailedOp', () => {
+  const failed = (): SyncOp => ({
+    id: 7,
+    op: 'updateSentenceUsage',
+    payload: { id: 's1' },
+    status: 'failed',
+    attempts: 5,
+    createdAt: 1,
+    deviceId: 'd1',
+    opId: 'o1',
+    lastError: "Could not find the 'usage' column of 'sentences' in the schema cache",
+    lastErrorCode: 'PGRST204',
+  });
+
+  it('makes the op pushable again', () => {
+    // pushOutbox only reads 'pending', so this is the whole point: without the
+    // status change the Retry button syncs past the ops it is complaining about.
+    const op = failed();
+    rearmFailedOp(op);
+    expect(op.status).toBe('pending');
+  });
+
+  it('resets attempts so the op is not failed again on sight', () => {
+    const op = failed();
+    rearmFailedOp(op);
+    expect(op.attempts).toBe(0);
+  });
+
+  it('clears the stale error so the banner cannot report a fixed cause', () => {
+    const op = failed();
+    rearmFailedOp(op);
+    expect(op.lastError).toBeUndefined();
+    expect(op.lastErrorCode).toBeUndefined();
+  });
+
+  it('leaves the payload and identity untouched', () => {
+    const op = failed();
+    rearmFailedOp(op);
+    expect(op.payload).toEqual({ id: 's1' });
+    expect(op.opId).toBe('o1');
+    expect(op.op).toBe('updateSentenceUsage');
+    expect(op.createdAt).toBe(1);
   });
 });
