@@ -160,6 +160,21 @@ export async function generateCompletion(prompt: string): Promise<string> {
   return PROVIDERS[provider](prompt);
 }
 
+/**
+ * The model id generateCompletion would use right now.
+ *
+ * Stored alongside anything the model writes into the deck, so a note can be
+ * read with its provenance rather than as settled fact. Returns '' when AI
+ * isn't configured — callers treat provenance as optional.
+ */
+export function configuredModel(): string {
+  try {
+    return getConfig().model;
+  } catch {
+    return '';
+  }
+}
+
 /** Check whether AI is configured and ready to use. */
 export function isAIConfigured(): boolean {
   const s = useAISettingsStore.getState();

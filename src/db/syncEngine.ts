@@ -13,7 +13,7 @@
 import { supabase } from '../lib/supabase';
 import { AUDIO_BUCKET } from '../lib/audioStorage';
 import { localDb, type SyncOp } from './localDb';
-import type { Deck, Meaning } from './schema';
+import type { Deck, Meaning, SentenceUsage } from './schema';
 import { hydrateFSRSSettingsFromBlob } from '../stores/fsrsSettingsStore';
 import type { FailedOp } from '../stores/syncStore';
 import { runAudioPrefetch } from '../services/audioPrefetch';
@@ -64,6 +64,7 @@ import {
   computeSafeUsn,
   extensionFromMime,
   groupConsecutiveRuns,
+  rearmFailedOp,
   type TableStats,
 } from './syncHelpers';
 import { useSyncStore } from '../stores/syncStore';
@@ -99,6 +100,31 @@ async function recoverInflightOps(): Promise<void> {
     .where('status')
     .equals('inflight')
     .modify({ status: 'pending' });
+}
+
+/**
+ * Re-arm ops that gave up, then sync — what the error banner's Retry means.
+ *
+ * pushOutbox only reads 'pending', and nothing else in the engine ever moves an
+ * op off 'failed', so before this existed the Retry button ran a sync that
+ * skipped precisely the ops it was offering to retry. The banner stayed up
+ * forever and the writes never landed, even once the cause was gone.
+ *
+ * And the cause usually IS gone by the time someone presses it: the permanent
+ * families are permanent for an unattended retry loop, not for a person who has
+ * just added the missing column or fixed the constraint. A schema cache that had
+ * not caught up (PGRST204) is the same story with a code the families do not
+ * even match. Pressing Retry is a claim that something changed on the server, so
+ * attempts resets to zero and the stale error text is cleared rather than left
+ * to describe a state that no longer holds.
+ *
+ * Only ever called from an explicit user action — automatic retry keeps its
+ * MAX_ATTEMPTS ceiling, which is what stops a genuinely broken op from being
+ * pushed forever.
+ */
+export async function retryFailedOps(): Promise<void> {
+  await localDb.outbox.where('status').equals('failed').modify(rearmFailedOp);
+  await runSync();
 }
 
 async function pushOutbox(): Promise<void> {
@@ -201,6 +227,9 @@ async function pushOpBatch(ops: SyncOp[]): Promise<void> {
       break;
     case 'updateTags':
       await pushSequential(ops, pushUpdateTags);
+      break;
+    case 'updateSentenceUsage':
+      await pushSequential(ops, pushUpdateSentenceUsage);
       break;
     case 'updateDeck':
       await pushSequential(ops, pushUpdateDeck);
@@ -431,6 +460,23 @@ async function pushUpdateTags(op: SyncOp): Promise<void> {
   const { error } = await supabase
     .from('sentences')
     .update({ tags })
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw syncErrorFrom(error);
+}
+
+/**
+ * Push usage notes (#212). Whole-object replace into the `usage` jsonb column,
+ * or SQL NULL when the user deleted them; the trg_sentences_sync trigger bumps
+ * usn + updated_at, and pull_changes returns the row via row_to_json, so no RPC
+ * change is needed.
+ */
+async function pushUpdateSentenceUsage(op: SyncOp): Promise<void> {
+  const { id, usage } = op.payload as { id: string; usage: SentenceUsage | null };
+  const userId = getCachedUserIdOrThrow();
+  const { error } = await supabase
+    .from('sentences')
+    .update({ usage })
     .eq('id', id)
     .eq('user_id', userId);
   if (error) throw syncErrorFrom(error);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSyncStore } from '../stores/syncStore';
-import { runSync } from '../db/syncEngine';
+import { retryFailedOps } from '../db/syncEngine';
 import type { SyncOpType } from '../db/localDb';
 
 const OP_LABELS: Record<SyncOpType, string> = {
@@ -9,6 +9,7 @@ const OP_LABELS: Record<SyncOpType, string> = {
   deleteEntity: 'delete',
   deleteAllData: 'clear all data',
   updateTags: 'tag update',
+  updateSentenceUsage: 'usage notes',
   updateDeck: 'deck settings',
   updateMeaning: 'meaning update',
   upsertAudioRecording: 'audio upload',
@@ -40,7 +41,7 @@ export function SyncErrorBanner() {
         </span>
         <button
           type="button"
-          onClick={() => runSync()}
+          onClick={() => retryFailedOps()}
           disabled={status === 'syncing'}
           className="px-2 py-0.5 rounded transition-colors disabled:opacity-50"
           style={{

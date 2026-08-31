@@ -22,6 +22,7 @@ import type {
   MeaningLink,
   Sentence,
   SentenceToken,
+  SentenceUsage,
   SrsCard,
   Deck,
   ReviewLog,
@@ -165,6 +166,22 @@ export async function insertSentence(sentence: Sentence): Promise<void> {
 export async function updateSentenceTags(id: string, tags: string[]): Promise<void> {
   await local.updateSentenceTags(id, tags);
   await enqueue({ op: 'updateTags', payload: { id, tags } });
+}
+
+/**
+ * Store LLM-written usage notes on a sentence, or clear them with null (#212).
+ *
+ * Whole-value replace rather than a merge: a note is one model's answer taken
+ * together, and splicing a new description onto an old caution would produce a
+ * note no model ever wrote. Clearing shares the op for the same reason — the
+ * server write is `usage = null`, which is one statement either way.
+ */
+export async function setSentenceUsage(
+  id: string,
+  usage: SentenceUsage | null,
+): Promise<void> {
+  await local.setSentenceUsage(id, usage);
+  await enqueue({ op: 'updateSentenceUsage', payload: { id, usage } });
 }
 
 /** Enqueue deleteEntity ops for an orphan closure in a single Dexie

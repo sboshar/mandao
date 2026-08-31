@@ -23,6 +23,7 @@ export type SyncOpType =
   | 'deleteEntity'
   | 'deleteAllData'
   | 'updateTags'
+  | 'updateSentenceUsage'
   | 'updateDeck'
   | 'updateMeaning'
   | 'upsertAudioRecording'
